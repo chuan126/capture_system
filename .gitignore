@@ -1,0 +1,128 @@
+# -----------------------------------------------------------------------------
+# ROS 2 / colcon build outputs
+# -----------------------------------------------------------------------------
+/ros2_ws/build/
+/ros2_ws/install/
+/ros2_ws/log/
+/ros2_ws/.colcon/
+
+# Vendor build outputs. Do not use a global **/build/ rule because directories
+# such as frontend/build/ contain source files in this project.
+/third_party/**/build/
+/third_party/**/install/
+/third_party/**/log/
+/third_party/**/compile_commands.json
+
+# -----------------------------------------------------------------------------
+# Frontend / Node.js
+# -----------------------------------------------------------------------------
+/frontend/node_modules/
+/frontend/dist/
+/frontend/.next/
+/frontend/.vinext/
+/frontend/out/
+/frontend/coverage/
+/frontend/.wrangler/
+/frontend/.vercel/
+/frontend/.turbo/
+/frontend/.cache/
+/frontend/outputs/
+/frontend/work/
+
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# -----------------------------------------------------------------------------
+# Backend / Python
+# -----------------------------------------------------------------------------
+**/__pycache__/
+*.py[cod]
+*$py.class
+/.venv/
+/backend/.venv/
+**/venv/
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/.coverage
+**/.coverage.*
+**/htmlcov/
+**/*.egg-info/
+**/.tox/
+**/.nox/
+
+# -----------------------------------------------------------------------------
+# Runtime data, recordings and generated databases
+# -----------------------------------------------------------------------------
+/data/**
+/runtime/**
+
+# Keep empty runtime directory structure where placeholders are provided.
+!/data/**/
+!/data/**/.gitkeep
+!/runtime/**/
+!/runtime/**/.gitkeep
+
+*.bag
+*.bag.active
+*.mcap
+*.db3
+*.pcd
+*.ply
+*.las
+*.laz
+*.sqlite
+*.sqlite3
+*.sqlite-shm
+*.sqlite-wal
+
+# -----------------------------------------------------------------------------
+# Logs, reports, caches and temporary files
+# -----------------------------------------------------------------------------
+*.log
+*.log.*
+*.pid
+*.pid.lock
+*.tmp
+*.temp
+*.bak
+*.old
+*.orig
+*.swp
+*.swo
+*~
+
+/.cache/
+/.pytest_cache/
+/coverage/
+/test-results/
+
+# Core dumps and profiling output can be very large.
+core
+core.*
+*.prof
+*.trace
+
+# -----------------------------------------------------------------------------
+# Local configuration and secrets
+# -----------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+!.env.sample
+*.pem
+*.key
+*.p12
+*.pfx
+
+# -----------------------------------------------------------------------------
+# IDE and operating-system files
+# -----------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/
+*.code-workspace
