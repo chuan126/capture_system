@@ -24,6 +24,27 @@ npm run dev
 
 ## 构建
 
+Sites/Vinext 构建：
+
 ```bash
 npm run build
 ```
+
+RK3588 设备静态构建：
+
+```bash
+npm run build:device
+```
+
+设备构建结果输出到 `out/`，包含可由 FastAPI、Nginx 等普通 Web 服务直接
+托管的 `index.html`、CSS、JavaScript 和图标文件。RK3588 正式运行时不需要
+启动 Node.js 或 Cloudflare Worker。
+
+设备静态构建测试：
+
+```bash
+npm run test:device
+```
+
+完整局域网部署方式见
+[`docs/deployment/lan_web.md`](../docs/deployment/lan_web.md)。

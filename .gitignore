@@ -6,6 +6,9 @@
 /ros2_ws/log/
 /ros2_ws/.colcon/
 
+# colcon commands accidentally invoked from the repository root write here.
+/log/
+
 # Vendor build outputs. Do not use a global **/build/ rule because directories
 # such as frontend/build/ contain source files in this project.
 /third_party/**/build/

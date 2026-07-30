@@ -1,0 +1,19 @@
+[Unit]
+Description=Capture System LAN Web Service
+After=network.target
+
+[Service]
+Type=simple
+User=cat
+Group=cat
+WorkingDirectory=/home/cat/Project/capture_system
+EnvironmentFile=/home/cat/Project/capture_system/config/network/web.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/cat/Project/capture_system/.venv/bin/uvicorn backend.main:app
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
