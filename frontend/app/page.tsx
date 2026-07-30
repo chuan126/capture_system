@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-type PageId = "dashboard" | "tasks" | "preview" | "playback" | "report";
+type PageId = "dashboard" | "tasks" | "playback" | "report";
 type PlaybackTab = "result" | "history" | "logs";
 type TaskTab = "pending" | "completed" | "abnormal";
 type ViewMode = "3d" | "top" | "section";
@@ -10,9 +10,8 @@ type ViewMode = "3d" | "top" | "section";
 const navigation: Array<{ id: PageId; label: string; index: string }> = [
   { id: "dashboard", label: "采集首页", index: "01" },
   { id: "tasks", label: "任务管理", index: "02" },
-  { id: "preview", label: "点云预览", index: "03" },
-  { id: "playback", label: "数据回放", index: "04" },
-  { id: "report", label: "报告导出", index: "05" },
+  { id: "playback", label: "数据回放", index: "03" },
+  { id: "report", label: "报告导出", index: "04" },
 ];
 
 function StatusPill({
@@ -143,6 +142,13 @@ function MetricCard({
 }
 
 function Dashboard() {
+  const [viewMode, setViewMode] = useState<ViewMode>("3d");
+  const modes: Array<{ id: ViewMode; label: string }> = [
+    { id: "3d", label: "三维视图" },
+    { id: "top", label: "俯视图" },
+    { id: "section", label: "断面视图" },
+  ];
+
   return (
     <div className="page-stack">
       <section className="metric-grid">
@@ -154,22 +160,44 @@ function Dashboard() {
 
       <section className="dashboard-layout">
         <div className="dashboard-main">
-          <article className="panel map-panel">
-            <PanelHead
-              title="RTK 实时地图"
-              description="隧道外车辆位置、入口出口坐标与绝对轨迹"
-              trailing={<span className="panel-tag">WGS84</span>}
-            />
-            <div className="map">
-              <div className="map__roads" />
-              <div className="map__river" />
-              <div className="map__labels"><span>入口位置</span><span>出口位置</span></div>
-              <div className="map__chips">
-                <span>定位模式：<strong>等待 RTK</strong></span>
-                <span>地图来源：<strong>未配置</strong></span>
+          <article className="panel cloud-panel dashboard-cloud-panel">
+            <div className="cloud-toolbar">
+              <div>
+                <h2>点云空间预览</h2>
+                <p>Odin1 Lite 降采样点云 · 预览链路与核心计算隔离</p>
               </div>
-              <EmptyState icon="⌖" title="地图等待接入" description="RTK 有效后显示车辆位置与轨迹" compact />
-              <div className="map__scale">200 m</div>
+              <div className="segmented segmented--small" aria-label="点云视角">
+                {modes.map((mode) => (
+                  <button
+                    type="button"
+                    key={mode.id}
+                    className={viewMode === mode.id ? "active" : ""}
+                    onClick={() => setViewMode(mode.id)}
+                  >
+                    {mode.label}
+                  </button>
+                ))}
+              </div>
+              <span className="panel-tag panel-tag--muted">0 点</span>
+            </div>
+            <div className={`cloud-stage dashboard-cloud-stage cloud-stage--${viewMode}`}>
+              <div className="cloud-stage__floor" />
+              <div className="axis axis--x">X</div>
+              <div className="axis axis--y">Y</div>
+              <div className="axis axis--z">Z</div>
+              <div className="orientation-cube">
+                <span>TOP</span><i>FRONT</i><b>RIGHT</b>
+              </div>
+              <EmptyState
+                icon="⁙"
+                title="等待点云预览数据"
+                description={`${modes.find((mode) => mode.id === viewMode)?.label}将在数据接入后显示`}
+                compact
+              />
+              <div className="cloud-stage__footer">
+                <span>车辆坐标系：X 向前 · Y 向左 · Z 向上</span>
+                <span>当前帧：0 点 · 显示范围：-- m</span>
+              </div>
             </div>
           </article>
 
@@ -378,104 +406,6 @@ function Tasks() {
           </table>
         </div>
       </article>
-    </div>
-  );
-}
-
-function Preview() {
-  const [viewMode, setViewMode] = useState<ViewMode>("3d");
-  const modes: Array<{ id: ViewMode; label: string }> = [
-    { id: "3d", label: "三维视图" },
-    { id: "top", label: "俯视图" },
-    { id: "section", label: "断面视图" },
-  ];
-
-  return (
-    <div className="preview-layout">
-      <article className="panel cloud-panel">
-        <div className="cloud-toolbar">
-          <div>
-            <h2>点云空间预览</h2>
-            <p>Odin1 Lite 降采样点云显示</p>
-          </div>
-          <div className="segmented segmented--small">
-            {modes.map((mode) => (
-              <button
-                type="button"
-                key={mode.id}
-                className={viewMode === mode.id ? "active" : ""}
-                onClick={() => setViewMode(mode.id)}
-              >
-                {mode.label}
-              </button>
-            ))}
-          </div>
-          <span className="panel-tag panel-tag--muted">0 点</span>
-        </div>
-        <div className={`cloud-stage cloud-stage--${viewMode}`}>
-          <div className="cloud-stage__floor" />
-          <div className="axis axis--x">X</div>
-          <div className="axis axis--y">Y</div>
-          <div className="axis axis--z">Z</div>
-          <div className="orientation-cube">
-            <span>TOP</span><i>FRONT</i><b>RIGHT</b>
-          </div>
-          <EmptyState
-            icon="⁙"
-            title="等待点云预览数据"
-            description={`${modes.find((mode) => mode.id === viewMode)?.label}将在数据接入后显示`}
-            compact
-          />
-          <div className="cloud-stage__footer">
-            <span>车辆坐标系：X 向前 · Y 向左 · Z 向上</span>
-            <span>显示范围：-- m</span>
-          </div>
-        </div>
-      </article>
-
-      <aside className="preview-side">
-        <article className="panel">
-          <PanelHead
-            title="点云统计"
-            description="当前预览帧"
-            trailing={<StatusPill>等待数据</StatusPill>}
-          />
-          <div className="stat-grid">
-            <div><span>点云总数</span><strong>0</strong><small>points</small></div>
-            <div><span>有效点数</span><strong>0</strong><small>points</small></div>
-            <div><span>有效点比例</span><strong>--</strong><small>%</small></div>
-            <div><span>当前帧时间</span><strong>--</strong><small>timestamp</small></div>
-          </div>
-        </article>
-
-        <article className="panel">
-          <PanelHead title="当前测量结果" description="点云断面结果摘要" />
-          <div className="result-hero">
-            <span>当前净空高度</span>
-            <strong>--<small>m</small></strong>
-            <p>暂无有效测量结果</p>
-          </div>
-          <div className="detail-list">
-            <div><span>任务最低净空</span><strong>-- m</strong></div>
-            <div><span>顶部最低点</span><strong>-- m</strong></div>
-            <div><span>最低点横向位置</span><strong>-- m</strong></div>
-            <div><span>路面质量</span><strong>暂无结果</strong></div>
-            <div><span>顶部质量</span><strong>暂无结果</strong></div>
-          </div>
-        </article>
-
-        <article className="panel">
-          <PanelHead title="显示设置" description="仅影响点云预览区域" />
-          <div className="display-settings">
-            <label><span>点大小</span><input type="range" min="1" max="5" defaultValue="2" /></label>
-            <label><span>颜色模式</span><select defaultValue="height"><option value="height">按高度</option><option value="intensity">按强度</option></select></label>
-            <label className="switch-row switch-row--simple">
-              <span><strong>显示坐标网格</strong></span>
-              <input type="checkbox" defaultChecked aria-label="显示坐标网格" /><i />
-            </label>
-          </div>
-        </article>
-      </aside>
     </div>
   );
 }
@@ -708,7 +638,6 @@ export default function Home() {
         <div className="page-content">
           {activePage === "dashboard" && <Dashboard />}
           {activePage === "tasks" && <Tasks />}
-          {activePage === "preview" && <Preview />}
           {activePage === "playback" && <Playback />}
           {activePage === "report" && <Report />}
         </div>

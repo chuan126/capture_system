@@ -34,7 +34,8 @@ test("renders the tunnel clearance terminal shell", async () => {
   assert.match(html, /Odin1 Lite/);
   assert.match(html, /采集首页/);
   assert.match(html, /任务管理/);
-  assert.match(html, /点云预览/);
+  assert.match(html, /点云空间预览/);
+  assert.doesNotMatch(html, />点云预览<\/button>/);
   assert.match(html, /数据回放/);
   assert.match(html, /报告导出/);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton/i);
