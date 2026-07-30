@@ -8,8 +8,8 @@ Web 服务向电脑浏览器提供监视与控制功能。
 
 当前厂商 SDK 2.0.2 将实物 ODIN1 Lite 的模型标识报告为 `ODIN2`，所以厂商
 Topic 中仍会出现 `/manifold/ODIN2/...`。业务模块通过 `sensor_adapter`
-动态发现并转换到稳定的 `/capture/...` Topic，不使用厂商模型字符串判断实物
-型号。
+Launch 使用 ROS 2 原生 remapping 转换到稳定的 `/capture/...` Topic，不使用
+厂商模型字符串判断实物型号，也不创建点云中继节点。
 
 ## 工程模块
 

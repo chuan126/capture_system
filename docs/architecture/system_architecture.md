@@ -57,7 +57,7 @@ flowchart LR
 %%{init: {"flowchart": {"curve": "linear", "nodeSpacing": 50, "rankSpacing": 60}}}%%
 flowchart LR
     DRIVER["设备驱动层\nODIN + RTK 串口"]
-    ADAPTER["标准化层\nsensor_adapter"]
+    ADAPTER["Topic映射层\nsensor_adapter"]
     ALGO["测量层\n运动补偿、定位、净空"]
     CONTROL["控制层\n任务状态与诊断决策"]
     OUTPUT["内部输出\n结果、事件、预览"]
@@ -81,20 +81,21 @@ flowchart LR
 - 业务代码只使用 ROS 2 标准消息或系统自定义接口，不调用 ODIN SDK。
 
 实际设备是 ODIN1 Lite，但当前固件/SDK 2.0.2 将模型字符串上报为 `ODIN2`，
-并生成 `/manifold/ODIN2/device0/...` Topic。适配层将其视为动态厂商前缀，
-不能用该字符串推断设备实物型号。
+并生成 `/manifold/ODIN2/device0/...` Topic。适配层将该前缀作为可覆盖的
+Launch 参数，不能用该字符串推断设备实物型号。
 
-### 4.2 传感器标准化层
+### 4.2 Topic 映射层
 
 `sensor_adapter` 是厂商数据和业务数据之间的唯一边界，负责：
 
-- 通过设备上线信息发现实际 Topic 前缀；
-- 校验消息类型、字段、点步长、逐点时间和时间戳；
-- 修正或拒绝不可信的 `frame_id`；
-- 将厂商 Topic 映射到稳定的 `/capture/...` Topic；
-- 发布在线、字段兼容性和时间质量诊断。
+- 启动当前 ODIN ROS 2 驱动；
+- 使用 ROS 2 原生 remapping 将五路厂商 Topic 映射到稳定的 `/capture/...`
+  Topic；
+- 提供使用系统 Topic 的 RViz2 预览入口；
+- 允许在启动时覆盖单设备厂商 Topic 前缀。
 
-适配层不承担净空算法，也不把无法确认的坐标语义包装成“有效”数据。
+适配层没有独立运行节点，不复制消息，也不修改字段、时间戳、`frame_id` 和 QoS。
+消息校验及时间、坐标语义检查由核心消费模块的输入边界承担。
 
 ### 4.3 测量与定位层
 

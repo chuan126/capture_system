@@ -21,7 +21,8 @@
 - `third_party/`：第三方驱动和依赖源码。
 - `ros2_ws/src/interfaces/`：系统自定义消息、服务和 Action。
 - `ros2_ws/src/rtk_driver/`：RTK 串口通信、NMEA 解析和质量状态。
-- `ros2_ws/src/sensor_adapter/`：厂商 Topic 发现、消息校验和标准化。
+- `ros2_ws/src/sensor_adapter/`：通过 ROS 2 remapping 将厂商 Topic 映射为稳定
+  的 `/capture/...` Topic，并提供雷达与 RViz2 启动入口。
 - `ros2_ws/src/motion_compensation/`：时间检查、位姿缓存、插值和点云去畸变。
 - `ros2_ws/src/localization/`：入口出口判断、洞内相对里程和轨迹估计。
 - `ros2_ws/src/clearance_engine/`：点云处理、路面建模、断面和净空计算。
@@ -45,7 +46,8 @@
 厂商驱动，默认视为只读。
 
 - 业务代码不得直接调用 ODIN SDK 内部接口，应使用 ROS 2 标准消息。
-- 厂商动态 Topic、错误 frame 和字段差异统一在 `sensor_adapter` 中处理。
+- 厂商 Topic 命名差异统一在 `sensor_adapter` Launch 中处理。当前适配层不修改
+  frame、字段和时间戳；相关语义必须由消费这些数据的核心模块显式检查。
 - 不为业务需求直接修改厂商驱动。
 - 如果驱动缺陷确实无法在适配层解决，先记录问题、复现条件和修改理由，再把
   补丁保持为最小变更，并在 `third_party/odin_ros_driver/README.md` 中登记。
@@ -63,8 +65,8 @@
 
 实物型号是 ODIN1 Lite，但当前固件/SDK 2.0.2 上报的模型字符串是 `ODIN2`，
 因此实际厂商 Topic 仍使用上述前缀。这是厂商接口兼容事实，不表示实物是
-ODIN2。不得在业务模块中写死模型字符串和 `device0`；实际前缀由适配层通过
-设备上线消息发现。
+ODIN2。不得在其他业务模块中写死模型字符串和 `device0`；当前单设备前缀只可
+作为 `sensor_adapter` Launch 参数配置，前缀变化时由部署配置显式覆盖。
 
 ## 4. ROS 2开发约定
 
@@ -216,6 +218,8 @@ colcon build --symlink-install
 ## 12. 开发工作方式
 
 - 修改前先阅读目标模块、相邻接口、相关配置和现有测试。
+- 新增或修改代码时，必要的代码注释统一使用中文；注释应说明设计意图、约束和
+  非显然行为，避免重复描述显而易见的代码。
 - 保留用户已有改动，不重置或覆盖无关文件。
 - 优先做最小、完整、可验证的改动，避免顺便大规模重构。
 - 修改公共接口前先检查所有发布者、订阅者、Web序列化和数据记录端。

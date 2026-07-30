@@ -31,7 +31,8 @@ RTK 定位精度或长时间稳定性验证。
 
 - 产品/项目型号使用“ODIN1 Lite”；
 - `ODIN2` 是当前 SDK 的模型字符串和实际厂商 Topic 组成部分；
-- `sensor_adapter` 必须读取 `device_online.prefix`，不能拼接型号；
+- `sensor_adapter` 默认前缀来自该实测结果，设备或 SDK 变化时必须通过 Launch
+  参数显式覆盖并重新验证；
 - 不修改厂商驱动 Topic 来掩盖该差异。
 
 ## 3. 雷达发布实测
@@ -52,8 +53,8 @@ RTK 定位精度或长时间稳定性验证。
 | camera0 compressed | 约 2.1 MB/s |
 
 厂商 raw cloud 的 `frame_id` 实测为 `device0/odom`，header 时间从设备启动后的
-数百秒开始，不是 Unix 时间。两者都需要在适配层验证和转换，不能直接作为
-`lidar_link` 和系统墙钟使用。
+数百秒开始，不是 Unix 时间。Topic remapping 不改变两者；核心消费模块必须
+验证其语义，不能直接作为 `lidar_link` 和系统墙钟使用。
 
 ## 4. 资源实测
 
@@ -67,7 +68,8 @@ RTK 定位精度或长时间稳定性验证。
 | 绑 CPU1–3 后 raw 频率 | 约 10.23 Hz，短时无明显频率下降 |
 
 因此第一版可以将厂商驱动限制在 A55 CPU1–3，将 A76 CPU4–7 留给
-`sensor_adapter + motion_compensation + localization + clearance_engine`。
+`motion_compensation + localization + clearance_engine`。`sensor_adapter`
+没有独立运行进程。
 这只是短时结论，仍需至少 30 分钟满通道和最终业务链路压力测试。
 
 ## 5. 网络诊断
@@ -102,12 +104,32 @@ net.core.netdev_max_backlog = 1000
 RTK Float/Fixed 或差分链路。`rtk_driver` 必须发布明确无效状态，不能发布
 零坐标作为有效位置。
 
-## 7. 尚未验证
+## 7. Topic remapping 与 RViz2 短时验证
+
+通过 `sensor_adapter/odin_driver.launch.py` 启动实机后确认：
+
+| 系统 Topic | 类型 | 短时结果 |
+| --- | --- | --- |
+| `/capture/lidar/points_raw` | `sensor_msgs/PointCloud2` | 发布正常；保留 `offset_time` |
+| `/capture/lidar/points_slam` | `sensor_msgs/PointCloud2` | 约 10.3 Hz |
+| `/capture/imu/data` | `sensor_msgs/Imu` | 约 401 Hz |
+| `/capture/odometry/high_rate` | `nav_msgs/Odometry` | 约 401 Hz |
+| `/capture/odometry/slam` | `nav_msgs/Odometry` | 发布正常 |
+
+五路 Topic 的发布者均为厂商节点 `odin_driver_P040100010`，证明 remapping 没有
+引入中继节点。对应的五路厂商数据 Topic 不再出现在 ROS 图中，未映射的相机、
+标定和设备上线 Topic 保持厂商命名。
+
+`sensor_adapter/odin_rviz.launch.py` 已在设备桌面环境启动成功，RViz2 使用
+OpenGL 3.3 加载系统配置，并直接订阅 `/capture/lidar/points_slam` 和
+`/capture/odometry/slam`。本次仅为短时功能验证，不代表长时间预览性能验证。
+
+## 8. 尚未验证
 
 - 车辆动态点云和逐点运动补偿；
 - ODIN1 Lite 坐标轴、外参和 raw cloud 的实际坐标语义；
 - RTK 天线和差分固定解；
 - 60 km/h 条件下处理延迟；
 - 桌面环境保留时的长时间调度抖动；
-- 点云预览、净空算法和 Web 同时运行；
+- 点云预览、净空算法和 Web 同时运行的资源与稳定性；
 - 当前不保存原始点云条件下的任务完整流程。

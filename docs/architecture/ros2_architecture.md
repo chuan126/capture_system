@@ -22,7 +22,7 @@ ROS 2 版本：Humble
 
 实际设备是 ODIN1 Lite。厂商固件/SDK 2.0.2 上报的模型字符串为 `ODIN2`，
 因此实测厂商前缀是 `/manifold/ODIN2/device0/`。该前缀只由
-`sensor_adapter` 动态消费。
+`sensor_adapter` Launch 参数持有，其他业务模块不引用厂商 Topic。
 
 ## 2. 包依赖关系
 
@@ -31,7 +31,7 @@ ROS 2 版本：Humble
 flowchart LR
     FOUNDATION["基础与装配\ninterfaces · bringup"]
     ACCESS["设备接入\nODIN驱动 · rtk_driver"]
-    STANDARD["标准化\nsensor_adapter"]
+    STANDARD["Topic映射\nsensor_adapter"]
     CORE["核心计算\nmotion · localization · clearance"]
     CONTROL["任务控制\ntask_manager"]
     SERVICES["旁路服务\nrecorder · visualization · monitor"]
@@ -51,7 +51,7 @@ flowchart LR
 | --- | --- | --- | --- |
 | `interfaces` | 无 | 自定义 msg/srv/action | 算法、配置、业务逻辑 |
 | `rtk_driver` | `rtk_driver_node` | 串口、NMEA、RTK 质量 | 进出洞状态机 |
-| `sensor_adapter` | `sensor_adapter_node` | Topic 发现、校验、标准化 | 运动补偿、净空 |
+| `sensor_adapter` | 无独立节点 | 原生 Topic remapping、雷达和 RViz2 启动 | 消息校验、frame 修改、运动补偿、净空 |
 | `motion_compensation` | `motion_compensation_node` | 位姿缓存、插值、逐点去畸变 | 长期定位、路面求解 |
 | `localization` | `localization_node` | RTK 稳定窗口、洞内里程、轨迹质量 | 任务生命周期 |
 | `clearance_engine` | `clearance_node` | 过滤、路面、断面、净空、置信度 | 原始记录、Web 编码 |
@@ -67,10 +67,11 @@ flowchart LR
 
 | Topic | 类型 | 发布者 | 主要订阅者 | 坐标系/时间 | 典型频率 | QoS |
 | --- | --- | --- | --- | --- | --- | --- |
-| `/capture/lidar/points_raw` | `sensor_msgs/PointCloud2` | `sensor_adapter` | `motion_compensation`；full_raw 时 recorder | `lidar_link`；设备采集基准时间，保留 `offset_time` | 实测约 10.23 Hz | `sensor_data_bounded` |
-| `/capture/imu/data` | `sensor_msgs/Imu` | `sensor_adapter` | `motion_compensation`, `localization`, recorder | `imu_link`；设备时间 | 实测约 401 Hz | `sensor_data_bounded` |
-| `/capture/odometry/high_rate` | `nav_msgs/Odometry` | `sensor_adapter` | `motion_compensation`, `localization`, recorder | `odom`→`base_link`；设备时间 | 实测约 401 Hz | `sensor_data_bounded` |
-| `/capture/odometry/slam` | `nav_msgs/Odometry` | `sensor_adapter` | `localization`, preview, recorder | 厂商语义经验证后映射 | 设备实际频率 | `sensor_data_bounded` |
+| `/capture/lidar/points_raw` | `sensor_msgs/PointCloud2` | ODIN 驱动（经 remap） | `motion_compensation`；full_raw 时 recorder | 保留厂商 `frame_id` 和设备时间，保留 `offset_time` | 实测约 10.23 Hz | 继承厂商驱动，当前 Reliable/Volatile |
+| `/capture/lidar/points_slam` | `sensor_msgs/PointCloud2` | ODIN 驱动（经 remap） | RViz2、辅助诊断 | 保留厂商坐标与设备时间；不得作为核心净空输入 | 实测约 10.3 Hz | 继承厂商驱动，当前 Reliable/Volatile |
+| `/capture/imu/data` | `sensor_msgs/Imu` | ODIN 驱动（经 remap） | `motion_compensation`, `localization`, recorder | 保留厂商 `frame_id` 和设备时间 | 实测约 401 Hz | 继承厂商驱动，当前 Reliable/Volatile |
+| `/capture/odometry/high_rate` | `nav_msgs/Odometry` | ODIN 驱动（经 remap） | `motion_compensation`, `localization`, recorder | 保留厂商父子 frame 和设备时间 | 实测约 401 Hz | 继承厂商驱动，当前 Reliable/Volatile |
+| `/capture/odometry/slam` | `nav_msgs/Odometry` | ODIN 驱动（经 remap） | `localization`, preview, recorder | 保留厂商父子 frame 和设备时间 | 实测约 10 Hz | 继承厂商驱动，当前 Reliable/Volatile |
 | `/capture/rtk/fix` | `sensor_msgs/NavSatFix` | `rtk_driver` | `localization`, recorder | WGS84；GNSS 时间或明确标记的接收时间 | 1–20 Hz | `reliable_state` |
 | `/capture/rtk/status` | `interfaces/msg/RtkStatus` | `rtk_driver` | `localization`, task, monitor, recorder | 与 fix 同一采样时刻 | 1–20 Hz | `reliable_state` |
 | `/capture/lidar/points_compensated` | `sensor_msgs/PointCloud2` | `motion_compensation` | `clearance_engine`, preview；full_raw 时 recorder | `base_link`；统一参考时刻 | 约 10 Hz | `sensor_data_bounded` |
@@ -80,8 +81,9 @@ flowchart LR
 
 实测原始点云为 49,152 点、18 字节/点；`offset_time` 是 FLOAT32 秒，按 32 个
 采集组从 0 递增到约 0.094368 秒，组间约 0.003044 秒。厂商 header 使用
-`device0/odom` 且时间从设备启动后约数百秒开始，适配层仍必须验证其坐标语义和
-时间原点，不能直接包装成可信的 `lidar_link`/系统墙钟。
+`device0/odom` 且时间从设备启动后约数百秒开始。remapping 不改变这些内容，
+`motion_compensation` 等消费者必须验证坐标语义和时间原点，不能直接解释为
+可信的 `lidar_link` 或系统墙钟。
 
 ### 4.2 状态、记录和预览 Topic
 

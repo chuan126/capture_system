@@ -25,7 +25,7 @@
 %%{init: {"flowchart": {"curve": "linear", "nodeSpacing": 45, "rankSpacing": 55}}}%%
 flowchart LR
     INPUT["实时输入\n原始点云、IMU、高频里程计"]
-    ADAPTER["sensor_adapter\n发现、校验、标准化"]
+    ADAPTER["sensor_adapter\n原生 Topic remapping"]
     TIME["时间与位姿模型\n缓存、检查、插值"]
     DESKEW["逐点运动补偿\n统一参考时刻"]
     FILTER["过滤与遮挡剔除"]
@@ -40,14 +40,15 @@ flowchart LR
 
 ### 2.1 点云接入
 
-`sensor_adapter` 对每帧执行最低限度校验：
+`sensor_adapter` 只改变 Topic 名称，不读取或复制消息。以下最低限度校验由
+`motion_compensation` 的输入边界承担：
 
 - 消息时间戳存在且未发生不可解释跳变；
 - `PointCloud2` 行步长、点步长和数据长度一致；
 - x/y/z、置信度和 `offset_time` 字段存在且类型正确；
 - 非有限点和全零点比例可统计；
-- 实际设备 Topic 与已发现设备一致；
-- 坐标系来自验证映射。
+- 消息仍来自启动配置指定的设备；
+- `frame_id` 和坐标语义已经过实测确认。
 
 校验失败的帧进入诊断和记录，但不进入净空求解。
 
@@ -129,37 +130,24 @@ flowchart LR
 
 ## 4. 任务控制流
 
-```mermaid
-sequenceDiagram
-    participant UI as 浏览器
-    participant API as FastAPI
-    participant TM as task_manager
-    participant REC as data_recorder
-    participant ALG as 定位/净空节点
+任务控制按“创建、运行、结束”三个阶段拆开表达。每张图只保留一条从左到右的
+主链路，节点下方的说明表负责补充条件和异常行为。
 
-    UI->>API: 创建任务
-    API->>TM: CreateTask Service
-    TM->>TM: 校验元数据、配置和标定
-    TM-->>API: task_id / 错误
-    UI->>API: 启动任务
-    API->>TM: CaptureTask Goal
-    TM->>REC: 发布任务准备/启动状态
-    REC-->>TM: 记录会话就绪
-    TM->>ALG: 通过任务状态启用任务上下文
-    loop 任务运行
-        ALG-->>TM: 定位与净空结果
-        TM-->>API: Action Feedback / 状态 Topic
-        API-->>UI: WebSocket 状态
-    end
-    UI->>API: 停止
-    API->>TM: Cancel Goal
-    TM->>REC: 请求安全收尾
-    REC-->>TM: 队列落盘完成/超时
-    TM-->>API: Action Result
-    API-->>UI: 最终结果
+### 4.1 创建与校验
+
+```mermaid
+%%{init: {"flowchart": {"curve": "linear", "nodeSpacing": 50, "rankSpacing": 55}}}%%
+flowchart LR
+    CREATE["浏览器\n填写任务信息"]
+    API["FastAPI\n接收创建请求"]
+    SERVICE["CreateTask Service"]
+    CHECK["task_manager\n校验前置条件"]
+    READY["返回 task_id\n进入 Prepared"]
+
+    CREATE --> API --> SERVICE --> CHECK --> READY
 ```
 
-任务开始前置条件至少包括：
+创建阶段由 `task_manager` 统一校验，后端不复制这些规则。前置条件至少包括：
 
 - 必需传感器在线；
 - 点云字段和时间模型已验证；
@@ -168,8 +156,59 @@ sequenceDiagram
 - 不存在冲突的活动任务；
 - 核心节点健康。
 
+任何一项不满足时，任务停留在非运行状态，并返回明确的失败项；不得创建一个
+表面成功但无法启动的任务上下文。
+
+### 4.2 启动与持续运行
+
+```mermaid
+%%{init: {"flowchart": {"curve": "linear", "nodeSpacing": 50, "rankSpacing": 55}}}%%
+flowchart LR
+    START["浏览器\n启动任务"]
+    GOAL["FastAPI\n发送 CaptureTask Goal"]
+    PREPARE["task_manager\n建立任务上下文"]
+    RECORDER["data_recorder\n确认记录会话就绪"]
+    ACTIVE["算法节点\n持续计算定位与净空"]
+    FEEDBACK["状态 Topic / Action Feedback"]
+    DISPLAY["FastAPI WebSocket\n浏览器实时展示"]
+
+    START --> GOAL --> PREPARE --> RECORDER
+    RECORDER --> ACTIVE --> FEEDBACK --> DISPLAY
+```
+
+运行期间各模块保持单向职责：
+
+| 模块 | 输入 | 输出 | 不承担的职责 |
+|---|---|---|---|
+| `task_manager` | Goal、传感器及节点状态 | 任务状态、Action Feedback | 不执行净空算法 |
+| `data_recorder` | 任务状态、结构化结果 | 会话就绪、队列及记录状态 | 不决定任务状态 |
+| 定位与净空节点 | 标准化传感器数据、任务上下文 | 定位和净空结果 | 不直接控制浏览器 |
+| FastAPI | ROS 状态与结果 | HTTP、WebSocket 数据 | 不复制设备端状态机 |
+
 若浏览器在 Goal 已接受后断开，Action 和设备端任务继续。浏览器重连后通过
 transient 状态 Topic 和后端查询恢复展示。
+
+### 4.3 停止与安全收尾
+
+```mermaid
+%%{init: {"flowchart": {"curve": "linear", "nodeSpacing": 50, "rankSpacing": 55}}}%%
+flowchart LR
+    STOP["浏览器\n停止任务"]
+    CANCEL["FastAPI\n取消 CaptureTask Goal"]
+    STOPPING["task_manager\n进入 Stopping"]
+    FLUSH["data_recorder\n有界队列收尾"]
+    FINALIZE["task_manager\n生成最终结果"]
+    COMPLETE["浏览器\n显示完成或告警"]
+
+    STOP --> CANCEL --> STOPPING --> FLUSH --> FINALIZE --> COMPLETE
+```
+
+| 收尾情况 | `task_manager` 行为 | 最终状态 |
+|---|---|---|
+| 队列在期限内完成 | 保存诊断摘要和最终结果 | `Completed` |
+| 队列超时但核心结果完整 | 标记记录不完整并明确告警 | `Completed`（带告警） |
+| 核心结果或元数据无法完成 | 保存可恢复信息和失败原因 | `Faulted` |
+| 浏览器在收尾期间断开 | 设备端继续执行，不等待浏览器 | 按实际收尾结果确定 |
 
 ## 5. 记录流
 
