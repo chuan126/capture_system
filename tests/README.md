@@ -3,7 +3,7 @@
 包内 `test/` 保存单个 ROS 2 包的单元测试，本目录保存跨包和现场验证：
 
 ```text
-tests/
+tests/                      # 跨模块测试、数据集和基准结果根目录
 ├── integration/             # 节点、Topic、Service 和 Action 集成
 ├── replay/                  # 固定 MCAP 数据集回放
 ├── performance/             # RK3588 延迟、资源、队列和丢帧

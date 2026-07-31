@@ -9,7 +9,7 @@ Group=cat
 WorkingDirectory=/home/cat/Project/capture_system
 EnvironmentFile=/home/cat/Project/capture_system/config/network/web.env
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/home/cat/Project/capture_system/.venv/bin/uvicorn backend.main:app
+ExecStart=/home/cat/Project/capture_system/scripts/operation/run_web.sh
 Restart=on-failure
 RestartSec=3
 NoNewPrivileges=true

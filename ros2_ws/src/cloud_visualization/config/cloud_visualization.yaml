@@ -1,0 +1,16 @@
+cloud_visualization_node:
+  ros__parameters:
+    # 首版只允许关闭预览，不影响雷达、核心计算或记录任务。
+    enabled: true
+
+    # 输入使用sensor_adapter提供的稳定SLAM点云Topic。
+    input_topic: /capture/lidar/points_slam
+
+    # 输出是裁减RGB并限制点数后的轻量XYZ点云Topic。
+    output_topic: /capture/visualization/cloud_preview
+
+    # 浏览器预览以5 Hz刷新，中间输入帧由最新帧覆盖。
+    publish_rate_hz: 5.0
+
+    # PCV1负载最多允许10,000点，对应每帧最多120,000字节XYZ数据。
+    max_points: 10000

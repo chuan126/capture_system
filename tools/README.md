@@ -1,7 +1,7 @@
 # 离线工具
 
 ```text
-tools/
+tools/                      # 标定、分析、仿真和导出工具根目录
 ├── calibration/             # 外参、轴向和时间标定
 ├── analysis/                # MCAP、轨迹、净空和诊断分析
 ├── simulation/              # 合成数据与故障注入

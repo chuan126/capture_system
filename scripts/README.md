@@ -1,7 +1,7 @@
 # 工程脚本
 
 ```text
-scripts/
+scripts/                    # 工程构建、部署、运行和数据脚本根目录
 ├── build/                   # 可重复构建和测试入口
 ├── deployment/              # 安装、升级、回滚
 ├── operation/               # 启动、停止和健康检查

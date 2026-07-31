@@ -4,7 +4,7 @@
 值和参数声明，本目录提供 RK3588 部署时实际生效的覆盖值。
 
 ```text
-config/
+config/                     # 设备、车辆和现场部署覆盖配置根目录
 ├── calibration/             # 传感器外参和标定版本
 ├── sensors/                 # ODIN、IMU、RTK 接入参数
 ├── coordinate_system/       # frame、轴向和 TF 约定

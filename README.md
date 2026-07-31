@@ -32,7 +32,7 @@ Launch 使用 ROS 2 原生 remapping 转换到稳定的 `/capture/...` Topic，�
 ## 局域网 Web 界面
 
 首次部署、运行方式和 systemd 配置见
-[`docs/deployment/lan_web.md`](docs/deployment/lan_web.md)。
+[`docs/deployment/局域网网页部署.md`](docs/deployment/局域网网页部署.md)。
 
 完成构建并启动服务后，同一局域网内的电脑可以通过以下形式访问：
 
@@ -48,10 +48,10 @@ http://<RK3588局域网IP>:8000/api/health
 
 ## 架构文档
 
-- [文档导航](docs/README.md)
-- [系统总体架构](docs/architecture/system_architecture.md)
-- [ROS 2 架构](docs/architecture/ros2_architecture.md)
-- [数据流设计](docs/architecture/data_flow.md)
+- [文档导航](docs/文档导航.md)
+- [系统总体架构](docs/architecture/系统总体架构.md)
+- [ROS 2 架构](docs/architecture/ROS2架构.md)
+- [数据流设计](docs/architecture/数据流设计.md)
 - [ROS 2 工作空间规划](ros2_ws/README.md)
 
 ## 目标工程结构
@@ -60,25 +60,25 @@ http://<RK3588局域网IP>:8000/api/health
 对应功能已经完成。
 
 ```text
-capture_system/
+capture_system/                 # 项目工程根目录
 ├── README.md                  # 项目入口、构建状态和文档导航
 ├── VERSION                    # 软件版本
 ├── AGENTS.md                  # 开发边界和工程约束
 ├── docs/                      # 架构、算法、接口、部署和测试文档
 ├── third_party/               # 只读第三方驱动及许可证
 ├── ros2_ws/                   # ROS 2 业务工作空间（规划）
-│   └── src/
-│       ├── interfaces/
-│       ├── rtk_driver/
-│       ├── sensor_adapter/
-│       ├── motion_compensation/
-│       ├── localization/
-│       ├── clearance_engine/
-│       ├── task_manager/
-│       ├── data_recorder/
-│       ├── cloud_visualization/
-│       ├── system_monitor/
-│       └── bringup/
+│   └── src/                   # ROS 2 业务包源码目录
+│       ├── interfaces/        # 系统自定义消息、服务和 Action
+│       ├── rtk_driver/        # RTK 串口接入和质量状态发布
+│       ├── sensor_adapter/    # 厂商 Topic 映射和 RViz2 入口
+│       ├── motion_compensation/ # 点云逐点时间检查和运动补偿
+│       ├── localization/      # 进出洞判断和洞内相对定位
+│       ├── clearance_engine/  # 断面提取和净空计算
+│       ├── task_manager/      # 任务生命周期和状态机
+│       ├── data_recorder/     # 遥测、元数据和结果记录
+│       ├── cloud_visualization/ # 浏览器轻量点云预览生成
+│       ├── system_monitor/    # 传感器、算法和资源监控
+│       └── bringup/           # Launch、QoS 和生产部署编排
 ├── backend/                   # FastAPI、WebSocket、ROS 2 Web 桥
 ├── frontend/                  # 浏览器监控和控制界面
 ├── config/                    # 可部署配置和现场覆盖参数

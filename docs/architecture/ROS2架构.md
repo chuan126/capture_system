@@ -57,7 +57,7 @@ flowchart LR
 | `clearance_engine` | `clearance_node` | 过滤、路面、断面、净空、置信度 | 原始记录、Web 编码 |
 | `task_manager` | `task_manager_node` | 任务与进出洞状态机 | 复制算法和后端状态 |
 | `data_recorder` | `data_recorder_node` | MCAP、元数据、结果和队列 | 阻塞实时链路 |
-| `cloud_visualization` | `cloud_visualization_node` | 预览限频、裁剪、降采样 | 外部 WebSocket 服务 |
+| `cloud_visualization` | `cloud_visualization_node` | SLAM预览保留最新帧、限频、RGB裁减和限点 | 布局检查、过滤、ROI、体素、坐标转换、外部WebSocket |
 | `system_monitor` | `system_monitor_node` | 资源、Topic、传感器和算法诊断 | 修改测量结果 |
 | `bringup` | 无 | Launch、QoS、参数组合、回放入口 | 业务算法 |
 
@@ -68,14 +68,14 @@ flowchart LR
 | Topic | 类型 | 发布者 | 主要订阅者 | 坐标系/时间 | 典型频率 | QoS |
 | --- | --- | --- | --- | --- | --- | --- |
 | `/capture/lidar/points_raw` | `sensor_msgs/PointCloud2` | ODIN 驱动（经 remap） | `motion_compensation`；full_raw 时 recorder | 保留厂商 `frame_id` 和设备时间，保留 `offset_time` | 实测约 10.23 Hz | 继承厂商驱动，当前 Reliable/Volatile |
-| `/capture/lidar/points_slam` | `sensor_msgs/PointCloud2` | ODIN 驱动（经 remap） | RViz2、辅助诊断 | 保留厂商坐标与设备时间；不得作为核心净空输入 | 实测约 10.3 Hz | 继承厂商驱动，当前 Reliable/Volatile |
+| `/capture/lidar/points_slam` | `sensor_msgs/PointCloud2` | ODIN 驱动（经 remap） | RViz2、`cloud_visualization`、辅助诊断 | 保留厂商SLAM世界坐标与设备时间；不得作为核心净空输入 | 实测约 10.3 Hz | 继承厂商驱动，当前 Reliable/Volatile |
 | `/capture/imu/data` | `sensor_msgs/Imu` | ODIN 驱动（经 remap） | `motion_compensation`, `localization`, recorder | 保留厂商 `frame_id` 和设备时间 | 实测约 401 Hz | 继承厂商驱动，当前 Reliable/Volatile |
 | `/capture/odometry/high_rate` | `nav_msgs/Odometry` | ODIN 驱动（经 remap） | `motion_compensation`, `localization`, recorder | 保留厂商父子 frame 和设备时间 | 实测约 401 Hz | 继承厂商驱动，当前 Reliable/Volatile |
-| `/capture/odometry/slam` | `nav_msgs/Odometry` | ODIN 驱动（经 remap） | `localization`, preview, recorder | 保留厂商父子 frame 和设备时间 | 实测约 10 Hz | 继承厂商驱动，当前 Reliable/Volatile |
+| `/capture/odometry/slam` | `nav_msgs/Odometry` | ODIN 驱动（经 remap） | `localization`, recorder | 保留厂商父子 frame 和设备时间；首版点云预览不订阅 | 实测约 10 Hz | 继承厂商驱动，当前 Reliable/Volatile |
 | `/capture/rtk/fix` | `sensor_msgs/NavSatFix` | `rtk_driver` | `localization`, recorder | WGS84；GNSS 时间或明确标记的接收时间 | 1–20 Hz | `reliable_state` |
 | `/capture/rtk/status` | `interfaces/msg/RtkStatus` | `rtk_driver` | `localization`, task, monitor, recorder | 与 fix 同一采样时刻 | 1–20 Hz | `reliable_state` |
-| `/capture/lidar/points_compensated` | `sensor_msgs/PointCloud2` | `motion_compensation` | `clearance_engine`, preview；full_raw 时 recorder | `base_link`；统一参考时刻 | 约 10 Hz | `sensor_data_bounded` |
-| `/capture/localization/odometry` | `nav_msgs/Odometry` | `localization` | clearance, task, preview, recorder | `odom`→`base_link`；融合参考时刻 | 约 10–100 Hz | `reliable_bounded` |
+| `/capture/lidar/points_compensated` | `sensor_msgs/PointCloud2` | `motion_compensation` | `clearance_engine`；full_raw 时 recorder | `base_link`；统一参考时刻 | 约 10 Hz | `sensor_data_bounded` |
+| `/capture/localization/odometry` | `nav_msgs/Odometry` | `localization` | clearance, task, recorder | `odom`→`base_link`；融合参考时刻 | 约 10–100 Hz | `reliable_bounded` |
 | `/capture/localization/status` | `interfaces/msg/LocalizationStatus` | `localization` | task, clearance, monitor, recorder | 对应定位估计时刻 | 约 10 Hz | `reliable_state` |
 | `/capture/clearance/result` | `interfaces/msg/ClearanceResult` | `clearance_engine` | task, recorder, monitor, backend | 关联点云参考时刻和断面位置 | 约 10 Hz | `reliable_bounded` |
 
@@ -92,7 +92,7 @@ flowchart LR
 | `/capture/task/status` | `interfaces/msg/TaskStatus` | `task_manager` | 当前任务唯一权威状态 | `transient_state` |
 | `/capture/task/events` | 拟定 `interfaces/msg/TaskEvent` | `task_manager` | 状态迁移、人工标记和异常事件 | `reliable_bounded` |
 | `/capture/recording/status` | 拟定 `interfaces/msg/RecordingStatus` | `data_recorder` | 队列、吞吐、丢弃、磁盘和会话状态 | `transient_state` |
-| `/capture/visualization/cloud_preview` | `sensor_msgs/PointCloud2` | `cloud_visualization` | 已限频和降采样，仅供预览 | `preview_best_effort` |
+| `/capture/visualization/cloud_preview` | `sensor_msgs/PointCloud2` | `cloud_visualization` | 5 Hz、xyz FLOAT32、最多10,000点；保持输入SLAM世界frame，仅供预览 | `preview_best_effort` |
 | `/capture/diagnostics` | `diagnostic_msgs/DiagnosticArray` | `system_monitor` | 聚合传感器、算法和系统诊断 | `transient_state` |
 
 若预览压缩后不再能用 `PointCloud2` 准确表达，才增加带协议版本的自定义消息。

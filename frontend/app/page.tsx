@@ -2,6 +2,9 @@
 
 import { useState } from "react";
 
+import PointCloudViewer from "@/components/point-cloud/PointCloudViewer";
+import type { PointCloudViewMode } from "@/components/point-cloud/PointCloudViewer";
+
 type PageId = "dashboard" | "tasks" | "playback" | "report";
 type PlaybackTab = "result" | "history" | "logs";
 type TaskTab = "pending" | "completed" | "abnormal";
@@ -143,10 +146,10 @@ function MetricCard({
 
 function Dashboard() {
   const [viewMode, setViewMode] = useState<ViewMode>("3d");
-  const modes: Array<{ id: ViewMode; label: string }> = [
+  const modes: Array<{ id: ViewMode; label: string; disabled?: boolean }> = [
     { id: "3d", label: "三维视图" },
     { id: "top", label: "俯视图" },
-    { id: "section", label: "断面视图" },
+    { id: "section", label: "断面视图", disabled: true },
   ];
 
   return (
@@ -164,7 +167,7 @@ function Dashboard() {
             <div className="cloud-toolbar">
               <div>
                 <h2>点云空间预览</h2>
-                <p>Odin1 Lite 降采样点云 · 预览链路与核心计算隔离</p>
+                <p>Odin1 Lite SLAM世界点云 · 5 Hz预览链路与核心计算隔离</p>
               </div>
               <div className="segmented segmented--small" aria-label="点云视角">
                 {modes.map((mode) => (
@@ -172,33 +175,17 @@ function Dashboard() {
                     type="button"
                     key={mode.id}
                     className={viewMode === mode.id ? "active" : ""}
+                    disabled={mode.disabled}
+                    title={mode.disabled ? "等待真实断面接口接入" : undefined}
                     onClick={() => setViewMode(mode.id)}
                   >
                     {mode.label}
                   </button>
                 ))}
               </div>
-              <span className="panel-tag panel-tag--muted">0 点</span>
+              <span className="panel-tag">实时接入</span>
             </div>
-            <div className={`cloud-stage dashboard-cloud-stage cloud-stage--${viewMode}`}>
-              <div className="cloud-stage__floor" />
-              <div className="axis axis--x">X</div>
-              <div className="axis axis--y">Y</div>
-              <div className="axis axis--z">Z</div>
-              <div className="orientation-cube">
-                <span>TOP</span><i>FRONT</i><b>RIGHT</b>
-              </div>
-              <EmptyState
-                icon="⁙"
-                title="等待点云预览数据"
-                description={`${modes.find((mode) => mode.id === viewMode)?.label}将在数据接入后显示`}
-                compact
-              />
-              <div className="cloud-stage__footer">
-                <span>车辆坐标系：X 向前 · Y 向左 · Z 向上</span>
-                <span>当前帧：0 点 · 显示范围：-- m</span>
-              </div>
-            </div>
+            <PointCloudViewer viewMode={viewMode as PointCloudViewMode} />
           </article>
 
           <article className="panel">

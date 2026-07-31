@@ -12,7 +12,7 @@
 ## `src/` 目录架构
 
 ```text
-src/
+src/                        # ROS 2 业务包源码根目录
 ├── interfaces/              # 系统自定义 ROS 2 接口
 ├── rtk_driver/              # RTK 设备接入
 ├── sensor_adapter/          # 雷达 Topic remapping 与 RViz2 启动
@@ -38,7 +38,7 @@ src/
 | `clearance_engine/` | 完成点云过滤、车辆遮挡剔除、路面建模、断面提取、通行包络求解和结果质量评估 | 只消费标准化、完成时间检查的点云和姿态数据 |
 | `task_manager/` | 管理任务创建、启动、进出洞、停止、故障和收尾状态，是设备端任务状态的唯一权威 | 后端和其他节点不得复制任务状态机 |
 | `data_recorder/` | 异步记录任务元数据、配置与标定快照、RTK/IMU/里程计遥测、净空结果和诊断摘要 | 当前默认不记录原始点云，并为以后使用独立 SSD/NVMe 和 MCAP 预留能力 |
-| `cloud_visualization/` | 对点云做限频、降采样和预览编码，向后端提供浏览器展示所需数据 | 不承担核心测量，也不直接向浏览器建立第二套外部服务 |
+| `cloud_visualization/` | 对SLAM点云保留最新帧、限频、裁减RGB并限制最大点数，向后端发布轻量xyz预览Topic | 首版不做布局检查、过滤、ROI、体素、里程计配对或坐标转换，也不建立外部WebSocket |
 | `system_monitor/` | 监控传感器、Topic、算法状态、CPU、内存、温度、磁盘和队列积压，汇总系统健康状态 | 只报告状态和降级原因，不直接改变任务状态 |
 | `bringup/` | 统一组织 Launch、节点组合、参数覆盖、QoS 和开发/生产运行配置 | 不存放业务算法 |
 
@@ -57,8 +57,8 @@ src/
 - 不在业务包中引用 ODIN SDK 或写死厂商 Topic。
 
 详细通信设计见
-[ROS 2 架构](../docs/architecture/ros2_architecture.md) 和
-[数据流设计](../docs/architecture/data_flow.md)。
+[ROS 2 架构](../docs/architecture/ROS2架构.md) 和
+[数据流设计](../docs/architecture/数据流设计.md)。
 
 ## 构建顺序
 
