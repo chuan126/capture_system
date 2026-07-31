@@ -31,7 +31,17 @@ Launch 使用 ROS 2 原生 remapping 转换到稳定的 `/capture/...` Topic，�
 
 ## 局域网 Web 界面
 
-首次部署、运行方式和 systemd 配置见
+开发阶段使用一条命令启动雷达驱动、SLAM点云预览和网页服务：
+
+```bash
+cd /home/cat/Project/capture_system
+scripts/operation/run_lan_preview.sh
+```
+
+终端会打印当前设备可访问的局域网地址；按 `Ctrl+C` 会统一停止本次启动的
+进程。当前阶段不需要安装或启用systemd开机自启。
+
+首次构建、分组件调试和后续部署方式见
 [`docs/deployment/局域网网页部署.md`](docs/deployment/局域网网页部署.md)。
 
 完成构建并启动服务后，同一局域网内的电脑可以通过以下形式访问：
