@@ -79,8 +79,8 @@ export default function PointCloudViewer({
       host.appendChild(renderer.domElement);
 
       const scene = new THREE.Scene();
-      scene.background = new THREE.Color(0x111a29);
-      scene.fog = new THREE.FogExp2(0x111a29, 0.012);
+      scene.background = new THREE.Color(0xf5f8fc);
+      scene.fog = new THREE.FogExp2(0xf5f8fc, 0.01);
 
       const perspectiveCamera = new THREE.PerspectiveCamera(48, 1, 0.01, 2_000);
       perspectiveCamera.up.set(0, 0, 1);
@@ -99,7 +99,7 @@ export default function PointCloudViewer({
       geometry.setDrawRange(0, 0);
 
       const material = new THREE.PointsMaterial({
-        color: 0x63b3ff,
+        color: 0x1769ee,
         size: 0.045,
         sizeAttenuation: true,
         transparent: true,
@@ -108,10 +108,10 @@ export default function PointCloudViewer({
       const points = new THREE.Points(geometry, material);
       scene.add(points);
 
-      const grid = new THREE.GridHelper(100, 100, 0x3f628c, 0x263b57);
+      const grid = new THREE.GridHelper(100, 100, 0x9fb8d8, 0xd8e2ef);
       grid.rotation.x = Math.PI / 2;
       grid.material.transparent = true;
-      grid.material.opacity = 0.55;
+      grid.material.opacity = 0.68;
       scene.add(grid);
       scene.add(new THREE.AxesHelper(1.5));
 

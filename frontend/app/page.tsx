@@ -153,12 +153,29 @@ function Dashboard() {
   ];
 
   return (
-    <div className="page-stack">
+    <div className="page-stack dashboard-page">
+      <section className="capture-state-bar" aria-label="采集任务状态">
+        <div className="capture-state-bar__main">
+          <span className="capture-state-icon">待</span>
+          <div>
+            <span>当前任务状态</span>
+            <strong>待机 · 尚未选择检测任务</strong>
+            <small>选择任务并完成设备检查后方可开始采集</small>
+          </div>
+        </div>
+        <div className="capture-state-bar__signals" aria-label="关键链路状态">
+          <span><i />点云未接入</span>
+          <span><i />RTK未接入</span>
+          <span><i />诊断等待中</span>
+        </div>
+        <p>任务由RK3588设备端独立运行，浏览器断开不会终止采集。</p>
+      </section>
+
       <section className="metric-grid">
         <MetricCard label="当前净空高度" value="--" unit="m" hint="等待有效测量结果" icon="H" primary />
         <MetricCard label="任务最低净空" value="--" unit="m" hint="任务开始后自动统计" icon="↓" />
-        <MetricCard label="RTK 定位状态" value="未接入" hint="等待定位质量信息" icon="◎" />
-        <MetricCard label="有效处理帧率" value="--" unit="FPS" hint="Odin1 Lite 点云输入" icon="≈" />
+        <MetricCard label="测量质量" value="无数据" hint="延迟 -- ms · 有效点 -- %" icon="质" />
+        <MetricCard label="RTK 定位质量" value="未定位" hint="解状态 -- · 卫星 -- · HDOP --" icon="◎" />
       </section>
 
       <section className="dashboard-layout">
@@ -167,7 +184,7 @@ function Dashboard() {
             <div className="cloud-toolbar">
               <div>
                 <h2>点云空间预览</h2>
-                <p>Odin1 Lite SLAM世界点云 · 5 Hz预览链路与核心计算隔离</p>
+                <p>Odin1 Lite SLAM世界点云 · 5 Hz轻量预览</p>
               </div>
               <div className="segmented segmented--small" aria-label="点云视角">
                 {modes.map((mode) => (
@@ -183,7 +200,7 @@ function Dashboard() {
                   </button>
                 ))}
               </div>
-              <span className="panel-tag">实时接入</span>
+              <span className="panel-tag panel-tag--muted">预览链路</span>
             </div>
             <PointCloudViewer viewMode={viewMode as PointCloudViewMode} />
           </article>
@@ -220,30 +237,48 @@ function Dashboard() {
               <div><span>任务进度</span><strong>0%</strong></div>
               <div className="progress-track"><i /></div>
             </div>
+            <div className="tunnel-markers">
+              <div>
+                <strong>隧道边界标记</strong>
+                <small>自动判断异常时可由现场人员手动标记</small>
+              </div>
+              <div>
+                <button type="button" className="button button--soft" disabled title="任务开始后可用">标记入口</button>
+                <button type="button" className="button button--soft" disabled title="任务开始后可用">标记出口</button>
+              </div>
+            </div>
           </article>
 
           <article className="panel control-panel">
-            <PanelHead title="采集任务管理" description="测量参数与采集控制" />
-            <div className="form-grid">
-              <label>
-                <span>雷达安装高度 / m</span>
-                <input placeholder="请输入安装高度" inputMode="decimal" />
-              </label>
-              <label>
-                <span>净空高度阈值 / m</span>
-                <input placeholder="请输入报警阈值" inputMode="decimal" />
-              </label>
-              <label className="form-grid__full">
-                <span>测量参数配置</span>
-                <select defaultValue="">
-                  <option value="">请选择参数方案</option>
-                </select>
-              </label>
+            <PanelHead title="采集控制" description="按设备端任务状态开放操作" trailing={<StatusPill>未就绪</StatusPill>} />
+            <div className="preflight-list" aria-label="采集前检查">
+              <div><span>检测任务</span><strong>未选择</strong></div>
+              <div><span>参数方案</span><strong>未确认</strong></div>
+              <div><span>雷达与定位链路</span><strong>等待接入</strong></div>
             </div>
+            <details className="config-disclosure">
+              <summary>查看并确认采集参数 <span>尚未配置</span></summary>
+              <div className="form-grid">
+                <label>
+                  <span>雷达安装高度 / m</span>
+                  <input placeholder="请输入安装高度" inputMode="decimal" />
+                </label>
+                <label>
+                  <span>净空高度阈值 / m</span>
+                  <input placeholder="请输入报警阈值" inputMode="decimal" />
+                </label>
+                <label className="form-grid__full">
+                  <span>测量参数配置</span>
+                  <select defaultValue="">
+                    <option value="">请选择参数方案</option>
+                  </select>
+                </label>
+              </div>
+            </details>
             <div className="button-grid button-grid--control">
-              <button type="button" className="button button--green">初始化并开始</button>
-              <button type="button" className="button button--warning">暂停 / 恢复</button>
-              <button type="button" className="button button--danger button-grid__full">停止采集并保存</button>
+              <button type="button" className="button button--green button-grid__full" disabled title="请选择任务并完成采集前检查">开始采集</button>
+              <button type="button" className="button button--warning" disabled>暂停采集</button>
+              <button type="button" className="button button--danger" disabled>停止并保存</button>
             </div>
             <label className="switch-row">
               <span>
@@ -256,13 +291,12 @@ function Dashboard() {
           </article>
 
           <article className="panel status-panel">
-            <PanelHead title="设备状态" description="现场设备与数据链路" />
+            <PanelHead title="设备与数据链路" description="状态变化和数据新鲜度" />
             <div className="device-grid">
               <div><span><i>雷</i>Odin1 Lite</span><StatusPill>等待接入</StatusPill></div>
               <div><span><i>RTK</i>RTK 定位</span><StatusPill>等待接入</StatusPill></div>
-              <div><span><i>控</i>主控状态</span><StatusPill>等待接入</StatusPill></div>
-              <div><span><i>存</i>存储状态</span><strong>--</strong></div>
-              <div><span><i>温</i>设备温度</span><strong>-- ℃</strong></div>
+              <div><span><i>控</i>RK3588主控</span><StatusPill>等待接入</StatusPill></div>
+              <div><span><i>存</i>存储与温度</span><strong>-- GB · -- ℃</strong></div>
             </div>
           </article>
         </div>
@@ -271,13 +305,13 @@ function Dashboard() {
       <section className="alert-grid">
         <article className="panel">
           <PanelHead
-            title="异常报警提示"
-            description="净空阈值与设备异常集中显示"
-            trailing={<StatusPill tone="ok">当前无报警</StatusPill>}
+            title="异常与操作提示"
+            description="仅在诊断数据有效时确认系统正常"
+            trailing={<StatusPill>等待系统诊断</StatusPill>}
           />
           <div className="alert-empty">
-            <span>✓</span>
-            <div><strong>系统暂无报警信息</strong><small>出现高度阈值或设备异常时将在此提示</small></div>
+            <span>…</span>
+            <div><strong>诊断链路尚未接入</strong><small>接入后将在此显示净空阈值、设备异常及处理建议</small></div>
           </div>
         </article>
         <article className="panel quick-status">
