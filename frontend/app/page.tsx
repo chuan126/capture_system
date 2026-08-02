@@ -221,107 +221,99 @@ function Dashboard() {
         </div>
 
         <div className="dashboard-side">
-          <article className="panel current-task">
-            <PanelHead
-              title="当前检测任务"
-              description="任务状态与切换信息"
-              trailing={<span className="panel-tag panel-tag--muted">未开始</span>}
-            />
-            <div className="task-identity">
-              <div><span>隧道编号</span><strong>--</strong></div>
-              <div><span>当前任务</span><strong>尚未选择</strong></div>
-              <div><span>下一任务</span><strong>暂无排队任务</strong></div>
-              <div><span>作业车道</span><strong>--</strong></div>
-            </div>
-            <div className="progress-block">
-              <div><span>任务进度</span><strong>0%</strong></div>
-              <div className="progress-track"><i /></div>
-            </div>
-            <div className="tunnel-markers">
-              <div>
-                <strong>隧道边界标记</strong>
-                <small>自动判断异常时可由现场人员手动标记</small>
+          <article className="panel operation-panel">
+            <section className="operation-section current-task">
+              <PanelHead
+                title="当前检测任务"
+                description="任务状态、进度与隧道边界"
+                trailing={<span className="panel-tag panel-tag--muted">未开始</span>}
+              />
+              <div className="task-identity">
+                <div><span>隧道编号</span><strong>--</strong></div>
+                <div><span>当前任务</span><strong>尚未选择</strong></div>
+                <div><span>下一任务</span><strong>暂无排队任务</strong></div>
+                <div><span>作业车道</span><strong>--</strong></div>
               </div>
-              <div>
-                <button type="button" className="button button--soft" disabled title="任务开始后可用">标记入口</button>
-                <button type="button" className="button button--soft" disabled title="任务开始后可用">标记出口</button>
+              <div className="progress-block">
+                <div><span>任务进度</span><strong>0%</strong></div>
+                <div className="progress-track"><i /></div>
               </div>
-            </div>
-          </article>
+              <div className="tunnel-markers">
+                <div>
+                  <strong>隧道边界标记</strong>
+                  <small>自动判断异常时手动兜底</small>
+                </div>
+                <div>
+                  <button type="button" className="button button--soft" disabled title="任务开始后可用">标记入口</button>
+                  <button type="button" className="button button--soft" disabled title="任务开始后可用">标记出口</button>
+                </div>
+              </div>
+            </section>
 
-          <article className="panel control-panel">
-            <PanelHead title="采集控制" description="按设备端任务状态开放操作" trailing={<StatusPill>未就绪</StatusPill>} />
-            <div className="preflight-list" aria-label="采集前检查">
-              <div><span>检测任务</span><strong>未选择</strong></div>
-              <div><span>参数方案</span><strong>未确认</strong></div>
-              <div><span>雷达与定位链路</span><strong>等待接入</strong></div>
-            </div>
-            <details className="config-disclosure">
-              <summary>查看并确认采集参数 <span>尚未配置</span></summary>
-              <div className="form-grid">
-                <label>
-                  <span>雷达安装高度 / m</span>
-                  <input placeholder="请输入安装高度" inputMode="decimal" />
-                </label>
-                <label>
-                  <span>净空高度阈值 / m</span>
-                  <input placeholder="请输入报警阈值" inputMode="decimal" />
-                </label>
-                <label className="form-grid__full">
-                  <span>测量参数配置</span>
-                  <select defaultValue="">
-                    <option value="">请选择参数方案</option>
-                  </select>
-                </label>
+            <section className="operation-section control-panel">
+              <PanelHead title="采集控制" description="按设备端任务状态开放操作" trailing={<StatusPill>未就绪</StatusPill>} />
+              <div className="preflight-list" aria-label="采集前检查">
+                <div><span>检测任务</span><strong>未选择</strong></div>
+                <div><span>参数方案</span><strong>未确认</strong></div>
+                <div><span>雷达与定位链路</span><strong>等待接入</strong></div>
               </div>
-            </details>
-            <div className="button-grid button-grid--control">
-              <button type="button" className="button button--green button-grid__full" disabled title="请选择任务并完成采集前检查">开始采集</button>
-              <button type="button" className="button button--warning" disabled>暂停采集</button>
-              <button type="button" className="button button--danger" disabled>停止并保存</button>
-            </div>
-            <label className="switch-row">
-              <span>
-                <strong>自动切换下一任务</strong>
-                <small>当前任务完成后加载下一任务</small>
-              </span>
-              <input type="checkbox" aria-label="自动切换下一任务" />
-              <i />
-            </label>
-          </article>
-
-          <article className="panel status-panel">
-            <PanelHead title="设备与数据链路" description="状态变化和数据新鲜度" />
-            <div className="device-grid">
-              <div><span><i>雷</i>Odin1 Lite</span><StatusPill>等待接入</StatusPill></div>
-              <div><span><i>RTK</i>RTK 定位</span><StatusPill>等待接入</StatusPill></div>
-              <div><span><i>控</i>RK3588主控</span><StatusPill>等待接入</StatusPill></div>
-              <div><span><i>存</i>存储与温度</span><strong>-- GB · -- ℃</strong></div>
-            </div>
+              <details className="config-disclosure">
+                <summary>查看并确认采集参数 <span>尚未配置</span></summary>
+                <div className="form-grid">
+                  <label>
+                    <span>雷达安装高度 / m</span>
+                    <input placeholder="请输入安装高度" inputMode="decimal" />
+                  </label>
+                  <label>
+                    <span>净空高度阈值 / m</span>
+                    <input placeholder="请输入报警阈值" inputMode="decimal" />
+                  </label>
+                  <label className="form-grid__full">
+                    <span>测量参数配置</span>
+                    <select defaultValue="">
+                      <option value="">请选择参数方案</option>
+                    </select>
+                  </label>
+                </div>
+              </details>
+              <div className="button-grid button-grid--control">
+                <button type="button" className="button button--green button-grid__full" disabled title="请选择任务并完成采集前检查">开始采集</button>
+                <button type="button" className="button button--warning" disabled>暂停采集</button>
+                <button type="button" className="button button--danger" disabled>停止并保存</button>
+              </div>
+              <label className="switch-row">
+                <span>
+                  <strong>自动切换下一任务</strong>
+                  <small>当前任务完成后加载下一任务</small>
+                </span>
+                <input type="checkbox" aria-label="自动切换下一任务" />
+                <i />
+              </label>
+            </section>
           </article>
         </div>
       </section>
 
-      <section className="alert-grid">
-        <article className="panel">
-          <PanelHead
-            title="异常与操作提示"
-            description="仅在诊断数据有效时确认系统正常"
-            trailing={<StatusPill>等待系统诊断</StatusPill>}
-          />
-          <div className="alert-empty">
-            <span>…</span>
-            <div><strong>诊断链路尚未接入</strong><small>接入后将在此显示净空阈值、设备异常及处理建议</small></div>
-          </div>
-        </article>
-        <article className="panel quick-status">
-          <PanelHead title="测量状态" description="当前帧测量质量摘要" />
+      <section className="dashboard-health-bar" aria-label="设备、诊断与测量状态">
+        <div className="health-alert">
+          <span>…</span>
           <div>
-            <span>测量质量<strong>暂无结果</strong></span>
-            <span>有效点比例<strong>-- %</strong></span>
-            <span>数据延迟<strong>-- ms</strong></span>
+            <strong>诊断链路尚未接入</strong>
+            <small>接入后显示净空阈值、设备异常及处理建议</small>
           </div>
-        </article>
+          <StatusPill>等待系统诊断</StatusPill>
+        </div>
+        <div className="health-devices">
+          <span><b>雷达</b><strong>等待接入</strong></span>
+          <span><b>RTK</b><strong>等待接入</strong></span>
+          <span><b>主控</b><strong>等待接入</strong></span>
+          <span><b>存储 / 温度</b><strong>-- GB · -- ℃</strong></span>
+        </div>
+        <div className="health-measurement">
+          <span>测量质量<strong>暂无结果</strong></span>
+          <span>有效点<strong>-- %</strong></span>
+          <span>延迟<strong>-- ms</strong></span>
+        </div>
       </section>
     </div>
   );
@@ -654,7 +646,7 @@ export default function Home() {
           <div className="version">CAPTURE SYSTEM · V1.0</div>
         </div>
       </aside>
-      <main>
+      <main className={activePage === "dashboard" ? "main--dashboard" : undefined}>
         <Header page={activePage} />
         <div className="page-content">
           {activePage === "dashboard" && <Dashboard />}

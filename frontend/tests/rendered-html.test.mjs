@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 async function render() {
@@ -47,4 +48,13 @@ test("renders the tunnel clearance terminal shell", async () => {
   assert.match(html, /数据回放/);
   assert.match(html, /报告导出/);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton/i);
+});
+
+test("keeps the 1920x1080 capture dashboard inside the viewport", async () => {
+  const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+
+  assert.match(css, /\.main--dashboard\s*\{[^}]*overflow:\s*hidden/i);
+  assert.match(css, /\.main--dashboard \.page-content\s*\{[^}]*height:\s*calc\(100dvh - 88px\)/i);
+  assert.match(css, /\.dashboard-page\s*\{[^}]*grid-template-rows:\s*64px 88px minmax\(0, 1fr\) 72px/i);
+  assert.match(css, /@media \(max-width:\s*1180px\)[\s\S]*?\.main--dashboard\s*\{[^}]*overflow-y:\s*auto/i);
 });
