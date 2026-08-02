@@ -41,7 +41,7 @@ backend/                                      # FastAPI后端源码与测试根�
 - FastAPI asyncio事件循环不执行ROS回调；
 - ROS预览消息只编码一次，多客户端共享同一个不可变PCV1帧；
 - 每客户端队列容量为1，新帧覆盖尚未发送的旧帧；
-- 最多两个同源浏览器客户端；
+- 最多四个同源浏览器客户端；
 - 连续发送超时会关闭慢客户端；
 - 浏览器断开不改变ROS节点、雷达或任务状态；
 - ROS桥启动失败时静态页面和健康接口仍然可用。
@@ -70,7 +70,7 @@ cd /home/cat/Project/capture_system
 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python -m pytest backend/tests -q
 ```
 
-当前自动化结果为9项通过。端到端雷达实测见
+当前自动化结果为10项通过。端到端雷达实测见
 [浏览器点云预览端到端实机测试](../docs/testing/浏览器点云预览端到端实机测试_2026-07-31.md)。
 
 ## 边界

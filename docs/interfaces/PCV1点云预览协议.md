@@ -27,7 +27,7 @@ wss://<host>/ws/v1/cloud-preview
 - 服务端不发送历史帧；
 - 每客户端最多保留一帧待发送数据，新帧覆盖旧帧；
 - 点云浮点负载不启用 `permessage-deflate`；
-- 服务端最多允许两个点云客户端；
+- 服务端最多允许四个点云客户端；
 - 当前协议只允许服务端推送。
 
 FastAPI依赖ROS预览Topic符合固定输出契约，不检查PointCloud2字段、偏移、步长、

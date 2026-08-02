@@ -41,7 +41,7 @@ async def cloud_preview_socket(websocket: WebSocket) -> None:
                 "type": "status",
                 "state": "degraded",
                 "reason": "CLIENT_LIMIT_REACHED",
-                "detail": "点云预览最多允许两个浏览器客户端",
+                "detail": "点云预览最多允许四个浏览器客户端",
             }
         )
         await websocket.close(code=1013, reason="点云客户端数量已达到上限")

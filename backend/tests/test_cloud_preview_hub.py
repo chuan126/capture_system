@@ -1,7 +1,12 @@
 import asyncio
 
+import pytest
+
 from backend.protocols.cloud_preview_v1 import CloudPreviewFrame
-from backend.websocket.cloud_preview_hub import CloudPreviewHub
+from backend.websocket.cloud_preview_hub import (
+    ClientLimitReachedError,
+    CloudPreviewHub,
+)
 
 
 def make_frame(sequence: int) -> CloudPreviewFrame:
@@ -37,3 +42,17 @@ def test_status_changes_from_waiting_to_streaming() -> None:
 
     hub.publish(make_frame(1))
     assert hub.current_status()["state"] == "streaming"
+
+
+def test_default_limit_allows_four_clients_and_rejects_fifth() -> None:
+    hub = CloudPreviewHub()
+
+    sessions = [hub.register() for _ in range(4)]
+    assert hub.client_count == 4
+
+    with pytest.raises(ClientLimitReachedError):
+        hub.register()
+
+    for session in sessions:
+        hub.unregister(session)
+    assert hub.client_count == 0

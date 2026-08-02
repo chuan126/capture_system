@@ -27,7 +27,7 @@ class CloudPreviewHub:
 
     def __init__(
         self,
-        max_clients: int = 2,
+        max_clients: int = 4,
     ) -> None:
         self._max_clients = max_clients
         self._sessions: set[CloudPreviewSession] = set()
