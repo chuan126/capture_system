@@ -93,7 +93,9 @@ flowchart LR
 | `/capture/task/events` | 拟定 `interfaces/msg/TaskEvent` | `task_manager` | 状态迁移、人工标记和异常事件 | `reliable_bounded` |
 | `/capture/recording/status` | 拟定 `interfaces/msg/RecordingStatus` | `data_recorder` | 队列、吞吐、丢弃、磁盘和会话状态 | `transient_state` |
 | `/capture/visualization/cloud_preview` | `sensor_msgs/PointCloud2` | `cloud_visualization` | 5 Hz、xyz FLOAT32、最多10,000点；保持输入SLAM世界frame，仅供预览 | `preview_best_effort` |
-| `/capture/diagnostics` | `diagnostic_msgs/DiagnosticArray` | `system_monitor` | 聚合传感器、算法和系统诊断 | `transient_state` |
+| `/capture/lidar/device_online` | `std_msgs/String` | ODIN驱动（经remap） | SDK成功接入设备的在线事件；发布器存在性用于雷达接入状态 | `transient_state` |
+| `/capture/lidar/device_offline` | `std_msgs/String` | ODIN驱动（经remap） | SDK检测到设备断开的离线事件 | `transient_state` |
+| `/capture/system/diagnostics` | `diagnostic_msgs/DiagnosticArray` | `system_monitor` | 聚合雷达、RTK、RK3588和实际数据存储诊断 | `transient_state` |
 
 若预览压缩后不再能用 `PointCloud2` 准确表达，才增加带协议版本的自定义消息。
 不能为 Web 私有格式污染核心测量 Topic。

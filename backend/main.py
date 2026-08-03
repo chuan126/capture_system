@@ -11,8 +11,10 @@ from fastapi.staticfiles import StaticFiles
 
 from backend.ros_bridge.cloud_preview_bridge import CloudPreviewBridge
 from backend.ros_bridge.rtk_bridge import RtkBridge
+from backend.ros_bridge.system_status_bridge import SystemStatusBridge
 from backend.websocket.cloud_preview_hub import CloudPreviewHub
 from backend.websocket.rtk_hub import RtkHub
+from backend.websocket.system_status_hub import SystemStatusHub
 from backend.websocket.routes import router as websocket_router
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -32,10 +34,12 @@ def create_app(
     start_ros_bridge: bool = True,
     bridge_factory: Callable[..., CloudPreviewBridge] = CloudPreviewBridge,
     rtk_bridge_factory: Callable[..., RtkBridge] = RtkBridge,
+    system_status_bridge_factory: Callable[..., SystemStatusBridge] = SystemStatusBridge,
 ) -> FastAPI:
     site_directory = (static_dir or resolve_static_dir()).resolve()
     hub = CloudPreviewHub()
     rtk_hub = RtkHub()
+    system_status_hub = SystemStatusHub()
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
@@ -48,6 +52,7 @@ def create_app(
 
         bridge: CloudPreviewBridge | None = None
         rtk_bridge: RtkBridge | None = None
+        system_status_bridge: SystemStatusBridge | None = None
         if start_ros_bridge:
             loop = asyncio.get_running_loop()
             bridge = bridge_factory(
@@ -60,9 +65,15 @@ def create_app(
             )
             rtk_started = rtk_bridge.start()
             rtk_hub.set_ros_availability(rtk_started, rtk_bridge.error)
+            system_status_bridge = system_status_bridge_factory(
+                lambda snapshot: loop.call_soon_threadsafe(system_status_hub.publish, snapshot)
+            )
+            system_started = system_status_bridge.start()
+            system_status_hub.set_ros_availability(system_started, system_status_bridge.error)
         else:
             application.state.cloud_preview_hub = hub
             application.state.rtk_hub = rtk_hub
+            application.state.system_status_hub = system_status_hub
 
         try:
             yield
@@ -71,6 +82,8 @@ def create_app(
                 bridge.stop()
             if rtk_bridge is not None:
                 rtk_bridge.stop()
+            if system_status_bridge is not None:
+                system_status_bridge.stop()
 
     application = FastAPI(
         title="Capture System Web API",
@@ -79,6 +92,7 @@ def create_app(
     )
     application.state.cloud_preview_hub = hub
     application.state.rtk_hub = rtk_hub
+    application.state.system_status_hub = system_status_hub
 
     @application.get("/api/health", tags=["system"])
     async def health() -> dict[str, str]:

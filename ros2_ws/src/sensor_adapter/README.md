@@ -14,12 +14,19 @@
 | --- | --- | --- |
 | `cloud/raw` | `/capture/lidar/points_raw` | `sensor_msgs/PointCloud2` |
 | `cloud/slam` | `/capture/lidar/points_slam` | `sensor_msgs/PointCloud2` |
+| `/manifold/driver/device_online` | `/capture/lidar/device_online` | `std_msgs/String` |
+| `/manifold/driver/device_offline` | `/capture/lidar/device_offline` | `std_msgs/String` |
 | `imu` | `/capture/imu/data` | `sensor_msgs/Imu` |
 | `odometry_hf` | `/capture/odometry/high_rate` | `nav_msgs/Odometry` |
 | `odometry` | `/capture/odometry/slam` | `nav_msgs/Odometry` |
 
 `/capture/lidar/points_slam` 仅用于 RViz2 预览和辅助诊断。核心净空计算仍使用
 带逐点 `offset_time` 的 `/capture/lidar/points_raw`。
+
+`device_online`由厂商SDK在设备发现并成功初始化后发布，其发布器随设备实例创建；
+设备断开时实例和发布器一同销毁。`system_monitor`通过稳定的
+`/capture/lidar/device_online`发布器是否存在判断雷达是否接入，不使用点云到达
+情况推断设备状态。
 
 ## 启动
 

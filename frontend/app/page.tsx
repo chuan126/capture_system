@@ -5,6 +5,8 @@ import { useState } from "react";
 import PointCloudViewer from "@/components/point-cloud/PointCloudViewer";
 import type { PointCloudViewMode } from "@/components/point-cloud/PointCloudViewer";
 import { useRtkSocket } from "@/components/rtk/useRtkSocket";
+import { useSystemStatusSocket } from "@/components/system-status/useSystemStatusSocket";
+import type { DeviceStatus, HealthState } from "@/components/system-status/systemStatusProtocol";
 
 type PageId = "dashboard" | "tasks" | "playback" | "report";
 type PlaybackTab = "result" | "history" | "logs";
@@ -120,26 +122,25 @@ function Dashboard() {
   const [viewMode, setViewMode] = useState<ViewMode>("3d");
   const rtk = useRtkSocket();
   const rtkSnapshot = rtk.snapshot;
+  const systemStatus = useSystemStatusSocket();
+  const systemSnapshot = systemStatus.snapshot;
   const modes: Array<{ id: ViewMode; label: string; disabled?: boolean }> = [
     { id: "3d", label: "三维视图" },
     { id: "top", label: "俯视图" },
     { id: "section", label: "断面视图", disabled: true },
   ];
 
-  const rtkDeviceText = rtk.connection !== "connected"
-    ? "Web连接中"
-    : rtkSnapshot?.serial_connected === true
-      ? "串口已连接"
-      : rtkSnapshot?.serial_connected === false
-        ? "串口重连中"
-        : "等待诊断";
-  const rtkTone = rtk.connection !== "connected"
+  const systemStreamAvailable = systemStatus.connection === "connected" && systemStatus.streamState === "streaming";
+  const rtkDeviceText = systemStreamAvailable ? systemSnapshot?.rtk.message ?? "检查中" : "系统检查中";
+  const rtkTone = !systemStreamAvailable
     ? "idle"
-    : rtkSnapshot?.serial_connected === true
+    : systemSnapshot?.rtk.state === "ok"
       ? "ok"
-      : rtkSnapshot?.serial_connected === false
+      : systemSnapshot?.rtk.state === "warn"
         ? "warn"
-        : "idle";
+        : systemSnapshot?.rtk.state === "error" || systemSnapshot?.rtk.state === "stale"
+          ? "danger"
+          : "idle";
   const solutionLabels: Record<number, string> = {
     0: "未定位",
     1: "单点定位",
@@ -171,6 +172,30 @@ function Dashboard() {
     ? `${rtkSnapshot.latitude.toFixed(8)}°, ${rtkSnapshot.longitude.toFixed(8)}°`
     : "--";
   const altitudeText = hasFix ? `${formatMetric(rtkSnapshot?.altitude)} m` : "--";
+  const monitorUnavailable = !systemStreamAvailable;
+  const statusText = (device: DeviceStatus | undefined, fallback: string) =>
+    monitorUnavailable ? fallback : device?.message ?? "检查中";
+  const statusState = (device: DeviceStatus | undefined): HealthState =>
+    monitorUnavailable ? "unknown" : device?.state ?? "unknown";
+  const availableBytes = Number(systemSnapshot?.storage.values?.available_bytes);
+  const storageText = monitorUnavailable
+    ? "检查中"
+    : Number.isFinite(availableBytes)
+      ? `${(availableBytes / 1024 ** 3).toFixed(1)} GiB 可用`
+      : systemSnapshot?.storage.message ?? "检查中";
+  const devices = systemSnapshot
+    ? [systemSnapshot.lidar, systemSnapshot.rtk, systemSnapshot.controller, systemSnapshot.storage]
+    : [];
+  const aggregateState: HealthState = monitorUnavailable
+    ? "unknown"
+    : devices.some((device) => device.state === "error" || device.state === "stale")
+      ? "error"
+      : devices.some((device) => device.state === "warn")
+        ? "warn"
+        : devices.length === 4 && devices.every((device) => device.state === "ok")
+          ? "ok"
+          : "unknown";
+  const aggregateText = {ok: "系统正常", warn: "系统有告警", error: "系统异常", stale: "系统异常", unknown: "系统检查中"}[aggregateState];
 
   return (
     <div className="page-stack dashboard-page">
@@ -178,14 +203,14 @@ function Dashboard() {
         <div className="health-alert">
           <span>…</span>
           <div>
-            <strong>系统状态</strong>
+            <strong className={`device-state device-state--${aggregateState}`}>{aggregateText}</strong>
           </div>
         </div>
         <div className="health-devices">
-          <span><b>雷达</b><strong>等待接入</strong></span>
-          <span><b>RTK</b><strong>{rtkDeviceText}</strong></span>
-          <span><b>控制器</b><strong>等待接入</strong></span>
-          <span><b>存储</b><strong>-- GB</strong></span>
+          <span><b>雷达</b><strong className={`device-state device-state--${statusState(systemSnapshot?.lidar)}`} title={systemSnapshot?.lidar.message}>{statusText(systemSnapshot?.lidar, "检查中")}</strong></span>
+          <span><b>RTK</b><strong className={`device-state device-state--${statusState(systemSnapshot?.rtk)}`} title={systemSnapshot?.rtk.message}>{statusText(systemSnapshot?.rtk, "检查中")}</strong></span>
+          <span><b>控制器</b><strong className={`device-state device-state--${statusState(systemSnapshot?.controller)}`} title={systemSnapshot?.controller.message}>{statusText(systemSnapshot?.controller, "检查中")}</strong></span>
+          <span><b>存储</b><strong className={`device-state device-state--${statusState(systemSnapshot?.storage)}`} title={systemSnapshot?.storage.message}>{storageText}</strong></span>
         </div>
       </section>
 

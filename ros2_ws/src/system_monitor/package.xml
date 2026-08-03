@@ -1,0 +1,13 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>system_monitor</name>
+  <version>0.1.0</version>
+  <description>统一报告雷达、RTK、RK3588资源和实际数据存储诊断。</description>
+  <maintainer email="todo@example.com">capture_system maintainers</maintainer>
+  <license>Proprietary</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>diagnostic_msgs</depend>
+  <depend>rclcpp</depend>
+  <test_depend>ament_cmake_gtest</test_depend>
+  <export><build_type>ament_cmake</build_type></export>
+</package>

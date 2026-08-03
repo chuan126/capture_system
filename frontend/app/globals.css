@@ -495,6 +495,10 @@ th { color: #7f8b9e; background: #fafbfd; font-weight: 600; white-space: nowrap;
 .health-devices > span:last-child, .health-measurement > span:last-child { border-right: 0; }
 .health-devices b, .health-measurement > span { color: var(--muted); font-size: 10px; font-weight: 500; }
 .health-devices strong, .health-measurement strong { overflow: hidden; color: var(--text); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.device-state--ok { color: #17845b !important; }
+.device-state--warn { color: #a76500 !important; }
+.device-state--error, .device-state--stale { color: #bd2c2c !important; }
+.device-state--unknown { color: var(--muted) !important; }
 .health-measurement { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .health-measurement > span { padding-right: 8px; padding-left: 8px; }
 

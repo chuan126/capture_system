@@ -3,7 +3,7 @@
 ## 1. 边界
 
 浏览器通过FastAPI同源WebSocket`/ws/v1/rtk`接收RTK最新值。该协议只汇总
-`/capture/rtk/status`、`/capture/rtk/fix`和`rtk_driver/serial`诊断的当前字段，
+`/capture/rtk/status`和`/capture/rtk/fix`的当前定位字段，
 不表达质量等级、稳定窗口或进出洞结论。
 
 每个浏览器客户端队列容量为1，最高发送5 Hz；新快照覆盖尚未发送的旧快照。浏览器
@@ -31,8 +31,8 @@
   "type": "rtk_snapshot",
   "sequence": 7,
   "emitted_at_ns": 1785738332197270906,
-  "serial_connected": true,
-  "serial_message": "串口已连接",
+  "serial_connected": null,
+  "serial_message": "等待RTK诊断",
   "status_stamp_ns": 1785738332156519368,
   "event_mask": 2,
   "rmc_validity": 86,
@@ -58,7 +58,8 @@
 
 ## 4. 页面表达
 
-- 串口状态只来自`serial_connected`和`serial_message`；
+- 串口连接状态来自`/ws/v1/system-status`；首版遗留的`serial_connected`和
+  `serial_message`字段保留兼容，但不再作为页面状态来源；
 - 解状态文字由`gps_state`固定映射；
 - 卫星数、HDOP、PDOP和RMC状态直接显示；
 - `fix_status`为`NavSatStatus.STATUS_NO_FIX`时，当前坐标和高度显示为`--`；

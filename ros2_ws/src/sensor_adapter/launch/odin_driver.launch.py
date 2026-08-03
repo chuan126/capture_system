@@ -12,6 +12,11 @@ TOPIC_REMAPPINGS = (
     ("odometry", "/capture/odometry/slam"),
 )
 
+DRIVER_EVENT_REMAPPINGS = (
+    ("device_online", "/capture/lidar/device_online"),
+    ("device_offline", "/capture/lidar/device_offline"),
+)
+
 
 def generate_launch_description():
     vendor_device_prefix = LaunchConfiguration("vendor_device_prefix")
@@ -26,6 +31,13 @@ def generate_launch_description():
         ([vendor_device_prefix, "/", source_suffix], target_topic)
         for source_suffix, target_topic in TOPIC_REMAPPINGS
     ]
+    remappings.extend(
+        (
+            ["/", topic_prefix, "/driver/", source_suffix],
+            target_topic,
+        )
+        for source_suffix, target_topic in DRIVER_EVENT_REMAPPINGS
+    )
 
     driver = Node(
         package="odin_ros_driver_rev1",

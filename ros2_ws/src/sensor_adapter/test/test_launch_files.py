@@ -23,6 +23,10 @@ def test_driver_launch_declares_expected_topic_contract():
         ("odometry_hf", "/capture/odometry/high_rate"),
         ("odometry", "/capture/odometry/slam"),
     )
+    assert module.DRIVER_EVENT_REMAPPINGS == (
+        ("device_online", "/capture/lidar/device_online"),
+        ("device_offline", "/capture/lidar/device_offline"),
+    )
     assert module.generate_launch_description() is not None
 
 
