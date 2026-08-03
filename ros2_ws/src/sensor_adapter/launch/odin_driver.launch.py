@@ -2,6 +2,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 TOPIC_REMAPPINGS = (
@@ -17,6 +18,15 @@ DRIVER_EVENT_REMAPPINGS = (
     ("device_offline", "/capture/lidar/device_offline"),
 )
 
+CHANNEL_ARGUMENT_DEFAULTS = {
+    "enable_raw_point": "true",
+    "enable_slam_point": "false",
+    "enable_image0": "false",
+    "enable_image1": "false",
+    "enable_imu": "true",
+    "enable_odom": "true",
+}
+
 
 def generate_launch_description():
     vendor_device_prefix = LaunchConfiguration("vendor_device_prefix")
@@ -25,6 +35,10 @@ def generate_launch_description():
     image_height = LaunchConfiguration("image_height")
     image_fps = LaunchConfiguration("image_fps")
     image_format = LaunchConfiguration("image_format")
+    channel_parameters = {
+        name: ParameterValue(LaunchConfiguration(name), value_type=bool)
+        for name in CHANNEL_ARGUMENT_DEFAULTS
+    }
 
     # remap 直接作用于厂商发布器，不创建中继节点，也不复制点云消息。
     remappings = [
@@ -51,6 +65,7 @@ def generate_launch_description():
                 "image_fps": image_fps,
                 "image_format": image_format,
                 "topic_prefix": topic_prefix,
+                **channel_parameters,
             }
         ],
         remappings=remappings,
@@ -72,6 +87,10 @@ def generate_launch_description():
             DeclareLaunchArgument("image_height", default_value="0"),
             DeclareLaunchArgument("image_fps", default_value="0"),
             DeclareLaunchArgument("image_format", default_value="mjpeg"),
+            *[
+                DeclareLaunchArgument(name, default_value=default_value)
+                for name, default_value in CHANNEL_ARGUMENT_DEFAULTS.items()
+            ],
             driver,
         ]
     )

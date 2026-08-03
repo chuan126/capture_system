@@ -44,11 +44,27 @@ source /home/cat/Project/capture_system/ros2_ws/install/setup.bash
 ros2 launch sensor_adapter odin_driver.launch.py
 ```
 
+该入口面向净空算法，默认开启原始点云、IMU 和里程计，关闭 SLAM 点云及两路
+图像，以减少 UDP 带宽和设备端处理负载。通道可以在启动时显式覆盖：
+
+```bash
+ros2 launch sensor_adapter odin_driver.launch.py \
+  enable_slam_point:=true \
+  enable_image0:=false \
+  enable_image1:=false
+```
+
+六个通道参数均为布尔值：`enable_raw_point`、`enable_slam_point`、
+`enable_image0`、`enable_image1`、`enable_imu` 和 `enable_odom`。通道选择只允许
+在启动前配置，运行过程中修改参数不会重启雷达数据流。
+
 同时启动雷达驱动和 RViz2 预览：
 
 ```bash
 ros2 launch sensor_adapter odin_rviz.launch.py
 ```
+
+RViz2 入口默认额外开启 SLAM 点云，但仍关闭两路图像。
 
 如果厂商设备前缀变化，可在启动时覆盖：
 
@@ -59,7 +75,7 @@ ros2 launch sensor_adapter odin_driver.launch.py \
 
 ## 明确边界
 
-- 不调用或修改 ODIN SDK；
+- 不从业务代码调用 ODIN SDK；适配层仅通过厂商驱动已登记的启动参数选择通道；
 - 不动态发现设备前缀；
 - 不校验点云字段或时间戳；
 - 不修改坐标系和 `frame_id`；

@@ -27,6 +27,14 @@ def test_driver_launch_declares_expected_topic_contract():
         ("device_online", "/capture/lidar/device_online"),
         ("device_offline", "/capture/lidar/device_offline"),
     )
+    assert module.CHANNEL_ARGUMENT_DEFAULTS == {
+        "enable_raw_point": "true",
+        "enable_slam_point": "false",
+        "enable_image0": "false",
+        "enable_image1": "false",
+        "enable_imu": "true",
+        "enable_odom": "true",
+    }
     assert module.generate_launch_description() is not None
 
 

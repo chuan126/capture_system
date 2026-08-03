@@ -3,6 +3,25 @@
 FastAPI是浏览器访问RK3588的唯一HTTP和WebSocket入口。当前已实现静态前端托管、
 `/api/health`、ROS 2点云桥、RTK详情桥、统一系统状态桥及相应实时WebSocket。
 
+## TXT下载链路测试
+
+当前提供两个仅用于验证电脑浏览器下载链路的临时同源接口：
+
+```text
+GET /api/v1/report-export-test             # 返回固定测试任务摘要与模拟曲线
+GET /api/v1/report-export-test/download    # 下载固定测试TXT文件
+```
+
+测试文件位于：
+
+```text
+data/tasks/browser-download-test/exports/test.txt    # 浏览器下载链路测试文件
+```
+
+该文件及接口中的净空数值均为模拟测试数据，不是正式测量结果。正式实现应由
+`data_recorder`将结构化净空结果写入任务目录的`results.sqlite3`，TXT只在需要
+下载时生成到该任务的`exports/`目录，不能作为算法结果的唯一数据源。
+
 ## 文件结构
 
 ```text
@@ -99,7 +118,7 @@ cd /home/cat/Project/capture_system
 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python -m pytest backend/tests -q
 ```
 
-当前后端自动化结果为19项通过。端到端雷达实测见
+当前后端自动化结果为21项通过。端到端雷达实测见
 [浏览器点云预览端到端实机测试](../docs/testing/浏览器点云预览端到端实机测试_2026-07-31.md)。
 
 ## 边界

@@ -102,8 +102,13 @@ class AsyncQueue {
   }
 
   void Stop() {
-    if (!running_) return;
-    running_ = false;
+    if (!running_.exchange(false)) return;
+    {
+      // 退出阶段的数据不再具有业务意义，丢弃积压项以保证设备可以有界停止。
+      std::lock_guard<std::mutex> lock(mutex_);
+      std::queue<T> empty;
+      queue_.swap(empty);
+    }
     cv_.notify_all();
     if (worker_.joinable()) {
       worker_.join();
@@ -112,6 +117,10 @@ class AsyncQueue {
 
   bool Push(T&& item) {
     std::lock_guard<std::mutex> lock(mutex_);
+    // SDK 回调可能与关闭流程并发；队列停止后必须拒绝新数据。
+    if (!running_.load()) {
+      return false;
+    }
     if (queue_.size() >= max_size_) {
       ++drop_count_;
       if (drop_count_ % 100 == 1) {
@@ -387,36 +396,42 @@ class odinRosDriver {
 
   // Handle functions - push to async queue (fast, non-blocking)
   void HandleRawPointCloud(const sdk::OdinPointCloudPacket &packet) {
+    if (!accepting_callbacks_.load(std::memory_order_acquire)) return;
     if (raw_point_queue_) {
       raw_point_queue_->Push(sdk::OdinPointCloudPacket(packet));
     }
   }
 
   void HandleSlamPointCloud(const sdk::OdinSlamPacket &packet) {
+    if (!accepting_callbacks_.load(std::memory_order_acquire)) return;
     if (slam_point_queue_) {
       slam_point_queue_->Push(sdk::OdinSlamPacket(packet));
     }
   }
 
   void HandleImage(const sdk::OdinImagePacket &packet) {
+    if (!accepting_callbacks_.load(std::memory_order_acquire)) return;
     if (image0_queue_) {
       image0_queue_->Push(sdk::OdinImagePacket(packet));
     }
   }
 
   void HandleImage2(const sdk::OdinImagePacket &packet) {
+    if (!accepting_callbacks_.load(std::memory_order_acquire)) return;
     if (image1_queue_) {
       image1_queue_->Push(sdk::OdinImagePacket(packet));
     }
   }
 
   void HandleImu(const sdk::OdinImuPacket &packet) {
+    if (!accepting_callbacks_.load(std::memory_order_acquire)) return;
     if (imu_queue_) {
       imu_queue_->Push(sdk::OdinImuPacket(packet));
     }
   }
 
   void HandleOdom(const sdk::OdinOdomPacket &packet, sdk::OdomSourceType odom_type) {
+    if (!accepting_callbacks_.load(std::memory_order_acquire)) return;
     if (odom_queue_) {
       odom_queue_->Push(OdomQueueItem{packet, odom_type});
     }
@@ -462,41 +477,48 @@ class odinRosDriver {
     std::string pkg_path = getPackageSourceDirectory();
     if (pkg_path.empty()) {
       LogWarn("Could not find package directory, using default channel config");
-      return;
+    } else {
+      std::string config_file = pkg_path + "/config/control_command.yaml";
+      try {
+        YAML::Node config = YAML::LoadFile(config_file);
+        if (!config["register_keys"]) {
+          LogWarn("Missing 'register_keys' in %s, using defaults", config_file.c_str());
+        } else {
+          YAML::Node keys = config["register_keys"];
+
+          if (keys["enable_raw_point"]) {
+            enable_raw_point_ = keys["enable_raw_point"].as<int>() != 0;
+          }
+          if (keys["enable_slam_point"]) {
+            enable_slam_point_ = keys["enable_slam_point"].as<int>() != 0;
+          }
+          if (keys["enable_image0"]) {
+            enable_image0_ = keys["enable_image0"].as<int>() != 0;
+          }
+          if (keys["enable_image1"]) {
+            enable_image1_ = keys["enable_image1"].as<int>() != 0;
+          }
+          if (keys["enable_imu"]) {
+            enable_imu_ = keys["enable_imu"].as<int>() != 0;
+          }
+          if (keys["enable_odom"]) {
+            enable_odom_ = keys["enable_odom"].as<int>() != 0;
+          }
+
+          LogInfo("Loaded channel config from %s", config_file.c_str());
+        }
+      } catch (const std::exception& e) {
+        LogWarn("Failed to load %s: %s, using defaults", config_file.c_str(), e.what());
+      }
     }
 
-    std::string config_file = pkg_path + "/config/control_command.yaml";
-    try {
-      YAML::Node config = YAML::LoadFile(config_file);
-      if (!config["register_keys"]) {
-        LogWarn("Missing 'register_keys' in %s, using defaults", config_file.c_str());
-        return;
-      }
-      YAML::Node keys = config["register_keys"];
-
-      if (keys["enable_raw_point"]) {
-        enable_raw_point_ = keys["enable_raw_point"].as<int>() != 0;
-      }
-      if (keys["enable_slam_point"]) {
-        enable_slam_point_ = keys["enable_slam_point"].as<int>() != 0;
-      }
-      if (keys["enable_image0"]) {
-        enable_image0_ = keys["enable_image0"].as<int>() != 0;
-      }
-      if (keys["enable_image1"]) {
-        enable_image1_ = keys["enable_image1"].as<int>() != 0;
-      }
-      if (keys["enable_imu"]) {
-        enable_imu_ = keys["enable_imu"].as<int>() != 0;
-      }
-      if (keys["enable_odom"]) {
-        enable_odom_ = keys["enable_odom"].as<int>() != 0;
-      }
-
-      LogInfo("Loaded channel config from %s", config_file.c_str());
-    } catch (const std::exception& e) {
-      LogWarn("Failed to load %s: %s, using defaults", config_file.c_str(), e.what());
-    }
+    // 部署参数优先于厂商 YAML，使适配层可以按业务场景关闭无用通道。
+    enable_raw_point_ = GetParam<bool>("enable_raw_point", enable_raw_point_);
+    enable_slam_point_ = GetParam<bool>("enable_slam_point", enable_slam_point_);
+    enable_image0_ = GetParam<bool>("enable_image0", enable_image0_);
+    enable_image1_ = GetParam<bool>("enable_image1", enable_image1_);
+    enable_imu_ = GetParam<bool>("enable_imu", enable_imu_);
+    enable_odom_ = GetParam<bool>("enable_odom", enable_odom_);
   }
 
   void AdvertiseTopics() {
@@ -822,6 +844,7 @@ class odinRosDriver {
     if (callbacks_registered_) {
       return;
     }
+    accepting_callbacks_.store(true, std::memory_order_release);
     sdk::RegisterPointCloudCallback(device_handle_, &odinRosDriver::PointCloudCallback, this);
     sdk::RegisterSlamCallback(device_handle_, &odinRosDriver::SlamCallback, this);
     sdk::RegisterImageCallback(device_handle_, &odinRosDriver::ImageCallback, this);
@@ -871,6 +894,8 @@ class odinRosDriver {
     QueryAndPrintSensorCapabilities();
 
     // Step 5: Configure all data streams (query capability per channel)
+    // 只有 SLAM 与里程计通道同时开启时才需要帧同步，否则 SDK 会无意义地积压单边数据。
+    sdk::EnableSlamOdomSyncForDevice(device_handle_, enable_slam_point_ && enable_odom_, 10);
     ConfigureStreams(sdk::OdinTransportMode::kUdp);
 
     return true;
@@ -1285,13 +1310,10 @@ class odinRosDriver {
 #endif
 
   void Shutdown() {
-    // Stop async queues first to prevent callbacks during disconnect
-    if (raw_point_queue_) raw_point_queue_->Stop();
-    if (slam_point_queue_) slam_point_queue_->Stop();
-    if (image0_queue_) image0_queue_->Stop();
-    if (image1_queue_) image1_queue_->Stop();
-    if (imu_queue_) imu_queue_->Stop();
-    if (odom_queue_) odom_queue_->Stop();
+    if (shutting_down_.exchange(true)) return;
+
+    // 先关闭回调入口，再断开 SDK；DisconnectDevice 返回后网络回调线程已停止。
+    accepting_callbacks_.store(false, std::memory_order_release);
 
     if (connected_ && device_handle_ != sdk::kInvalidDeviceHandle) {
       RequestStandbyMode();
@@ -1299,6 +1321,14 @@ class odinRosDriver {
       connected_ = false;
       device_handle_ = sdk::kInvalidDeviceHandle;
     }
+    callbacks_registered_ = false;
+
+    if (raw_point_queue_) raw_point_queue_->Stop();
+    if (slam_point_queue_) slam_point_queue_->Stop();
+    if (image0_queue_) image0_queue_->Stop();
+    if (image1_queue_) image1_queue_->Stop();
+    if (imu_queue_) imu_queue_->Stop();
+    if (odom_queue_) odom_queue_->Stop();
   }
 
   RosTime ToRosTime(uint64_t timestamp) const {
@@ -1889,6 +1919,8 @@ class odinRosDriver {
   sdk::OdinOperatingMode desired_mode_ = sdk::OdinOperatingMode::kNormal;
   bool connected_ = false;
   bool callbacks_registered_ = false;
+  std::atomic<bool> accepting_callbacks_{false};
+  std::atomic<bool> shutting_down_{false};
 
   std::string device_sn_;     // SN of the actually connected device
   std::string device_model_;  // Device model (e.g., "ODIN2")

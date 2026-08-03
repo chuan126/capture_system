@@ -12,6 +12,23 @@ type PageId = "dashboard" | "tasks" | "playback" | "report";
 type PlaybackTab = "result" | "history" | "logs";
 type TaskTab = "pending" | "completed" | "abnormal";
 type ViewMode = "3d" | "top" | "section";
+type ReportLoadState = "idle" | "loading" | "ready" | "error";
+
+type ReportTestData = {
+  task_id: string;
+  task_name: string;
+  tunnel_name: string;
+  lane: string;
+  inspection_time: string;
+  distance_m: number;
+  minimum_clearance_m: number;
+  valid_points: number;
+  quality_status: string;
+  file_name: string;
+  file_size_bytes: number;
+  download_url: string;
+  clearance_points: Array<{ distance_m: number; clearance_m: number }>;
+};
 
 const navigation: Array<{ id: PageId; label: string; index: string }> = [
   { id: "dashboard", label: "采集首页", index: "01" },
@@ -521,88 +538,156 @@ function MeasurementTable({ message }: { message: string }) {
 }
 
 function Report() {
+  const [reportData, setReportData] = useState<ReportTestData | null>(null);
+  const [loadState, setLoadState] = useState<ReportLoadState>("idle");
+
+  const selectReportTask = async (taskId: string) => {
+    if (!taskId) {
+      setReportData(null);
+      setLoadState("idle");
+      return;
+    }
+
+    setLoadState("loading");
+    try {
+      const response = await fetch("/api/v1/report-export-test", { cache: "no-store" });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      setReportData(await response.json() as ReportTestData);
+      setLoadState("ready");
+    } catch {
+      setReportData(null);
+      setLoadState("error");
+    }
+  };
+
+  const formatFileSize = (bytes: number) => `${Math.max(1, Math.ceil(bytes / 1024))} KB`;
+  const chartPoints = reportData?.clearance_points.map((point) => {
+    const x = reportData.distance_m > 0 ? point.distance_m / reportData.distance_m * 1000 : 0;
+    const y = Math.max(0, Math.min(300, (6 - point.clearance_m) / 1.5 * 300));
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+  const minimumPoint = reportData && reportData.clearance_points.length > 0
+    ? reportData.clearance_points.reduce((minimum, point) =>
+        point.clearance_m < minimum.clearance_m ? point : minimum
+      )
+    : null;
+  const minimumPointPosition = minimumPoint && reportData
+    ? {
+        x: reportData.distance_m > 0 ? minimumPoint.distance_m / reportData.distance_m * 1000 : 0,
+        y: Math.max(0, Math.min(300, (6 - minimumPoint.clearance_m) / 1.5 * 300)),
+      }
+    : null;
+
   return (
-    <div className="page-stack">
-      <article className="panel report-filter">
-        <div>
-          <span>检测结果输出</span>
-          <strong>选择已完成任务并设置导出内容</strong>
+    <div className="page-stack report-page">
+      <article className="panel report-taskbar">
+        <label className="report-task-select">
+          <span>检测任务</span>
+          <select defaultValue="" onChange={(event) => void selectReportTask(event.target.value)}>
+            <option value="">请选择已完成任务</option>
+            <option value="browser-download-test">浏览器下载测试任务（模拟数据）</option>
+          </select>
+        </label>
+        <div className="report-key-metric">
+          <span>最低净空</span>
+          <strong>{reportData ? reportData.minimum_clearance_m.toFixed(2) : "--"} <small>m</small></strong>
         </div>
-        <label><span>检测任务</span><select defaultValue=""><option value="">请选择已完成任务</option></select></label>
-        <button type="button" className="button button--primary">载入报告信息</button>
+        <div className="report-key-metric">
+          <span>有效测点</span>
+          <strong>{reportData?.valid_points ?? "--"}</strong>
+        </div>
+        <div className="report-key-metric">
+          <span>质量状态</span>
+          <strong className={reportData ? "report-key-metric__test" : "report-key-metric__muted"}>
+            {loadState === "loading" ? "正在载入" : reportData?.quality_status ?? "待选择任务"}
+          </strong>
+        </div>
       </article>
 
       <section className="report-layout">
-        <div className="report-main">
-          <article className="panel">
-            <PanelHead title="报告导出" description="选择文件类型与报告内容" />
-            <div className="export-list">
-              <label className="export-option">
-                <input type="radio" name="exportType" defaultChecked />
-                <div className="file-icon">CSV</div>
-                <span><strong>测量数据表</strong><small>逐测量点净空、位置与质量状态</small></span>
-                <i>数据表格</i>
-              </label>
-              <label className="export-option">
-                <input type="radio" name="exportType" />
-                <div className="file-icon file-icon--blue">PDF</div>
-                <span><strong>综合检测报告</strong><small>任务摘要、最低净空与诊断信息</small></span>
-                <i>正式报告</i>
-              </label>
+        <aside className="panel report-export-panel">
+          <PanelHead title="文件导出" description="将当前任务检测结果导出到本地" />
+          <div className="report-file-card">
+            <div className="report-file-icon">TXT</div>
+            <div>
+              <strong>检测结果文件</strong>
+              <small>文本文件 · TXT</small>
             </div>
-            <fieldset className="report-content-options">
-              <legend>报告内容</legend>
-              <label><input type="checkbox" defaultChecked />任务基本信息</label>
-              <label><input type="checkbox" defaultChecked />进出隧道 RTK</label>
-              <label><input type="checkbox" defaultChecked />最低净空结果</label>
-              <label><input type="checkbox" defaultChecked />净空变化曲线</label>
-              <label><input type="checkbox" defaultChecked />数据质量摘要</label>
-              <label><input type="checkbox" />运行日志摘要</label>
-            </fieldset>
-            <div className="export-actions">
-              <button type="button" className="button button--soft">预览报告</button>
-              <button type="button" className="button button--primary">生成并导出</button>
+            <span className="report-file-tag">测试文件</span>
+          </div>
+          <div className="report-file-name">
+            <span>导出文件名</span>
+            <strong>{reportData ? `${reportData.file_name} · ${formatFileSize(reportData.file_size_bytes)}` : "选择任务后显示文件"}</strong>
+          </div>
+          <div className="report-export-hint">
+            <i>i</i>
+            <p>当前下载的是固定测试文件，仅用于验证电脑浏览器到设备端的文件下载链路。</p>
+          </div>
+          <div className="report-export-footer">
+            <div className="report-export-state">
+              <i className={loadState === "ready" ? "ready" : loadState === "error" ? "error" : ""} />
+              <span>
+                <strong>{loadState === "ready" ? "测试文件已就绪" : loadState === "error" ? "测试文件载入失败" : loadState === "loading" ? "正在检查测试文件" : "等待选择任务"}</strong>
+                <small>{loadState === "error" ? "请确认FastAPI服务和设备端测试文件可用" : loadState === "ready" ? "可下载到当前电脑的浏览器默认目录" : "请选择浏览器下载测试任务"}</small>
+              </span>
             </div>
-          </article>
-
-          <article className="panel report-preview">
-            <PanelHead
-              title="报告预览"
-              description="加载任务后显示报告页面"
-              trailing={<span className="panel-tag panel-tag--muted">未生成</span>}
-            />
-            <div className="paper">
-              <div className="paper__header"><i>T</i><span>隧道净空综合检测报告</span></div>
-              <EmptyState icon="▧" title="暂无报告预览" description="选择任务并点击预览报告" />
-              <div className="paper__footer">三维采集系统 · 隧道净空测量显控终端</div>
-            </div>
-          </article>
-        </div>
-
-        <aside className="report-side">
-          <article className="panel">
-            <PanelHead
-              title="任务摘要"
-              description="随所选任务自动更新"
-              trailing={<span className="panel-tag panel-tag--muted">未选择</span>}
-            />
-            <div className="summary">
-              <div><span>隧道名称</span><strong>--</strong></div>
-              <div><span>任务编号</span><strong>--</strong></div>
-              <div><span>检测车道</span><strong>--</strong></div>
-              <div><span>采集时长</span><strong>--:--</strong></div>
-              <div><span>最低净空</span><strong>-- m</strong></div>
-              <div><span>入口 RTK</span><strong>待选择任务</strong></div>
-              <div><span>出口 RTK</span><strong>待选择任务</strong></div>
-              <div><span>有效测量点</span><strong>--</strong></div>
-              <div><span>有效帧数</span><strong>--</strong></div>
-            </div>
-          </article>
-          <article className="panel file-status">
-            <PanelHead title="导出状态" description="报告文件生成情况" />
-            <div><i>↧</i><span><strong>尚未生成文件</strong><small>完成报告设置后开始导出</small></span></div>
-          </article>
+            {reportData ? (
+              <a className="button button--primary report-download-button" href={reportData.download_url} download={reportData.file_name}>下载测试 TXT</a>
+            ) : (
+              <button type="button" className="button button--primary" disabled>下载测试 TXT</button>
+            )}
+          </div>
         </aside>
+
+        <article className="panel report-overview">
+          <PanelHead
+            title="任务数据概览"
+            description="查看所选任务的基本信息与净空高度变化"
+            trailing={<span className={`panel-tag${reportData ? " panel-tag--test" : " panel-tag--muted"}`}>{reportData ? "模拟数据" : "未选择"}</span>}
+          />
+          <div className="report-basic-info">
+            <div><span>隧道名称</span><strong>{reportData?.tunnel_name ?? "--"}</strong></div>
+            <div><span>任务编号</span><strong>{reportData?.task_id ?? "--"}</strong></div>
+            <div><span>检测车道</span><strong>{reportData?.lane ?? "--"}</strong></div>
+            <div><span>检测时间</span><strong>{reportData?.inspection_time ?? "--"}</strong></div>
+            <div><span>检测里程</span><strong>{reportData ? `${reportData.distance_m.toFixed(1)} m` : "-- m"}</strong></div>
+            <div><span>有效测点</span><strong>{reportData?.valid_points ?? "--"}</strong></div>
+          </div>
+          <div className="report-chart-head">
+            <div>
+              <strong>净空高度曲线</strong>
+              <span>随车辆相对里程变化</span>
+            </div>
+            <div className="report-chart-legend"><i /><span>净空高度</span></div>
+          </div>
+          <div className="report-clearance-chart">
+            <div className="report-chart-grid" />
+            {chartPoints && (
+              <svg className="report-chart-plot" viewBox="0 0 1000 300" preserveAspectRatio="none" aria-label="模拟净空高度曲线">
+                <polyline points={chartPoints} />
+                {minimumPointPosition && <circle cx={minimumPointPosition.x} cy={minimumPointPosition.y} r="7" />}
+              </svg>
+            )}
+            <div className="report-chart-y-title">净空高度（m）</div>
+            <div className="report-chart-y-axis">
+              <span>6.0</span><span>5.5</span><span>5.0</span><span>4.5</span>
+            </div>
+            <div className="report-chart-x-axis">
+              <span>0</span><span>25</span><span>50</span><span>75</span><span>100</span>
+            </div>
+            <div className="report-chart-x-title">相对里程（m）</div>
+            {!reportData && (
+              <EmptyState
+                compact
+                icon={loadState === "error" ? "!" : "⌁"}
+                title={loadState === "error" ? "测试数据载入失败" : "暂无净空曲线"}
+                description={loadState === "error" ? "请检查FastAPI和测试文件" : "选择测试任务后显示模拟曲线"}
+              />
+            )}
+          </div>
+        </article>
       </section>
     </div>
   );

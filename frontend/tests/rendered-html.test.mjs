@@ -66,6 +66,18 @@ test("renders the tunnel clearance terminal shell", async () => {
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton/i);
 });
 
+test("keeps report export focused on one TXT file and task data", async () => {
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+
+  assert.match(page, /下载测试 TXT/);
+  assert.match(page, /browser-download-test/);
+  assert.match(page, /\/api\/v1\/report-export-test/);
+  assert.match(page, /任务数据概览/);
+  assert.match(page, /净空高度曲线/);
+  assert.doesNotMatch(page, /综合检测报告/);
+  assert.doesNotMatch(page, /报告内容/);
+});
+
 test("keeps the 1920x1080 capture dashboard inside the viewport", async () => {
   const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
 

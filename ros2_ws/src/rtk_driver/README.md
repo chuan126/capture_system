@@ -101,3 +101,6 @@ ros2 topic echo /diagnostics diagnostic_msgs/msg/DiagnosticArray --once
 ros2 topic echo /capture/rtk/fix sensor_msgs/msg/NavSatFix
 ros2 topic echo /capture/rtk/status interfaces/msg/RtkStatus
 ```
+
+需要在不占用真实RTK设备时验证从串口解析到浏览器显示的完整链路，参见
+[RTK伪串口测试](./伪串口测试.md)。

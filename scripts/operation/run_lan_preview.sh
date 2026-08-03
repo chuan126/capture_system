@@ -126,7 +126,7 @@ if ! ros2 pkg prefix system_monitor >/dev/null 2>&1; then
 fi
 
 echo "正在启动ODIN雷达驱动……"
-setsid --wait ros2 launch sensor_adapter odin_driver.launch.py &
+setsid --wait ros2 launch sensor_adapter odin_driver.launch.py enable_slam_point:=true &
 child_pids+=("$!")
 
 echo "正在启动SLAM点云预览节点……"

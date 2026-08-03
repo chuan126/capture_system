@@ -2,6 +2,8 @@
 #include <cstring>
 #include <vector>
 
+#include "logger.h"
+
 namespace odin {
 namespace sdk {
 
@@ -48,9 +50,22 @@ bool UdpTransport::Open(const ITransportAddress& local_address) {
   // Set receive buffer size to 8MB to reduce packet loss on high-speed data transfer
   // This requires net.core.rmem_max >= 8388608 on Linux
   int rcvbuf_size = 8 * 1024 * 1024;  // 8MB
-  if (setsockopt(socket_, SOL_SOCKET, SO_RCVBUF, 
+  if (setsockopt(socket_, SOL_SOCKET, SO_RCVBUF,
                  reinterpret_cast<const char*>(&rcvbuf_size), sizeof(rcvbuf_size)) != 0) {
-    // Failed to set buffer size, continue anyway with default
+    LOG_WARN("UdpTransport: failed to request %d-byte receive buffer\n", rcvbuf_size);
+  }
+
+  int actual_rcvbuf_size = 0;
+  socklen_t option_length = sizeof(actual_rcvbuf_size);
+  if (getsockopt(socket_, SOL_SOCKET, SO_RCVBUF,
+                 reinterpret_cast<char*>(&actual_rcvbuf_size), &option_length) != 0) {
+    LOG_WARN("UdpTransport: failed to query effective receive buffer size\n");
+  } else if (actual_rcvbuf_size < rcvbuf_size) {
+    LOG_WARN("UdpTransport: effective receive buffer is only %d bytes; requested %d bytes. "
+             "Increase net.core.rmem_max to avoid packet loss.\n",
+             actual_rcvbuf_size, rcvbuf_size);
+  } else {
+    LOG_INFO("UdpTransport: effective receive buffer is %d bytes\n", actual_rcvbuf_size);
   }
 
   local_address_ = *net_addr;
