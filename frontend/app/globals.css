@@ -390,6 +390,7 @@ th { color: #7f8b9e; background: #fafbfd; font-weight: 600; white-space: nowrap;
 .dashboard-main > .panel { display: flex; min-height: 0; flex-direction: column; padding: 14px; }
 .dashboard-main > .panel > .panel-head { margin-bottom: 9px; }
 .dashboard-main > .panel > .chart { flex: 1; min-height: 0; height: auto; }
+.dashboard-cloud-panel { position: relative; }
 .dashboard-cloud-panel .cloud-toolbar { flex: 0 0 auto; margin-bottom: 9px; }
 .dashboard-cloud-panel .dashboard-cloud-stage { flex: 1; min-height: 0; }
 
@@ -768,7 +769,8 @@ table {
   .health-devices { border: 0; }
   .task-page-grid { grid-template-columns: 1fr; }
   .cloud-stage { min-height: 570px; }
-  .dashboard-cloud-stage { min-height: 380px; }
+  .dashboard-cloud-panel .dashboard-cloud-stage { flex: 0 0 380px; min-height: 380px; }
+  .dashboard-main > .panel > .chart { flex: 0 0 168px; min-height: 168px; height: 168px; }
 }
 
 @media (max-width: 760px) {
@@ -800,7 +802,8 @@ table {
   .cloud-toolbar { grid-template-columns: 1fr; }
   .cloud-toolbar .panel-tag { position: absolute; top: 17px; right: 17px; }
   .cloud-stage { min-height: 450px; }
-  .dashboard-cloud-stage { min-height: 340px; }
+  .dashboard-cloud-panel .dashboard-cloud-stage { flex-basis: 340px; min-height: 340px; }
+  .dashboard-main > .panel > .chart { flex-basis: 190px; min-height: 190px; height: 190px; }
   .cloud-stage__footer { align-items: flex-start; flex-direction: column; gap: 5px; }
   .operation-panel .tunnel-markers { grid-template-columns: 1fr; }
   .config-disclosure .form-grid { position: static; border: 0; border-top: 1px solid var(--line-soft); border-radius: 0; box-shadow: none; }

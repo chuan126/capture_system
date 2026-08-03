@@ -74,3 +74,17 @@ test("keeps the 1920x1080 capture dashboard inside the viewport", async () => {
   assert.match(css, /\.dashboard-page\s*\{[^}]*grid-template-rows:\s*64px minmax\(0, 1fr\)/i);
   assert.match(css, /@media \(max-width:\s*1180px\)[\s\S]*?\.main--dashboard\s*\{[^}]*overflow-y:\s*auto/i);
 });
+
+test("keeps dashboard visualizations visible at responsive breakpoints", async () => {
+  const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+  const tabletStart = css.indexOf("@media (max-width: 1180px)");
+  const mobileStart = css.indexOf("@media (max-width: 760px)");
+  const tabletRules = css.slice(tabletStart, mobileStart);
+  const mobileRules = css.slice(mobileStart);
+
+  assert.ok(tabletStart >= 0 && mobileStart > tabletStart);
+  assert.match(tabletRules, /\.dashboard-cloud-panel \.dashboard-cloud-stage\s*\{[^}]*flex:\s*0 0 380px[^}]*min-height:\s*380px/i);
+  assert.match(tabletRules, /\.dashboard-main > \.panel > \.chart\s*\{[^}]*min-height:\s*168px/i);
+  assert.match(mobileRules, /\.dashboard-cloud-panel \.dashboard-cloud-stage\s*\{[^}]*flex-basis:\s*340px[^}]*min-height:\s*340px/i);
+  assert.match(mobileRules, /\.dashboard-main > \.panel > \.chart\s*\{[^}]*min-height:\s*190px/i);
+});
