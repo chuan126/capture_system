@@ -126,24 +126,21 @@ function Dashboard() {
 
   return (
     <div className="page-stack dashboard-page">
-      <section className="dashboard-taskbar" aria-label="任务与采集控制">
-        <div className="dashboard-taskbar__identity">
-          <span className="dashboard-taskbar__state">待</span>
+      <section className="dashboard-health-bar" aria-label="系统状态与当前告警">
+        <div className="health-alert">
+          <span>…</span>
           <div>
-            <span>当前检测任务</span>
-            <strong>尚未选择任务</strong>
-            <small>待机 · 选择任务并完成采集前检查</small>
+            <strong>系统状态</strong>
+            <small>诊断链路尚未接入；出现异常时，此处直接替换为告警和处置建议</small>
           </div>
+          <StatusPill>等待诊断</StatusPill>
         </div>
-        <div className="dashboard-taskbar__progress" aria-label="任务进度">
-          <div><span>任务进度</span><strong>0%</strong></div>
-          <div className="progress-track"><i /></div>
-        </div>
-        <div className="dashboard-taskbar__actions">
-          <button type="button" className="button button--soft" onClick={() => setSettingsOpen(true)}>任务设置</button>
-          <button type="button" className="button button--soft" disabled title="任务开始后可用">标记入口</button>
-          <button type="button" className="button button--soft" disabled title="任务开始后可用">标记出口</button>
-          <button type="button" className="button button--green" disabled title="请选择任务并完成采集前检查">开始采集</button>
+        <div className="health-devices">
+          <span><b>雷达</b><strong>等待接入</strong></span>
+          <span><b>RTK</b><strong>等待接入</strong></span>
+          <span><b>控制器</b><strong>等待接入</strong></span>
+          <span><b>存储</b><strong>-- GB</strong></span>
+          <span><b>预览延迟</b><strong>-- ms</strong></span>
         </div>
       </section>
 
@@ -189,11 +186,11 @@ function Dashboard() {
           </article>
         </div>
 
-        <aside className="panel measurement-panel">
+        <aside className="panel measurement-panel measurement-control-panel">
           <PanelHead
-            title="测量与定位"
-            description="净空判断和隧道边界所需的关键结果"
-            trailing={<StatusPill>等待数据</StatusPill>}
+            title="测量与任务控制"
+            description="关键结果、RTK质量和当前任务操作"
+            trailing={<StatusPill>待机</StatusPill>}
           />
           <section className="measurement-primary">
             <span>当前净空高度</span>
@@ -202,11 +199,7 @@ function Dashboard() {
           </section>
           <section className="measurement-summary">
             <div><span>任务最低净空</span><strong>-- m</strong></div>
-            <div><span>洞内相对里程</span><strong>-- m</strong></div>
-          </section>
-          <section className="measurement-validity">
-            <div><span>测量有效性</span><StatusPill>无数据</StatusPill></div>
-            <p>接入点云和位姿后显示有效状态；无效时明确给出原因。</p>
+            <div><span>结果状态</span><strong>无有效数据</strong></div>
           </section>
           <section className="measurement-details" aria-label="RTK定位质量">
             <h3>RTK 定位质量</h3>
@@ -215,26 +208,27 @@ function Dashboard() {
             <div><span>入口坐标</span><strong>未标记</strong></div>
             <div><span>出口坐标</span><strong>未标记</strong></div>
           </section>
+          <section className="task-control-section" aria-label="当前任务与采集控制">
+            <div className="task-control-section__head">
+              <h3>当前任务</h3>
+              <button type="button" onClick={() => setSettingsOpen(true)}>任务设置</button>
+            </div>
+            <div className="task-control-current">
+              <div><span>任务名称</span><strong>尚未选择任务</strong></div>
+              <StatusPill>待机</StatusPill>
+            </div>
+            <div className="task-control-progress">
+              <div><span>任务进度</span><strong>0%</strong></div>
+              <div className="progress-track"><i /></div>
+            </div>
+            <div className="task-control-actions">
+              <button type="button" className="button button--green" disabled title="请选择任务并完成采集前检查">开始</button>
+              <button type="button" className="button button--warning" disabled>暂停</button>
+              <button type="button" className="button button--danger" disabled>停止</button>
+            </div>
+          </section>
           <p className="measurement-footnote">浏览器断开不会终止RK3588上的采集与计算任务。</p>
         </aside>
-      </section>
-
-      <section className="dashboard-health-bar" aria-label="系统状态与当前告警">
-        <div className="health-alert">
-          <span>…</span>
-          <div>
-            <strong>系统状态 / 当前告警</strong>
-            <small>诊断链路尚未接入，异常出现时此处优先显示处置建议</small>
-          </div>
-          <StatusPill>等待诊断</StatusPill>
-        </div>
-        <div className="health-devices">
-          <span><b>雷达</b><strong>等待接入</strong></span>
-          <span><b>RTK</b><strong>等待接入</strong></span>
-          <span><b>主控</b><strong>等待接入</strong></span>
-          <span><b>存储</b><strong>-- GB</strong></span>
-          <span><b>预览延迟</b><strong>-- ms</strong></span>
-        </div>
       </section>
 
       {settingsOpen && (

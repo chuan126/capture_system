@@ -196,7 +196,7 @@ main { min-width: 0; height: 100dvh; overflow-y: auto; }
 .page-content { padding: 20px 24px 34px; }
 .page-stack { display: grid; gap: 15px; }
 .dashboard-page {
-  grid-template-rows: 72px minmax(0, 1fr) 64px;
+  grid-template-rows: 64px minmax(0, 1fr);
   gap: 12px;
   height: 100%;
   min-height: 0;
@@ -547,7 +547,21 @@ th { color: #7f8b9e; background: #fafbfd; font-weight: 600; white-space: nowrap;
 .measurement-details strong { font-size: 10px; }
 .measurement-footnote { margin: auto 0 0; padding: 10px; color: #63748b; border-radius: 8px; background: #f5f8fb; font-size: 9px; line-height: 1.5; }
 
-.dashboard-health-bar { grid-template-columns: minmax(340px, 1.05fr) minmax(650px, 1.8fr); min-height: 64px; padding: 8px 12px; border-radius: 12px; }
+.task-control-section { padding: 13px 2px 4px; border-top: 1px solid var(--line-soft); }
+.task-control-section__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.task-control-section__head h3 { margin: 0; font-size: 11px; }
+.task-control-section__head button { padding: 0; color: var(--primary); border: 0; background: transparent; font-size: 10px; font-weight: 700; }
+.task-control-current { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px; border: 1px solid var(--line-soft); border-radius: 9px; background: #fafbfd; }
+.task-control-current > div { display: grid; gap: 4px; min-width: 0; }
+.task-control-current span { color: var(--muted); font-size: 9px; }
+.task-control-current strong { overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.task-control-progress { margin-top: 10px; }
+.task-control-progress > div:first-child { display: flex; justify-content: space-between; color: var(--muted); font-size: 10px; }
+.task-control-progress strong { color: var(--text); font-size: 10px; }
+.task-control-actions { display: grid; grid-template-columns: 1.25fr 1fr 1fr; gap: 7px; margin-top: 11px; }
+.task-control-actions .button { min-height: 36px; }
+
+.dashboard-health-bar { grid-template-columns: minmax(360px, 1.05fr) minmax(650px, 1.8fr); min-height: 64px; padding: 8px 12px; border-radius: 12px; }
 .health-devices { grid-template-columns: repeat(5, minmax(0, 1fr)); border-right: 0; }
 
 .settings-layer { position: fixed; z-index: 50; inset: 0; display: flex; justify-content: flex-end; background: rgba(20, 32, 48, .28); backdrop-filter: blur(2px); }
