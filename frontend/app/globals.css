@@ -557,9 +557,6 @@ th { color: #7f8b9e; background: #fafbfd; font-weight: 600; white-space: nowrap;
 .task-information-grid > div { display: grid; gap: 5px; min-height: 48px; padding: 9px 10px; background: #fff; }
 .task-information-grid span { color: var(--muted); font-size: 9px; }
 .task-information-grid strong { overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
-.task-control-progress { margin-top: 10px; }
-.task-control-progress > div:first-child { display: flex; justify-content: space-between; color: var(--muted); font-size: 10px; }
-.task-control-progress strong { color: var(--text); font-size: 10px; }
 .task-control-actions { display: grid; grid-template-columns: 1.25fr 1fr 1fr; gap: 7px; margin-top: 11px; }
 .task-control-actions .button { min-height: 36px; }
 

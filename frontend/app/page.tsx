@@ -130,7 +130,6 @@ function Dashboard() {
           <span>…</span>
           <div>
             <strong>系统状态</strong>
-            <small>诊断链路尚未接入；出现异常时，此处直接替换为告警和处置建议</small>
           </div>
         </div>
         <div className="health-devices">
@@ -217,10 +216,6 @@ function Dashboard() {
               <div><span>参数方案</span><strong>--</strong></div>
               <div><span>计划日期</span><strong>--</strong></div>
               <div><span>采集时长</span><strong>--:--</strong></div>
-            </div>
-            <div className="task-control-progress">
-              <div><span>任务进度</span><strong>0%</strong></div>
-              <div className="progress-track"><i /></div>
             </div>
             <div className="task-control-actions">
               <button type="button" className="button button--green" disabled title="请选择任务并完成采集前检查">开始</button>

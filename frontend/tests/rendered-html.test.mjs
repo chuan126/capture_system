@@ -48,7 +48,8 @@ test("renders the tunnel clearance terminal shell", async () => {
   assert.doesNotMatch(html, /标记入口/);
   assert.doesNotMatch(html, /标记出口/);
   assert.match(html, /浏览器断开不会终止RK3588上的采集与计算任务/);
-  assert.match(html, /出现异常时，此处直接替换为告警和处置建议/);
+  assert.doesNotMatch(html, /诊断链路尚未接入/);
+  assert.doesNotMatch(html, /任务进度/);
   assert.doesNotMatch(html, /任务设置/);
   assert.match(html, /任务编号/);
   assert.match(html, /隧道名称/);
