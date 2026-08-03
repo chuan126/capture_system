@@ -4,6 +4,7 @@ import { useState } from "react";
 
 import PointCloudViewer from "@/components/point-cloud/PointCloudViewer";
 import type { PointCloudViewMode } from "@/components/point-cloud/PointCloudViewer";
+import { useRtkSocket } from "@/components/rtk/useRtkSocket";
 
 type PageId = "dashboard" | "tasks" | "playback" | "report";
 type PlaybackTab = "result" | "history" | "logs";
@@ -117,11 +118,59 @@ function Header({ page }: { page: PageId }) {
 
 function Dashboard() {
   const [viewMode, setViewMode] = useState<ViewMode>("3d");
+  const rtk = useRtkSocket();
+  const rtkSnapshot = rtk.snapshot;
   const modes: Array<{ id: ViewMode; label: string; disabled?: boolean }> = [
     { id: "3d", label: "三维视图" },
     { id: "top", label: "俯视图" },
     { id: "section", label: "断面视图", disabled: true },
   ];
+
+  const rtkDeviceText = rtk.connection !== "connected"
+    ? "Web连接中"
+    : rtkSnapshot?.serial_connected === true
+      ? "串口已连接"
+      : rtkSnapshot?.serial_connected === false
+        ? "串口重连中"
+        : "等待诊断";
+  const rtkTone = rtk.connection !== "connected"
+    ? "idle"
+    : rtkSnapshot?.serial_connected === true
+      ? "ok"
+      : rtkSnapshot?.serial_connected === false
+        ? "warn"
+        : "idle";
+  const solutionLabels: Record<number, string> = {
+    0: "未定位",
+    1: "单点定位",
+    2: "差分定位",
+    4: "RTK固定",
+    5: "RTK浮动",
+  };
+  const gpsState = rtkSnapshot?.gps_state;
+  const solutionText = gpsState === null || gpsState === undefined
+    ? "等待RTK数据"
+    : `${solutionLabels[gpsState] ?? "状态码"}（${gpsState}）`;
+  const rmcCharacter = rtkSnapshot?.rmc_validity
+    ? String.fromCharCode(rtkSnapshot.rmc_validity)
+    : null;
+  const rmcText = rmcCharacter === "A"
+    ? "RMC有效（A）"
+    : rmcCharacter === "V"
+      ? "RMC无效（V）"
+      : rmcCharacter
+        ? `RMC（${rmcCharacter}）`
+        : "RMC --";
+  const formatMetric = (value: number | null | undefined, digits = 2) =>
+    value === null || value === undefined ? "--" : value.toFixed(digits);
+  const hasFix = rtkSnapshot?.fix_status !== null &&
+    rtkSnapshot?.fix_status !== undefined && rtkSnapshot.fix_status !== -1;
+  const coordinateText = hasFix &&
+    rtkSnapshot?.latitude !== null && rtkSnapshot?.latitude !== undefined &&
+    rtkSnapshot?.longitude !== null && rtkSnapshot?.longitude !== undefined
+    ? `${rtkSnapshot.latitude.toFixed(8)}°, ${rtkSnapshot.longitude.toFixed(8)}°`
+    : "--";
+  const altitudeText = hasFix ? `${formatMetric(rtkSnapshot?.altitude)} m` : "--";
 
   return (
     <div className="page-stack dashboard-page">
@@ -134,7 +183,7 @@ function Dashboard() {
         </div>
         <div className="health-devices">
           <span><b>雷达</b><strong>等待接入</strong></span>
-          <span><b>RTK</b><strong>等待接入</strong></span>
+          <span><b>RTK</b><strong>{rtkDeviceText}</strong></span>
           <span><b>控制器</b><strong>等待接入</strong></span>
           <span><b>存储</b><strong>-- GB</strong></span>
         </div>
@@ -195,9 +244,19 @@ function Dashboard() {
             <div><span>任务最低净空</span><strong>-- m</strong></div>
           </section>
           <section className="measurement-details" aria-label="RTK定位质量">
-            <h3>RTK 定位质量</h3>
-            <div><span>解状态</span><strong>等待定位</strong></div>
-            <div><span>卫星数 / HDOP</span><strong>-- / --</strong></div>
+            <div className="measurement-details__head">
+              <h3>RTK 定位质量</h3>
+              <StatusPill tone={rtkTone}>{rtkDeviceText}</StatusPill>
+            </div>
+            <div><span>解状态</span><strong>{solutionText} · {rmcText}</strong></div>
+            <div>
+              <span>卫星数 / HDOP / PDOP</span>
+              <strong>
+                {rtkSnapshot?.satellite_count ?? "--"} / {formatMetric(rtkSnapshot?.hdop)} / {formatMetric(rtkSnapshot?.pdop)}
+              </strong>
+            </div>
+            <div><span>当前坐标</span><strong className="rtk-coordinate">{coordinateText}</strong></div>
+            <div><span>高度</span><strong>{altitudeText}</strong></div>
             <div><span>入口坐标</span><strong>未标记</strong></div>
             <div><span>出口坐标</span><strong>未标记</strong></div>
           </section>

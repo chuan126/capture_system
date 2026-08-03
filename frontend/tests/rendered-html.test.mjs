@@ -42,7 +42,9 @@ test("renders the tunnel clearance terminal shell", async () => {
   assert.match(html, />暂停<\/button>/);
   assert.match(html, />停止<\/button>/);
   assert.match(html, /测量与任务控制/);
-  assert.match(html, /卫星数 \/ HDOP/);
+  assert.match(html, /卫星数 \/ HDOP \/ PDOP/);
+  assert.match(html, /当前坐标/);
+  assert.match(html, /RMC --/);
   assert.doesNotMatch(html, /暂无有效结果/);
   assert.doesNotMatch(html, /结果状态/);
   assert.doesNotMatch(html, /标记入口/);

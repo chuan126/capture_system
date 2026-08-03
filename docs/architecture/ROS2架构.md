@@ -50,7 +50,7 @@ flowchart LR
 | 包 | 主要节点 | 核心职责 | 明确不负责 |
 | --- | --- | --- | --- |
 | `interfaces` | 无 | 自定义 msg/srv/action | 算法、配置、业务逻辑 |
-| `rtk_driver` | `rtk_driver_node` | 串口、NMEA、RTK 质量 | 进出洞状态机 |
+| `rtk_driver` | `rtk_driver_node` | 串口、既有 NMEA 解析器调用、位置和原始质量字段发布 | 质量与稳定性判断、进出洞状态机 |
 | `sensor_adapter` | 无独立节点 | 原生 Topic remapping、雷达和 RViz2 启动 | 消息校验、frame 修改、运动补偿、净空 |
 | `motion_compensation` | `motion_compensation_node` | 位姿缓存、插值、逐点去畸变 | 长期定位、路面求解 |
 | `localization` | `localization_node` | RTK 稳定窗口、洞内里程、轨迹质量 | 任务生命周期 |

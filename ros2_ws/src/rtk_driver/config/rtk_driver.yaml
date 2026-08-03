@@ -1,0 +1,12 @@
+rtk_driver_node:
+  ros__parameters:
+    device: "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0"
+    baud_rate: 115200
+    frame_id: "rtk_link"
+    reconnect_interval_ms: 1000
+    read_period_ms: 10
+    read_buffer_size: 512
+    max_reads_per_cycle: 8
+    fix_topic: "/capture/rtk/fix"
+    status_topic: "/capture/rtk/status"
+    diagnostics_topic: "/diagnostics"

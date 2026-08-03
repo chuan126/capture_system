@@ -31,7 +31,7 @@ Launch 使用 ROS 2 原生 remapping 转换到稳定的 `/capture/...` Topic，�
 
 ## 局域网 Web 界面
 
-开发阶段使用一条命令启动雷达驱动、SLAM点云预览和网页服务：
+开发阶段使用一条命令启动雷达驱动、RTK驱动、SLAM点云预览和网页服务：
 
 ```bash
 cd /home/cat/Project/capture_system

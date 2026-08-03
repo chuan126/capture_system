@@ -539,11 +539,14 @@ th { color: #7f8b9e; background: #fafbfd; font-weight: 600; white-space: nowrap;
 .measurement-validity > div > span { font-size: 11px; font-weight: 700; }
 .measurement-validity p { margin: 8px 0 0; color: var(--muted); font-size: 10px; line-height: 1.55; }
 .measurement-details { min-height: 0; padding: 13px 2px 4px; }
-.measurement-details h3 { margin: 0 0 7px; font-size: 11px; }
+.measurement-details h3 { margin: 0; font-size: 11px; }
+.measurement-details__head { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 28px; }
+.measurement-details__head .status-pill { flex: 0 0 auto; padding: 4px 7px; font-size: 8px; }
 .measurement-details > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 31px; border-bottom: 1px solid var(--line-soft); font-size: 10px; }
 .measurement-details > div:last-child { border-bottom: 0; }
 .measurement-details span { color: var(--muted); }
 .measurement-details strong { font-size: 10px; }
+.measurement-details .rtk-coordinate { max-width: 185px; overflow-wrap: anywhere; text-align: right; }
 .measurement-footnote { margin: auto 0 0; padding: 10px; color: #63748b; border-radius: 8px; background: #f5f8fb; font-size: 9px; line-height: 1.5; }
 
 .task-control-section { padding: 13px 2px 4px; border-top: 1px solid var(--line-soft); }

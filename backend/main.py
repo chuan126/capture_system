@@ -10,7 +10,9 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from backend.ros_bridge.cloud_preview_bridge import CloudPreviewBridge
+from backend.ros_bridge.rtk_bridge import RtkBridge
 from backend.websocket.cloud_preview_hub import CloudPreviewHub
+from backend.websocket.rtk_hub import RtkHub
 from backend.websocket.routes import router as websocket_router
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -29,9 +31,11 @@ def create_app(
     *,
     start_ros_bridge: bool = True,
     bridge_factory: Callable[..., CloudPreviewBridge] = CloudPreviewBridge,
+    rtk_bridge_factory: Callable[..., RtkBridge] = RtkBridge,
 ) -> FastAPI:
     site_directory = (static_dir or resolve_static_dir()).resolve()
     hub = CloudPreviewHub()
+    rtk_hub = RtkHub()
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
@@ -43,6 +47,7 @@ def create_app(
             )
 
         bridge: CloudPreviewBridge | None = None
+        rtk_bridge: RtkBridge | None = None
         if start_ros_bridge:
             loop = asyncio.get_running_loop()
             bridge = bridge_factory(
@@ -50,14 +55,22 @@ def create_app(
             )
             started = bridge.start()
             hub.set_ros_availability(started, bridge.error)
+            rtk_bridge = rtk_bridge_factory(
+                lambda snapshot: loop.call_soon_threadsafe(rtk_hub.publish, snapshot)
+            )
+            rtk_started = rtk_bridge.start()
+            rtk_hub.set_ros_availability(rtk_started, rtk_bridge.error)
         else:
             application.state.cloud_preview_hub = hub
+            application.state.rtk_hub = rtk_hub
 
         try:
             yield
         finally:
             if bridge is not None:
                 bridge.stop()
+            if rtk_bridge is not None:
+                rtk_bridge.stop()
 
     application = FastAPI(
         title="Capture System Web API",
@@ -65,6 +78,7 @@ def create_app(
         lifespan=lifespan,
     )
     application.state.cloud_preview_hub = hub
+    application.state.rtk_hub = rtk_hub
 
     @application.get("/api/health", tags=["system"])
     async def health() -> dict[str, str]:
