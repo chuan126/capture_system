@@ -115,37 +115,9 @@ function Header({ page }: { page: PageId }) {
   );
 }
 
-function MetricCard({
-  label,
-  value,
-  unit,
-  hint,
-  icon,
-  primary = false,
-}: {
-  label: string;
-  value: string;
-  unit?: string;
-  hint: string;
-  icon: string;
-  primary?: boolean;
-}) {
-  return (
-    <article className={`metric-card${primary ? " metric-card--primary" : ""}`}>
-      <div className="metric-card__top">
-        <span>{label}</span>
-        <i className="metric-icon">{icon}</i>
-      </div>
-      <strong className={value.length > 4 ? "metric-card__text-value" : ""}>
-        {value}{unit && <small>{unit}</small>}
-      </strong>
-      <p>{hint}</p>
-    </article>
-  );
-}
-
 function Dashboard() {
   const [viewMode, setViewMode] = useState<ViewMode>("3d");
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const modes: Array<{ id: ViewMode; label: string; disabled?: boolean }> = [
     { id: "3d", label: "三维视图" },
     { id: "top", label: "俯视图" },
@@ -154,28 +126,25 @@ function Dashboard() {
 
   return (
     <div className="page-stack dashboard-page">
-      <section className="capture-state-bar" aria-label="采集任务状态">
-        <div className="capture-state-bar__main">
-          <span className="capture-state-icon">待</span>
+      <section className="dashboard-taskbar" aria-label="任务与采集控制">
+        <div className="dashboard-taskbar__identity">
+          <span className="dashboard-taskbar__state">待</span>
           <div>
-            <span>当前任务状态</span>
-            <strong>待机 · 尚未选择检测任务</strong>
-            <small>选择任务并完成设备检查后方可开始采集</small>
+            <span>当前检测任务</span>
+            <strong>尚未选择任务</strong>
+            <small>待机 · 选择任务并完成采集前检查</small>
           </div>
         </div>
-        <div className="capture-state-bar__signals" aria-label="关键链路状态">
-          <span><i />点云未接入</span>
-          <span><i />RTK未接入</span>
-          <span><i />诊断等待中</span>
+        <div className="dashboard-taskbar__progress" aria-label="任务进度">
+          <div><span>任务进度</span><strong>0%</strong></div>
+          <div className="progress-track"><i /></div>
         </div>
-        <p>任务由RK3588设备端独立运行，浏览器断开不会终止采集。</p>
-      </section>
-
-      <section className="metric-grid">
-        <MetricCard label="当前净空高度" value="--" unit="m" hint="等待有效测量结果" icon="H" primary />
-        <MetricCard label="任务最低净空" value="--" unit="m" hint="任务开始后自动统计" icon="↓" />
-        <MetricCard label="测量质量" value="无数据" hint="延迟 -- ms · 有效点 -- %" icon="质" />
-        <MetricCard label="RTK 定位质量" value="未定位" hint="解状态 -- · 卫星 -- · HDOP --" icon="◎" />
+        <div className="dashboard-taskbar__actions">
+          <button type="button" className="button button--soft" onClick={() => setSettingsOpen(true)}>任务设置</button>
+          <button type="button" className="button button--soft" disabled title="任务开始后可用">标记入口</button>
+          <button type="button" className="button button--soft" disabled title="任务开始后可用">标记出口</button>
+          <button type="button" className="button button--green" disabled title="请选择任务并完成采集前检查">开始采集</button>
+        </div>
       </section>
 
       <section className="dashboard-layout">
@@ -183,8 +152,8 @@ function Dashboard() {
           <article className="panel cloud-panel dashboard-cloud-panel">
             <div className="cloud-toolbar">
               <div>
-                <h2>点云空间预览</h2>
-                <p>Odin1 Lite SLAM世界点云 · 5 Hz轻量预览</p>
+                <h2>点云实时预览</h2>
+                <p>Odin1 Lite SLAM世界点云 · 浏览器轻量预览</p>
               </div>
               <div className="segmented segmented--small" aria-label="点云视角">
                 {modes.map((mode) => (
@@ -220,101 +189,92 @@ function Dashboard() {
           </article>
         </div>
 
-        <div className="dashboard-side">
-          <article className="panel operation-panel">
-            <section className="operation-section current-task">
-              <PanelHead
-                title="当前检测任务"
-                description="任务状态、进度与隧道边界"
-                trailing={<span className="panel-tag panel-tag--muted">未开始</span>}
-              />
-              <div className="task-identity">
-                <div><span>隧道编号</span><strong>--</strong></div>
-                <div><span>当前任务</span><strong>尚未选择</strong></div>
-                <div><span>下一任务</span><strong>暂无排队任务</strong></div>
-                <div><span>作业车道</span><strong>--</strong></div>
-              </div>
-              <div className="progress-block">
-                <div><span>任务进度</span><strong>0%</strong></div>
-                <div className="progress-track"><i /></div>
-              </div>
-              <div className="tunnel-markers">
-                <div>
-                  <strong>隧道边界标记</strong>
-                  <small>自动判断异常时手动兜底</small>
-                </div>
-                <div>
-                  <button type="button" className="button button--soft" disabled title="任务开始后可用">标记入口</button>
-                  <button type="button" className="button button--soft" disabled title="任务开始后可用">标记出口</button>
-                </div>
-              </div>
-            </section>
-
-            <section className="operation-section control-panel">
-              <PanelHead title="采集控制" description="按设备端任务状态开放操作" trailing={<StatusPill>未就绪</StatusPill>} />
-              <div className="preflight-list" aria-label="采集前检查">
-                <div><span>检测任务</span><strong>未选择</strong></div>
-                <div><span>参数方案</span><strong>未确认</strong></div>
-                <div><span>雷达与定位链路</span><strong>等待接入</strong></div>
-              </div>
-              <details className="config-disclosure">
-                <summary>查看并确认采集参数 <span>尚未配置</span></summary>
-                <div className="form-grid">
-                  <label>
-                    <span>雷达安装高度 / m</span>
-                    <input placeholder="请输入安装高度" inputMode="decimal" />
-                  </label>
-                  <label>
-                    <span>净空高度阈值 / m</span>
-                    <input placeholder="请输入报警阈值" inputMode="decimal" />
-                  </label>
-                  <label className="form-grid__full">
-                    <span>测量参数配置</span>
-                    <select defaultValue="">
-                      <option value="">请选择参数方案</option>
-                    </select>
-                  </label>
-                </div>
-              </details>
-              <div className="button-grid button-grid--control">
-                <button type="button" className="button button--green button-grid__full" disabled title="请选择任务并完成采集前检查">开始采集</button>
-                <button type="button" className="button button--warning" disabled>暂停采集</button>
-                <button type="button" className="button button--danger" disabled>停止并保存</button>
-              </div>
-              <label className="switch-row">
-                <span>
-                  <strong>自动切换下一任务</strong>
-                  <small>当前任务完成后加载下一任务</small>
-                </span>
-                <input type="checkbox" aria-label="自动切换下一任务" />
-                <i />
-              </label>
-            </section>
-          </article>
-        </div>
+        <aside className="panel measurement-panel">
+          <PanelHead
+            title="测量与定位"
+            description="净空判断和隧道边界所需的关键结果"
+            trailing={<StatusPill>等待数据</StatusPill>}
+          />
+          <section className="measurement-primary">
+            <span>当前净空高度</span>
+            <strong>-- <small>m</small></strong>
+            <p>暂无有效结果</p>
+          </section>
+          <section className="measurement-summary">
+            <div><span>任务最低净空</span><strong>-- m</strong></div>
+            <div><span>洞内相对里程</span><strong>-- m</strong></div>
+          </section>
+          <section className="measurement-validity">
+            <div><span>测量有效性</span><StatusPill>无数据</StatusPill></div>
+            <p>接入点云和位姿后显示有效状态；无效时明确给出原因。</p>
+          </section>
+          <section className="measurement-details" aria-label="RTK定位质量">
+            <h3>RTK 定位质量</h3>
+            <div><span>解状态</span><strong>等待定位</strong></div>
+            <div><span>卫星数 / HDOP</span><strong>-- / --</strong></div>
+            <div><span>入口坐标</span><strong>未标记</strong></div>
+            <div><span>出口坐标</span><strong>未标记</strong></div>
+          </section>
+          <p className="measurement-footnote">浏览器断开不会终止RK3588上的采集与计算任务。</p>
+        </aside>
       </section>
 
-      <section className="dashboard-health-bar" aria-label="设备、诊断与测量状态">
+      <section className="dashboard-health-bar" aria-label="系统状态与当前告警">
         <div className="health-alert">
           <span>…</span>
           <div>
-            <strong>诊断链路尚未接入</strong>
-            <small>接入后显示净空阈值、设备异常及处理建议</small>
+            <strong>系统状态 / 当前告警</strong>
+            <small>诊断链路尚未接入，异常出现时此处优先显示处置建议</small>
           </div>
-          <StatusPill>等待系统诊断</StatusPill>
+          <StatusPill>等待诊断</StatusPill>
         </div>
         <div className="health-devices">
           <span><b>雷达</b><strong>等待接入</strong></span>
           <span><b>RTK</b><strong>等待接入</strong></span>
           <span><b>主控</b><strong>等待接入</strong></span>
-          <span><b>存储 / 温度</b><strong>-- GB · -- ℃</strong></span>
-        </div>
-        <div className="health-measurement">
-          <span>测量质量<strong>暂无结果</strong></span>
-          <span>有效点<strong>-- %</strong></span>
-          <span>延迟<strong>-- ms</strong></span>
+          <span><b>存储</b><strong>-- GB</strong></span>
+          <span><b>预览延迟</b><strong>-- ms</strong></span>
         </div>
       </section>
+
+      {settingsOpen && (
+        <div className="settings-layer" role="presentation" onMouseDown={() => setSettingsOpen(false)}>
+          <aside className="settings-drawer" role="dialog" aria-modal="true" aria-labelledby="settings-title" onMouseDown={(event) => event.stopPropagation()}>
+            <div className="settings-drawer__head">
+              <div><span>按需设置</span><h2 id="settings-title">任务设置与采集前检查</h2></div>
+              <button type="button" aria-label="关闭任务设置" onClick={() => setSettingsOpen(false)}>×</button>
+            </div>
+            <section>
+              <h3>当前任务</h3>
+              <label><span>检测任务</span><select defaultValue=""><option value="">请选择检测任务</option></select></label>
+            </section>
+            <section>
+              <h3>采集参数</h3>
+              <div className="form-grid">
+                <label><span>雷达安装高度 / m</span><input placeholder="请输入安装高度" inputMode="decimal" /></label>
+                <label><span>净空高度阈值 / m</span><input placeholder="请输入报警阈值" inputMode="decimal" /></label>
+                <label className="form-grid__full"><span>测量参数方案</span><select defaultValue=""><option value="">请选择参数方案</option></select></label>
+              </div>
+            </section>
+            <section>
+              <h3>采集前检查</h3>
+              <div className="preflight-list">
+                <div><span>检测任务</span><strong>未选择</strong></div>
+                <div><span>参数方案</span><strong>未确认</strong></div>
+                <div><span>雷达与定位链路</span><strong>等待接入</strong></div>
+              </div>
+            </section>
+            <label className="switch-row">
+              <span><strong>自动切换下一任务</strong><small>当前任务完成后加载下一任务</small></span>
+              <input type="checkbox" aria-label="自动切换下一任务" /><i />
+            </label>
+            <div className="settings-drawer__actions">
+              <button type="button" className="button button--soft" onClick={() => setSettingsOpen(false)}>取消</button>
+              <button type="button" className="button button--primary" disabled>确认设置</button>
+            </div>
+          </aside>
+        </div>
+      )}
     </div>
   );
 }
@@ -647,7 +607,7 @@ export default function Home() {
         </div>
       </aside>
       <main className={activePage === "dashboard" ? "main--dashboard" : undefined}>
-        <Header page={activePage} />
+        {activePage !== "dashboard" && <Header page={activePage} />}
         <div className="page-content">
           {activePage === "dashboard" && <Dashboard />}
           {activePage === "tasks" && <Tasks />}

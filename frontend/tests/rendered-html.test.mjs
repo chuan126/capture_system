@@ -35,14 +35,15 @@ test("renders the tunnel clearance terminal shell", async () => {
   assert.match(html, /Odin1 Lite/);
   assert.match(html, /采集首页/);
   assert.match(html, /任务管理/);
-  assert.match(html, /点云空间预览/);
-  assert.match(html, /待机 · 尚未选择检测任务/);
-  assert.match(html, /测量质量/);
-  assert.match(html, /解状态 -- · 卫星 -- · HDOP --/);
+  assert.match(html, /点云实时预览/);
+  assert.match(html, /待机 · 选择任务并完成采集前检查/);
+  assert.match(html, /测量与定位/);
+  assert.match(html, /卫星数 \/ HDOP/);
   assert.match(html, /标记入口/);
   assert.match(html, /标记出口/);
-  assert.match(html, /浏览器断开不会终止采集/);
-  assert.match(html, /等待系统诊断/);
+  assert.match(html, /浏览器断开不会终止RK3588上的采集与计算任务/);
+  assert.match(html, /系统状态 \/ 当前告警/);
+  assert.match(html, /任务设置/);
   assert.doesNotMatch(html, /当前无报警/);
   assert.doesNotMatch(html, />点云预览<\/button>/);
   assert.match(html, /数据回放/);
@@ -54,7 +55,7 @@ test("keeps the 1920x1080 capture dashboard inside the viewport", async () => {
   const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
 
   assert.match(css, /\.main--dashboard\s*\{[^}]*overflow:\s*hidden/i);
-  assert.match(css, /\.main--dashboard \.page-content\s*\{[^}]*height:\s*calc\(100dvh - 88px\)/i);
-  assert.match(css, /\.dashboard-page\s*\{[^}]*grid-template-rows:\s*64px 88px minmax\(0, 1fr\) 72px/i);
+  assert.match(css, /\.main--dashboard \.page-content\s*\{[^}]*height:\s*100dvh/i);
+  assert.match(css, /\.dashboard-page\s*\{[^}]*grid-template-rows:\s*72px minmax\(0, 1fr\) 64px/i);
   assert.match(css, /@media \(max-width:\s*1180px\)[\s\S]*?\.main--dashboard\s*\{[^}]*overflow-y:\s*auto/i);
 });
