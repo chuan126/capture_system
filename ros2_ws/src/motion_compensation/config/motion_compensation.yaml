@@ -2,12 +2,19 @@ enu_cloud_transform_node:
   ros__parameters:
     input_cloud_topic: /capture/lidar/points_raw
     odometry_topic: /capture/odometry/high_rate
-    imu_topic: /capture/imu/data
     output_cloud_topic: /capture/lidar/points_compensated_enu
     output_frame_id: lidar_local_enu
+
     pose_cache_duration_s: 2.0
     max_interpolation_gap_s: 0.02
+
+    # false时只执行逐点姿态旋转。当前里程计位置存在漂移，默认关闭平移补偿。
     use_odometry_translation: false
-    min_gravity_norm_m_s2: 7.0
-    max_gravity_norm_m_s2: 12.0
+
+    # C0 = R_b<-l。按行排列，将雷达坐标系矢量转换到里程计机体坐标系。
+    # 当前安装关系为x_b=-x_l、y_b=-y_l、z_b=z_l。
+    lidar_to_odometry_rotation: [-1.0, 0.0, 0.0,
+                                  0.0, -1.0, 0.0,
+                                  0.0, 0.0, 1.0]
+
     pending_cloud_limit: 2

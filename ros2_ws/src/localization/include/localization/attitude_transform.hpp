@@ -18,9 +18,9 @@ struct EnuPoint3d
   double up;
 };
 
-// 将ROS的[x, y, z, w]四元数归一化后，通过独立姿态库生成体坐标到局部水平系矩阵。
+// 将ROS的[x, y, z, w]四元数归一化后，生成R_n<-b，即机体系到导航系的旋转矩阵。
 bool rosQuaternionToMatrix(
-  double x, double y, double z, double w, double Cnb[9]) noexcept;
+  double x, double y, double z, double w, double R_navigation_from_body[9]) noexcept;
 
 // 以雷达当前放置姿态为零姿态，直接规定当前X=East、Y=North、Z=Up。
 bool initializeLocalEnuReference(

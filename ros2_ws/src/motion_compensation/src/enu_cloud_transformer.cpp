@@ -42,66 +42,6 @@ bool validPose(PoseSample sample) noexcept
     [](const double value) {return std::isfinite(value);});
 }
 
-bool validImu(const ImuSample & sample) noexcept
-{
-  if (sample.stamp_ns <= 0) {
-    return false;
-  }
-  return std::all_of(
-    sample.angular_velocity_rad_s.begin(), sample.angular_velocity_rad_s.end(),
-    [](const double value) {return std::isfinite(value);}) &&
-         std::all_of(
-    sample.linear_acceleration_m_s2.begin(), sample.linear_acceleration_m_s2.end(),
-    [](const double value) {return std::isfinite(value);});
-}
-
-bool gravityAlignmentMatrix(
-  const double acceleration_odom[3], const double min_norm, const double max_norm,
-  double alignment[9]) noexcept
-{
-  const double norm = std::sqrt(
-    acceleration_odom[0] * acceleration_odom[0] +
-    acceleration_odom[1] * acceleration_odom[1] +
-    acceleration_odom[2] * acceleration_odom[2]);
-  if (!std::isfinite(norm) || norm < min_norm || norm > max_norm) {
-    return false;
-  }
-  const double x = acceleration_odom[0] / norm;
-  const double y = acceleration_odom[1] / norm;
-  const double z = std::clamp(acceleration_odom[2] / norm, -1.0, 1.0);
-  const double sine_squared = x * x + y * y;
-  if (sine_squared <= 1.0e-18) {
-    if (z < 0.0) {
-      alignment[0] = 1.0;
-      alignment[1] = 0.0;
-      alignment[2] = 0.0;
-      alignment[3] = 0.0;
-      alignment[4] = -1.0;
-      alignment[5] = 0.0;
-      alignment[6] = 0.0;
-      alignment[7] = 0.0;
-      alignment[8] = -1.0;
-    } else {
-      const double identity[9]{1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0};
-      std::copy(identity, identity + 9, alignment);
-    }
-    return true;
-  }
-
-  // Rodrigues公式：把四元数估计下的加速度方向旋转到ENU的+Z。
-  const double factor = (1.0 - z) / sine_squared;
-  alignment[0] = 1.0 - x * x * factor;
-  alignment[1] = -x * y * factor;
-  alignment[2] = -x;
-  alignment[3] = -x * y * factor;
-  alignment[4] = 1.0 - y * y * factor;
-  alignment[5] = -y;
-  alignment[6] = x;
-  alignment[7] = y;
-  alignment[8] = z;
-  return true;
-}
-
 std::array<double, 4> slerp(
   const std::array<double, 4> & first, const std::array<double, 4> & second,
   const double fraction) noexcept
@@ -136,6 +76,43 @@ std::array<double, 4> slerp(
     result[index] = first_weight * first[index] + second_weight * target[index];
   }
   return result;
+}
+
+bool validRotationMatrix(const RotationMatrix3d & rotation) noexcept
+{
+  for (const double value : rotation) {
+    if (!std::isfinite(value)) {
+      return false;
+    }
+  }
+
+  constexpr double tolerance = 1.0e-6;
+  for (int row = 0; row < 3; ++row) {
+    for (int other_row = 0; other_row < 3; ++other_row) {
+      double dot = 0.0;
+      for (int col = 0; col < 3; ++col) {
+        dot += rotation[row * 3 + col] * rotation[other_row * 3 + col];
+      }
+      const double expected = row == other_row ? 1.0 : 0.0;
+      if (std::abs(dot - expected) > tolerance) {
+        return false;
+      }
+    }
+  }
+
+  const double determinant =
+    rotation[0] * (rotation[4] * rotation[8] - rotation[5] * rotation[7]) -
+    rotation[1] * (rotation[3] * rotation[8] - rotation[5] * rotation[6]) +
+    rotation[2] * (rotation[3] * rotation[7] - rotation[4] * rotation[6]);
+  return std::abs(determinant - 1.0) <= tolerance;
+}
+
+void multiplyMatrixVector(
+  const double matrix[9], const double input[3], double output[3]) noexcept
+{
+  output[0] = matrix[0] * input[0] + matrix[1] * input[1] + matrix[2] * input[2];
+  output[1] = matrix[3] * input[0] + matrix[4] * input[1] + matrix[5] * input[2];
+  output[2] = matrix[6] * input[0] + matrix[7] * input[1] + matrix[8] * input[2];
 }
 
 }  // namespace
@@ -223,107 +200,27 @@ std::int64_t PoseBuffer::newestStampNs() const noexcept
 
 EnuCloudTransformer::EnuCloudTransformer(
   const std::int64_t cache_duration_ns, const std::int64_t max_interpolation_gap_ns,
-  const bool use_odometry_translation, const double min_gravity_norm_m_s2,
-  const double max_gravity_norm_m_s2)
+  const bool use_odometry_translation, const RotationMatrix3d & lidar_to_odometry_rotation)
 : pose_buffer_(cache_duration_ns, max_interpolation_gap_ns),
-  cache_duration_ns_(cache_duration_ns),
-  max_interpolation_gap_ns_(max_interpolation_gap_ns),
   use_odometry_translation_(use_odometry_translation),
-  min_gravity_norm_m_s2_(min_gravity_norm_m_s2),
-  max_gravity_norm_m_s2_(max_gravity_norm_m_s2)
+  lidar_to_odometry_rotation_(lidar_to_odometry_rotation)
 {
-  if (!(min_gravity_norm_m_s2_ > 0.0) ||
-    !(max_gravity_norm_m_s2_ > min_gravity_norm_m_s2_))
-  {
-    throw std::invalid_argument("重力模长范围参数不合法");
+  if (cache_duration_ns <= 0 || max_interpolation_gap_ns <= 0) {
+    throw std::invalid_argument("时间参数必须为正数");
+  }
+  if (!validRotationMatrix(lidar_to_odometry_rotation_)) {
+    throw std::invalid_argument("lidar_to_odometry_rotation必须为正交且行列式为1的3×3旋转矩阵");
   }
 }
 
 bool EnuCloudTransformer::addPose(const PoseSample & sample) noexcept
 {
-  if (!pose_buffer_.add(sample)) {
-    return false;
-  }
-  if (!initialized_) {
-    initialized_ = localization::initializeGravityAlignedEnuReference(
-      sample.quaternion_xyzw[0], sample.quaternion_xyzw[1], sample.quaternion_xyzw[2],
-      sample.quaternion_xyzw[3], Cenu_odom_);
-  }
-  return initialized_;
-}
-
-bool EnuCloudTransformer::addImu(const ImuSample & sample) noexcept
-{
-  if (!validImu(sample) || cache_duration_ns_ <= 0 || max_interpolation_gap_ns_ <= 0) {
-    return false;
-  }
-  if (!imu_samples_.empty() && sample.stamp_ns < imu_samples_.back().stamp_ns) {
-    return false;
-  }
-  if (!imu_samples_.empty() && sample.stamp_ns == imu_samples_.back().stamp_ns) {
-    imu_samples_.back() = sample;
-  } else {
-    imu_samples_.push_back(sample);
-  }
-  while (imu_samples_.size() > 1U &&
-    imu_samples_.back().stamp_ns - imu_samples_.front().stamp_ns > cache_duration_ns_)
-  {
-    imu_samples_.pop_front();
-  }
-  return true;
+  return pose_buffer_.add(sample);
 }
 
 bool EnuCloudTransformer::initialized() const noexcept
 {
-  return initialized_ && !imu_samples_.empty();
-}
-
-std::int64_t EnuCloudTransformer::oldestImuStampNs() const noexcept
-{
-  return imu_samples_.empty() ? 0 : imu_samples_.front().stamp_ns;
-}
-
-std::int64_t EnuCloudTransformer::newestImuStampNs() const noexcept
-{
-  return imu_samples_.empty() ? 0 : imu_samples_.back().stamp_ns;
-}
-
-bool EnuCloudTransformer::interpolateImu(
-  const std::int64_t stamp_ns, ImuSample & output) const noexcept
-{
-  if (imu_samples_.empty() || stamp_ns < imu_samples_.front().stamp_ns ||
-    stamp_ns > imu_samples_.back().stamp_ns)
-  {
-    return false;
-  }
-  const auto upper = std::lower_bound(
-    imu_samples_.begin(), imu_samples_.end(), stamp_ns,
-    [](const ImuSample & sample, const std::int64_t target) {
-      return sample.stamp_ns < target;
-    });
-  if (upper != imu_samples_.end() && upper->stamp_ns == stamp_ns) {
-    output = *upper;
-    return true;
-  }
-  if (upper == imu_samples_.begin() || upper == imu_samples_.end()) {
-    return false;
-  }
-  const auto lower = std::prev(upper);
-  const std::int64_t gap_ns = upper->stamp_ns - lower->stamp_ns;
-  if (gap_ns <= 0 || gap_ns > max_interpolation_gap_ns_) {
-    return false;
-  }
-  const double fraction = static_cast<double>(stamp_ns - lower->stamp_ns) /
-    static_cast<double>(gap_ns);
-  output.stamp_ns = stamp_ns;
-  for (std::size_t index = 0; index < 3U; ++index) {
-    output.angular_velocity_rad_s[index] = lower->angular_velocity_rad_s[index] +
-      fraction * (upper->angular_velocity_rad_s[index] - lower->angular_velocity_rad_s[index]);
-    output.linear_acceleration_m_s2[index] = lower->linear_acceleration_m_s2[index] +
-      fraction *
-      (upper->linear_acceleration_m_s2[index] - lower->linear_acceleration_m_s2[index]);
-  }
-  return true;
+  return !pose_buffer_.empty();
 }
 
 std::int64_t EnuCloudTransformer::oldestPoseStampNs() const noexcept
@@ -342,7 +239,7 @@ bool EnuCloudTransformer::transform(
 {
   output.clear();
   if (!initialized()) {
-    invalid_reason = "REFERENCE_NOT_INITIALIZED";
+    invalid_reason = "POSE_NOT_INITIALIZED";
     return false;
   }
   if (cloud_stamp_ns <= 0 || input.empty()) {
@@ -351,7 +248,7 @@ bool EnuCloudTransformer::transform(
   }
 
   PoseSample reference_pose;
-  if (!pose_buffer_.interpolate(cloud_stamp_ns, reference_pose)) {
+  if (use_odometry_translation_ && !pose_buffer_.interpolate(cloud_stamp_ns, reference_pose)) {
     invalid_reason = "REFERENCE_POSE_NOT_COVERED";
     return false;
   }
@@ -368,11 +265,12 @@ bool EnuCloudTransformer::transform(
       output.push_back(EnuPoint{nan, nan, nan});
       continue;
     }
-    // 厂商驱动用全零点表示低置信度无效点，不能叠加运动平移后变成伪有效点。
+    // 厂商驱动用全零点表示低置信度无效点，不能经过旋转和平移后变成伪有效点。
     if (point.x == 0.0F && point.y == 0.0F && point.z == 0.0F) {
       output.push_back(EnuPoint{});
       continue;
     }
+
     const auto offset_ns = static_cast<std::int64_t>(
       std::llround(static_cast<double>(point.offset_time_s) * 1.0e9));
     if (offset_ns < 0 || cloud_stamp_ns > std::numeric_limits<std::int64_t>::max() - offset_ns) {
@@ -380,6 +278,7 @@ bool EnuCloudTransformer::transform(
       invalid_reason = "INVALID_POINT_TIME";
       return false;
     }
+
     PoseSample point_pose;
     if (!pose_buffer_.interpolate(cloud_stamp_ns + offset_ns, point_pose)) {
       output.clear();
@@ -387,70 +286,40 @@ bool EnuCloudTransformer::transform(
       return false;
     }
 
-    ImuSample imu_sample;
-    if (!interpolateImu(cloud_stamp_ns + offset_ns, imu_sample)) {
-      output.clear();
-      invalid_reason = "POINT_IMU_NOT_COVERED";
-      return false;
-    }
-
-    double Codom_lidar[9];
+    // q2mat经rosQuaternionToMatrix输出R_n<-b，即里程计机体系到导航ENU系的旋转矩阵。
+    double rotation_navigation_from_body[9];
     if (!localization::rosQuaternionToMatrix(
         point_pose.quaternion_xyzw[0], point_pose.quaternion_xyzw[1],
-        point_pose.quaternion_xyzw[2], point_pose.quaternion_xyzw[3], Codom_lidar))
+        point_pose.quaternion_xyzw[2], point_pose.quaternion_xyzw[3],
+        rotation_navigation_from_body))
     {
       output.clear();
       invalid_reason = "INVALID_INTERPOLATED_QUATERNION";
       return false;
     }
-    const double acceleration_odom[3]{
-      Codom_lidar[0] * imu_sample.linear_acceleration_m_s2[0] +
-      Codom_lidar[1] * imu_sample.linear_acceleration_m_s2[1] +
-      Codom_lidar[2] * imu_sample.linear_acceleration_m_s2[2],
-      Codom_lidar[3] * imu_sample.linear_acceleration_m_s2[0] +
-      Codom_lidar[4] * imu_sample.linear_acceleration_m_s2[1] +
-      Codom_lidar[5] * imu_sample.linear_acceleration_m_s2[2],
-      Codom_lidar[6] * imu_sample.linear_acceleration_m_s2[0] +
-      Codom_lidar[7] * imu_sample.linear_acceleration_m_s2[1] +
-      Codom_lidar[8] * imu_sample.linear_acceleration_m_s2[2]};
-    double Cgravity_odom[9];
-    if (!gravityAlignmentMatrix(
-        acceleration_odom, min_gravity_norm_m_s2_, max_gravity_norm_m_s2_, Cgravity_odom))
-    {
-      output.clear();
-      invalid_reason = "INVALID_GRAVITY_NORM";
-      return false;
-    }
-    double Ccorrected_lidar[9];
-    for (int row = 0; row < 3; ++row) {
-      for (int col = 0; col < 3; ++col) {
-        Ccorrected_lidar[row * 3 + col] =
-          Cgravity_odom[row * 3] * Codom_lidar[col] +
-          Cgravity_odom[row * 3 + 1] * Codom_lidar[3 + col] +
-          Cgravity_odom[row * 3 + 2] * Codom_lidar[6 + col];
-      }
-    }
-    const double radar[3]{point.x, point.y, point.z};
-    double odom[3]{
-      Ccorrected_lidar[0] * radar[0] + Ccorrected_lidar[1] * radar[1] +
-      Ccorrected_lidar[2] * radar[2],
-      Ccorrected_lidar[3] * radar[0] + Ccorrected_lidar[4] * radar[1] +
-      Ccorrected_lidar[5] * radar[2],
-      Ccorrected_lidar[6] * radar[0] + Ccorrected_lidar[7] * radar[1] +
-      Ccorrected_lidar[8] * radar[2]};
+
+    const double radar_point[3]{point.x, point.y, point.z};
+    double body_point[3];
+    multiplyMatrixVector(lidar_to_odometry_rotation_.data(), radar_point, body_point);
+
+    // r_n = R_n<-b(t_i) * C0_b<-l * r_l。
+    double navigation_point[3];
+    multiplyMatrixVector(rotation_navigation_from_body, body_point, navigation_point);
+
     if (use_odometry_translation_) {
       for (std::size_t index = 0; index < 3U; ++index) {
-        odom[index] += point_pose.position_m[index] - reference_pose.position_m[index];
+        navigation_point[index] +=
+          point_pose.position_m[index] - reference_pose.position_m[index];
       }
     }
-    const double enu[3]{
-      Cenu_odom_[0] * odom[0] + Cenu_odom_[1] * odom[1] + Cenu_odom_[2] * odom[2],
-      Cenu_odom_[3] * odom[0] + Cenu_odom_[4] * odom[1] + Cenu_odom_[5] * odom[2],
-      Cenu_odom_[6] * odom[0] + Cenu_odom_[7] * odom[1] + Cenu_odom_[8] * odom[2]};
+
     output.push_back(
       EnuPoint{
-        static_cast<float>(enu[0]), static_cast<float>(enu[1]), static_cast<float>(enu[2])});
+        static_cast<float>(navigation_point[0]),
+        static_cast<float>(navigation_point[1]),
+        static_cast<float>(navigation_point[2])});
   }
+
   invalid_reason = "NONE";
   return true;
 }

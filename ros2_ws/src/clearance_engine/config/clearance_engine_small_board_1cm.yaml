@@ -16,17 +16,13 @@ clearance_engine_node:
     ransac.max_iterations: 500
     ransac.probability: 0.99
     ransac.max_candidate_planes: 8
-
-    # 30 cm × 30 cm水平木板静态验证参数。
-    # 顶面移除后剩余点数可能较少，因此降低继续搜索门限。
     ransac.min_remaining_points: 100
-    # 最终RANSAC门限取绝对门限和比例门限中的较大值。
     ransac.min_inliers_absolute: 50
     ransac.min_inlier_ratio: 0.0003
 
-    # 2 cm网格比1 cm网格更能保持稀疏木板回波的八邻域连通性。
-    # 最低跨度约10 cm，最低占用面积约48 cm²。
-    region.grid_size_m: 0.020
+    # 1 cm网格实验配置。点间距超过约1.4 cm时，连通区域可能破碎。
+    # 最低跨度约5 cm，最低占用面积约15 cm²。
+    region.grid_size_m: 0.010
     region.min_span_cells: 5
-    region.min_occupied_cells: 12
+    region.min_occupied_cells: 15
     region.max_residual_p95_m: 0.05

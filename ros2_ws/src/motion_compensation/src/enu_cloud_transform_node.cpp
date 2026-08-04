@@ -1,14 +1,13 @@
 #include "motion_compensation/enu_cloud_transformer.hpp"
 
 #include <builtin_interfaces/msg/time.hpp>
-#include <sensor_msgs/msg/imu.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <sensor_msgs/point_cloud2_iterator.hpp>
 
 #include <algorithm>
-#include <chrono>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <deque>
@@ -37,25 +36,38 @@ bool hasFloat32Field(const sensor_msgs::msg::PointCloud2 & message, const std::s
     });
 }
 
+RotationMatrix3d vectorToRotationMatrix(const std::vector<double> & values)
+{
+  if (values.size() != 9U) {
+    throw std::invalid_argument("lidar_to_odometry_rotation必须包含9个按行排列的数值");
+  }
+  RotationMatrix3d rotation{};
+  std::copy(values.begin(), values.end(), rotation.begin());
+  return rotation;
+}
+
 }  // namespace
 
 class EnuCloudTransformNode : public rclcpp::Node
 {
 public:
   EnuCloudTransformNode()
-  : Node("enu_cloud_transform_node"),
-    transformer_(
+  : Node("enu_cloud_transform_node")
+  {
+    const auto lidar_to_odometry_rotation = vectorToRotationMatrix(
+      declare_parameter<std::vector<double>>(
+        "lidar_to_odometry_rotation",
+        std::vector<double>{-1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0}));
+    transformer_ = std::make_unique<EnuCloudTransformer>(
       secondsToNanoseconds(declare_parameter<double>("pose_cache_duration_s", 2.0)),
       secondsToNanoseconds(declare_parameter<double>("max_interpolation_gap_s", 0.02)),
       declare_parameter<bool>("use_odometry_translation", false),
-      declare_parameter<double>("min_gravity_norm_m_s2", 7.0),
-      declare_parameter<double>("max_gravity_norm_m_s2", 12.0))
-  {
+      lidar_to_odometry_rotation);
+
     input_topic_ = declare_parameter<std::string>(
       "input_cloud_topic", "/capture/lidar/points_raw");
     odometry_topic_ = declare_parameter<std::string>(
       "odometry_topic", "/capture/odometry/high_rate");
-    imu_topic_ = declare_parameter<std::string>("imu_topic", "/capture/imu/data");
     output_topic_ = declare_parameter<std::string>(
       "output_cloud_topic", "/capture/lidar/points_compensated_enu");
     output_frame_id_ = declare_parameter<std::string>("output_frame_id", "lidar_local_enu");
@@ -70,15 +82,13 @@ public:
     odometry_subscription_ = create_subscription<nav_msgs::msg::Odometry>(
       odometry_topic_, rclcpp::QoS(rclcpp::KeepLast(1000)).best_effort().durability_volatile(),
       std::bind(&EnuCloudTransformNode::odometryCallback, this, std::placeholders::_1));
-    imu_subscription_ = create_subscription<sensor_msgs::msg::Imu>(
-      imu_topic_, rclcpp::QoS(rclcpp::KeepLast(1000)).best_effort().durability_volatile(),
-      std::bind(&EnuCloudTransformNode::imuCallback, this, std::placeholders::_1));
     cloud_subscription_ = create_subscription<sensor_msgs::msg::PointCloud2>(
       input_topic_, rclcpp::QoS(rclcpp::KeepLast(2)).reliable().durability_volatile(),
       std::bind(&EnuCloudTransformNode::cloudCallback, this, std::placeholders::_1));
 
     RCLCPP_INFO(
-      get_logger(), "ENU点云转换已启动：cloud=%s odom=%s output=%s frame=%s",
+      get_logger(),
+      "ENU点云转换已启动：cloud=%s odom=%s output=%s frame=%s；天向仅由里程计四元数确定",
       input_topic_.c_str(), odometry_topic_.c_str(), output_topic_.c_str(),
       output_frame_id_.c_str());
   }
@@ -102,7 +112,7 @@ private:
     sample.quaternion_xyzw = {
       message->pose.pose.orientation.x, message->pose.pose.orientation.y,
       message->pose.pose.orientation.z, message->pose.pose.orientation.w};
-    if (!transformer_.addPose(sample)) {
+    if (!transformer_->addPose(sample)) {
       RCLCPP_WARN_THROTTLE(
         get_logger(), *get_clock(), 5000, "拒绝无效或乱序的高频里程计姿态");
       return;
@@ -119,22 +129,6 @@ private:
       pending_clouds_.pop_front();
     }
     pending_clouds_.push_back(message);
-    processPendingClouds();
-  }
-
-  void imuCallback(const sensor_msgs::msg::Imu::ConstSharedPtr message)
-  {
-    ImuSample sample;
-    sample.stamp_ns = stampToNanoseconds(message->header.stamp);
-    sample.angular_velocity_rad_s = {
-      message->angular_velocity.x, message->angular_velocity.y, message->angular_velocity.z};
-    sample.linear_acceleration_m_s2 = {
-      message->linear_acceleration.x, message->linear_acceleration.y,
-      message->linear_acceleration.z};
-    if (!transformer_.addImu(sample)) {
-      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000, "拒绝无效或乱序的IMU样本");
-      return;
-    }
     processPendingClouds();
   }
 
@@ -175,7 +169,7 @@ private:
 
   void processPendingClouds()
   {
-    while (!pending_clouds_.empty() && transformer_.initialized()) {
+    while (!pending_clouds_.empty() && transformer_->initialized()) {
       const auto message = pending_clouds_.front();
       std::vector<TimedRadarPoint> raw_points;
       std::int64_t last_point_stamp_ns = 0;
@@ -187,22 +181,12 @@ private:
         continue;
       }
       const std::int64_t cloud_stamp_ns = stampToNanoseconds(message->header.stamp);
-      if (transformer_.newestPoseStampNs() < last_point_stamp_ns) {
+      if (transformer_->newestPoseStampNs() < last_point_stamp_ns) {
         return;
       }
-      if (transformer_.newestImuStampNs() < last_point_stamp_ns) {
-        return;
-      }
-      if (transformer_.oldestPoseStampNs() > cloud_stamp_ns) {
+      if (transformer_->oldestPoseStampNs() > cloud_stamp_ns) {
         RCLCPP_WARN_THROTTLE(
           get_logger(), *get_clock(), 5000, "点云起始时间早于姿态缓存，无法补偿");
-        publishEmptyCloud(*message);
-        pending_clouds_.pop_front();
-        continue;
-      }
-      if (transformer_.oldestImuStampNs() > cloud_stamp_ns) {
-        RCLCPP_WARN_THROTTLE(
-          get_logger(), *get_clock(), 5000, "点云起始时间早于IMU缓存，无法补偿");
         publishEmptyCloud(*message);
         pending_clouds_.pop_front();
         continue;
@@ -210,7 +194,7 @@ private:
 
       std::vector<EnuPoint> enu_points;
       std::string invalid_reason;
-      if (!transformer_.transform(cloud_stamp_ns, raw_points, enu_points, invalid_reason)) {
+      if (!transformer_->transform(cloud_stamp_ns, raw_points, enu_points, invalid_reason)) {
         RCLCPP_WARN_THROTTLE(
           get_logger(), *get_clock(), 5000, "ENU点云转换失败：%s", invalid_reason.c_str());
         publishEmptyCloud(*message);
@@ -259,16 +243,14 @@ private:
     output_publisher_->publish(output);
   }
 
-  EnuCloudTransformer transformer_;
+  std::unique_ptr<EnuCloudTransformer> transformer_;
   std::string input_topic_;
   std::string odometry_topic_;
-  std::string imu_topic_;
   std::string output_topic_;
   std::string output_frame_id_;
   std::size_t pending_cloud_limit_{2U};
   std::deque<sensor_msgs::msg::PointCloud2::ConstSharedPtr> pending_clouds_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odometry_subscription_;
-  rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_subscription_;
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr cloud_subscription_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr output_publisher_;
 };

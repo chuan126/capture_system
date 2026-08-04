@@ -1,0 +1,27 @@
+clearance_engine_node:
+  ros__parameters:
+    input_topic: /capture/lidar/points_compensated_enu
+    output_topic: /capture/clearance/result
+    expected_frame_id: lidar_local_enu
+
+    filter.min_range_m: 0.20
+
+    roi.min_up_height_m: 0.20
+    roi.max_up_height_m: 15.0
+    roi.east_half_angle_deg: 55.0
+    roi.north_half_angle_deg: 35.0
+
+    ransac.max_normal_angle_deg: 15.0
+    ransac.distance_threshold_m: 0.04
+    ransac.max_iterations: 500
+    ransac.probability: 0.99
+    ransac.max_candidate_planes: 8
+    ransac.min_remaining_points: 500
+    ransac.min_inliers_absolute: 300
+    ransac.min_inlier_ratio: 0.005
+
+    # 10×10格偶发切掉真实顶面，8×8格会接纳小碎片；实测折中为9×9格。
+    region.grid_size_m: 0.10
+    region.min_span_cells: 9
+    region.min_occupied_cells: 81
+    region.max_residual_p95_m: 0.05

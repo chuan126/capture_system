@@ -9,7 +9,7 @@ import rclpy
 from builtin_interfaces.msg import Time
 from nav_msgs.msg import Odometry
 from rclpy.qos import QoSProfile, ReliabilityPolicy
-from sensor_msgs.msg import Imu, PointCloud2, PointField
+from sensor_msgs.msg import PointCloud2, PointField
 from sensor_msgs_py import point_cloud2
 from std_msgs.msg import Header
 
@@ -46,7 +46,7 @@ class TestEnuCloudTransformNode(unittest.TestCase):
     def tearDown(self):
         self.node.destroy_node()
 
-    def test_publishes_xyz_as_east_north_up_for_identity_pose(self):
+    def test_applies_default_c0_for_identity_odometry_pose(self):
         reliable = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
         best_effort = QoSProfile(
             depth=100, reliability=ReliabilityPolicy.BEST_EFFORT
@@ -56,9 +56,6 @@ class TestEnuCloudTransformNode(unittest.TestCase):
         )
         odometry_publisher = self.node.create_publisher(
             Odometry, "/capture/odometry/high_rate", best_effort
-        )
-        imu_publisher = self.node.create_publisher(
-            Imu, "/capture/imu/data", best_effort
         )
         outputs = []
         self.node.create_subscription(
@@ -72,12 +69,10 @@ class TestEnuCloudTransformNode(unittest.TestCase):
         while time.monotonic() < discovery_deadline and (
             cloud_publisher.get_subscription_count() == 0
             or odometry_publisher.get_subscription_count() == 0
-            or imu_publisher.get_subscription_count() == 0
         ):
             rclpy.spin_once(self.node, timeout_sec=0.05)
         self.assertGreater(cloud_publisher.get_subscription_count(), 0)
         self.assertGreater(odometry_publisher.get_subscription_count(), 0)
-        self.assertGreater(imu_publisher.get_subscription_count(), 0)
 
         base_stamp = self.node.get_clock().now().to_msg()
         for delta_ns in (0, 10_000_000):
@@ -85,10 +80,6 @@ class TestEnuCloudTransformNode(unittest.TestCase):
             odometry.header.stamp = add_nanoseconds(base_stamp, delta_ns)
             odometry.pose.pose.orientation.w = 1.0
             odometry_publisher.publish(odometry)
-            imu = Imu()
-            imu.header.stamp = odometry.header.stamp
-            imu.linear_acceleration.z = 9.81
-            imu_publisher.publish(imu)
             rclpy.spin_once(self.node, timeout_sec=0.05)
 
         fields = [
@@ -118,6 +109,6 @@ class TestEnuCloudTransformNode(unittest.TestCase):
             )
         )
         self.assertEqual(len(points), 1)
-        self.assertAlmostEqual(float(points[0][0]), 1.0, places=6)
-        self.assertAlmostEqual(float(points[0][1]), 2.0, places=6)
+        self.assertAlmostEqual(float(points[0][0]), -1.0, places=6)
+        self.assertAlmostEqual(float(points[0][1]), -2.0, places=6)
         self.assertAlmostEqual(float(points[0][2]), 3.0, places=6)

@@ -27,26 +27,27 @@ void setInvalidPoint(EnuPoint3d & point) noexcept
 }  // namespace
 
 bool rosQuaternionToMatrix(
-  double x, double y, double z, double w, double Cnb[9]) noexcept
+  double x, double y, double z, double w, double R_navigation_from_body[9]) noexcept
 {
-  if (Cnb == nullptr || !std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z) ||
-    !std::isfinite(w))
+  if (R_navigation_from_body == nullptr || !std::isfinite(x) || !std::isfinite(y) ||
+    !std::isfinite(z) || !std::isfinite(w))
   {
-    if (Cnb != nullptr) {
-      setInvalidMatrix(Cnb);
+    if (R_navigation_from_body != nullptr) {
+      setInvalidMatrix(R_navigation_from_body);
     }
     return false;
   }
 
   const double norm = std::sqrt(x * x + y * y + z * z + w * w);
   if (!std::isfinite(norm) || norm <= 1.0e-12) {
-    setInvalidMatrix(Cnb);
+    setInvalidMatrix(R_navigation_from_body);
     return false;
   }
 
-  // 独立姿态库使用[w, x, y, z]顺序，ROS消息则使用[x, y, z, w]。
+  // q2mat使用[w, x, y, z]顺序，ROS消息使用[x, y, z, w]。
+  // 本项目已确认q2mat输出R_n<-b，即机体系到导航系的旋转矩阵。
   double qnb[4]{w / norm, x / norm, y / norm, z / norm};
-  q2mat(qnb, Cnb);
+  q2mat(qnb, R_navigation_from_body);
   return true;
 }
 

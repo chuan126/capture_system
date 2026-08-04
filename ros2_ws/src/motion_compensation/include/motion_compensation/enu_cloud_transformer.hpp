@@ -11,6 +11,8 @@
 namespace motion_compensation
 {
 
+using RotationMatrix3d = std::array<double, 9>;
+
 struct PoseSample
 {
   std::int64_t stamp_ns{0};
@@ -24,13 +26,6 @@ struct TimedRadarPoint
   float y{0.0F};
   float z{0.0F};
   float offset_time_s{0.0F};
-};
-
-struct ImuSample
-{
-  std::int64_t stamp_ns{0};
-  std::array<double, 3> angular_velocity_rad_s{};
-  std::array<double, 3> linear_acceleration_m_s2{};
 };
 
 struct EnuPoint
@@ -62,32 +57,20 @@ class EnuCloudTransformer
 public:
   EnuCloudTransformer(
     std::int64_t cache_duration_ns, std::int64_t max_interpolation_gap_ns,
-    bool use_odometry_translation, double min_gravity_norm_m_s2 = 7.0,
-    double max_gravity_norm_m_s2 = 12.0);
+    bool use_odometry_translation, const RotationMatrix3d & lidar_to_odometry_rotation);
 
   bool addPose(const PoseSample & sample) noexcept;
-  bool addImu(const ImuSample & sample) noexcept;
   bool initialized() const noexcept;
   std::int64_t oldestPoseStampNs() const noexcept;
   std::int64_t newestPoseStampNs() const noexcept;
-  std::int64_t oldestImuStampNs() const noexcept;
-  std::int64_t newestImuStampNs() const noexcept;
   bool transform(
     std::int64_t cloud_stamp_ns, const std::vector<TimedRadarPoint> & input,
     std::vector<EnuPoint> & output, std::string & invalid_reason) const noexcept;
 
 private:
   PoseBuffer pose_buffer_;
-  std::int64_t cache_duration_ns_;
-  std::int64_t max_interpolation_gap_ns_;
-  std::deque<ImuSample> imu_samples_;
   bool use_odometry_translation_;
-  double min_gravity_norm_m_s2_;
-  double max_gravity_norm_m_s2_;
-  bool initialized_{false};
-  double Cenu_odom_[9]{};
-
-  bool interpolateImu(std::int64_t stamp_ns, ImuSample & output) const noexcept;
+  RotationMatrix3d lidar_to_odometry_rotation_;
 };
 
 }  // namespace motion_compensation
