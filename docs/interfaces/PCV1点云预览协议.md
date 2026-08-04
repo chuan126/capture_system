@@ -6,9 +6,9 @@
 
 ## 1. 适用范围
 
-PCV1用于FastAPI向局域网浏览器发送ROS 2侧已经限频并限制最大点数的当前帧
-原始点云。点的XYZ数值保持传感器局部坐标语义；`frame_id` 原样携带，但不得在
-完成标定前据此推断厂商消息的实际坐标变换。
+PCV1用于FastAPI向局域网浏览器发送ROS 2侧已经完成姿态补偿、限频并限制最大
+点数的当前帧局部东北天点云。点坐标固定为`x=East`、`y=North`、`z=Up`，单位米；
+`frame_id`固定为`lidar_local_enu`。
 
 PCV1不是ROS 2消息，不用于净空计算、记录、坐标转换或跨设备传感器同步。
 
@@ -47,8 +47,8 @@ FastAPI依赖ROS预览Topic符合固定输出契约，不检查PointCloud2字段
   "point_format": "xyz_float32_le",
   "point_stride": 12,
   "max_points": 10000,
-  "frame_id": "device0/odom",
-  "coordinate_mode": "sensor_local",
+  "frame_id": "lidar_local_enu",
+  "coordinate_mode": "local_enu",
   "sensor_clock": "device_boot",
   "color_mode": "single"
 }
@@ -56,8 +56,9 @@ FastAPI依赖ROS预览Topic符合固定输出契约，不检查PointCloud2字段
 
 `frame_id` 来自当前ROS预览消息，示例值不是业务代码固定常量。
 
-当前 `coordinate_mode` 固定为 `sensor_local`，表示点坐标没有转换到SLAM世界
-坐标或车辆 `base_link`。如果 `frame_id`、点格式或点数上限变化，服务端
+当前 `coordinate_mode` 固定为 `local_enu`，表示点坐标是以雷达为局部原点的
+东北天坐标，不表示已获得经纬度或全局地图原点。如果 `frame_id`、点格式或点数
+上限变化，服务端
 必须先发送新的 `stream_info`，再发送新语义二进制帧。
 
 ## 4. 状态消息
@@ -133,11 +134,11 @@ float32_le z
 | 1 | `0x0002` | `sensor_stamp_ns`有效 |
 | 2～15 |  | 保留 |
 
-当前运行版发送雷达传感器局部坐标，并未转换为车辆局部坐标，因此位0仍为0。
+当前运行版发送雷达原点下的局部东北天坐标，并未转换为车辆`base_link`，因此位0仍为0。
 设备时间戳有效时位1为1。发送端将其他位全部置0，接收端忽略未知位。
 
-传感器局部坐标语义由`stream_info.coordinate_mode=sensor_local`表达；位0保留是
-为了兼容未来车辆`base_link`坐标转换，不表示当前已完成该转换。
+局部东北天坐标语义由`stream_info.coordinate_mode=local_enu`表达；位0保留是
+为了兼容未来车辆`base_link`坐标转换，不表示当前已完成车辆外参转换。
 
 ## 7. 时间戳语义
 

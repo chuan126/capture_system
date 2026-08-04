@@ -105,14 +105,29 @@ test("keeps dashboard visualizations visible at responsive breakpoints", async (
   assert.match(mobileRules, /\.dashboard-main > \.panel > \.chart\s*\{[^}]*min-height:\s*190px/i);
 });
 
-test("uses the lidar X axis as the point-cloud vertical axis", async () => {
+test("renders the local ENU point cloud and world axes", async () => {
   const viewer = await readFile(
     new URL("../components/point-cloud/PointCloudViewer.tsx", import.meta.url),
     "utf8",
   );
 
-  assert.match(viewer, /perspectiveCamera\.up\.set\(1, 0, 0\)/);
-  assert.match(viewer, /topCamera\.position\.set\(center\.x \+ span \* 2, center\.y, center\.z\)/);
-  assert.match(viewer, /grid\.rotation\.z = -Math\.PI \/ 2/);
-  assert.match(viewer, /雷达局部坐标系 · X轴向上/);
+  assert.match(viewer, /perspectiveCamera\.up\.set\(0, 0, 1\)/);
+  assert.match(viewer, /topCamera\.position\.set\(center\.x, center\.y, center\.z \+ span \* 2\)/);
+  assert.match(viewer, /grid\.rotation\.x = Math\.PI \/ 2/);
+  assert.match(viewer, /makeAxisLabel\("东 E"/);
+  assert.match(viewer, /makeAxisLabel\("北 N"/);
+  assert.match(viewer, /makeAxisLabel\("天 U"/);
+  assert.match(viewer, /enuSceneRoot\.add\(points\)/);
+  assert.match(viewer, /enuSceneRoot\.add\(eastLabel, northLabel, upLabel\)/);
+  assert.match(viewer, /雷达局部东北天 · X=东 · Y=北 · Z=天/);
+});
+
+test("renders the current clearance value and rolling live chart", async () => {
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+
+  assert.match(page, /雷达到当前最低顶面/);
+  assert.match(page, /function LiveClearanceChart/);
+  assert.match(page, /slice\(-120\)/);
+  assert.match(page, /snapshot\.lidar_to_top_m/);
+  assert.match(page, /实时净空高度曲线/);
 });

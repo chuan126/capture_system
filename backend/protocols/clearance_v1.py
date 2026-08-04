@@ -35,8 +35,9 @@ class ClearanceSnapshot:
     selected_tilt_deg: float | None
     residual_median_m: float | None
     residual_p95_m: float | None
-    minimum_position_y_m: float | None
-    minimum_position_z_m: float | None
+    minimum_position_east_m: float | None
+    minimum_position_north_m: float | None
+    minimum_position_up_m: float | None
     valid_point_ratio: float | None
     invalid_reason: str
     processing_time_ms: float | None
@@ -59,8 +60,15 @@ def from_ros_message(message: object, sequence: int) -> ClearanceSnapshot:
         selected_tilt_deg=_finite_or_none(getattr(message, "selected_tilt_deg")),
         residual_median_m=_finite_or_none(getattr(message, "residual_median_m")),
         residual_p95_m=_finite_or_none(getattr(message, "residual_p95_m")),
-        minimum_position_y_m=_finite_or_none(getattr(message, "minimum_position_y_m")),
-        minimum_position_z_m=_finite_or_none(getattr(message, "minimum_position_z_m")),
+        minimum_position_east_m=_finite_or_none(
+            getattr(message, "minimum_position_east_m")
+        ),
+        minimum_position_north_m=_finite_or_none(
+            getattr(message, "minimum_position_north_m")
+        ),
+        minimum_position_up_m=_finite_or_none(
+            getattr(message, "minimum_position_up_m")
+        ),
         valid_point_ratio=_finite_or_none(getattr(message, "valid_point_ratio")),
         invalid_reason=str(getattr(message, "invalid_reason")),
         processing_time_ms=_finite_or_none(getattr(message, "processing_time_ms")),

@@ -60,5 +60,6 @@ if(BUILD_TESTING)
 endif()
 
 ament_export_include_directories(include)
+ament_export_libraries(attitude_matrix localization_attitude_transform)
 ament_export_targets(export_localization_attitude_matrix HAS_LIBRARY_TARGET)
 ament_package()

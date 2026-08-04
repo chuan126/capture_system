@@ -11,8 +11,8 @@ bringup/                                      # ROS 2业务节点启动编排包
 ├── package.xml                               # ROS 2包元数据与运行依赖
 ├── README.md                                 # 包职责、构建和启动说明
 └── launch/                                   # 系统Launch入口目录
-    ├── clearance_preview.launch.py           # 首版实时净空计算节点启动入口
-    └── cloud_preview.launch.py               # 浏览器SLAM点云预览节点启动入口
+    ├── clearance_preview.launch.py           # ENU逐点补偿与实时净空计算启动入口
+    └── cloud_preview.launch.py               # 浏览器局部东北天点云预览节点启动入口
 ```
 
 ## 点云预览启动

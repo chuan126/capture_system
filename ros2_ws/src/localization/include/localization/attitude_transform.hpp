@@ -27,6 +27,11 @@ bool initializeLocalEnuReference(
   double quaternion_x, double quaternion_y, double quaternion_z, double quaternion_w,
   double Cenu_odom[9]) noexcept;
 
+// 仅将初始化航向定义为局部东向，保留里程计坐标系的重力Up方向。
+bool initializeGravityAlignedEnuReference(
+  double quaternion_x, double quaternion_y, double quaternion_z, double quaternion_w,
+  double Cenu_odom[9]) noexcept;
+
 // 组合初始化参考和当前姿态，得到雷达xyz到局部ENU的纯旋转矩阵。
 bool radarToLocalEnuMatrix(
   double quaternion_x, double quaternion_y, double quaternion_z, double quaternion_w,

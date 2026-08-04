@@ -19,8 +19,9 @@ export type ClearanceSnapshot = {
   selected_tilt_deg: number | null;
   residual_median_m: number | null;
   residual_p95_m: number | null;
-  minimum_position_y_m: number | null;
-  minimum_position_z_m: number | null;
+  minimum_position_east_m: number | null;
+  minimum_position_north_m: number | null;
+  minimum_position_up_m: number | null;
   valid_point_ratio: number | null;
   invalid_reason: string;
   processing_time_ms: number | null;
@@ -66,8 +67,9 @@ export function parseClearanceText(text: string): ClearanceTextMessage {
     "selected_tilt_deg",
     "residual_median_m",
     "residual_p95_m",
-    "minimum_position_y_m",
-    "minimum_position_z_m",
+    "minimum_position_east_m",
+    "minimum_position_north_m",
+    "minimum_position_up_m",
     "valid_point_ratio",
     "processing_time_ms",
   ] as const;

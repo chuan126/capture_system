@@ -8,6 +8,11 @@ from launch_ros.actions import Node
 
 
 def generate_launch_description() -> LaunchDescription:
+    motion_parameters = (
+        Path(get_package_share_directory("motion_compensation"))
+        / "config"
+        / "motion_compensation.yaml"
+    )
     default_parameters = (
         Path(get_package_share_directory("clearance_engine"))
         / "config"
@@ -21,6 +26,13 @@ def generate_launch_description() -> LaunchDescription:
                 "parameters_file",
                 default_value=str(default_parameters),
                 description="首版净空算法参数文件绝对路径",
+            ),
+            Node(
+                package="motion_compensation",
+                executable="enu_cloud_transform_node",
+                name="enu_cloud_transform_node",
+                output="screen",
+                parameters=[str(motion_parameters)],
             ),
             Node(
                 package="clearance_engine",

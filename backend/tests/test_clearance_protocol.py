@@ -16,8 +16,9 @@ def make_message(*, valid: bool, height: float) -> SimpleNamespace:
         selected_tilt_deg=2.5,
         residual_median_m=0.01,
         residual_p95_m=0.03,
-        minimum_position_y_m=-0.4,
-        minimum_position_z_m=0.7,
+        minimum_position_east_m=-0.4,
+        minimum_position_north_m=0.7,
+        minimum_position_up_m=height,
         valid_point_ratio=0.51,
         invalid_reason="NONE" if valid else "NO_PLANE_FOUND",
         processing_time_ms=46.8,
@@ -32,7 +33,8 @@ def test_maps_valid_clearance_result() -> None:
     assert snapshot.frame_id == "odin_lidar"
     assert snapshot.valid is True
     assert snapshot.lidar_to_top_m == 1.723
-    assert snapshot.minimum_position_y_m == -0.4
+    assert snapshot.minimum_position_east_m == -0.4
+    assert snapshot.minimum_position_up_m == 1.723
     assert snapshot.to_message()["type"] == "clearance_snapshot"
 
 

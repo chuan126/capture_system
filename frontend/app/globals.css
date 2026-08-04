@@ -325,6 +325,10 @@ button:focus-visible {
 .chart__grid, .cloud-view__grid { position: absolute; inset: 17px 19px 24px 38px; background-image: linear-gradient(#e9edf3 1px, transparent 1px), linear-gradient(90deg, #e9edf3 1px, transparent 1px); background-size: 20% 25%; border-left: 1px solid #aab4c2; border-bottom: 1px solid #aab4c2; }
 .chart__axis { position: absolute; top: 13px; bottom: 22px; left: 7px; display: flex; flex-direction: column; justify-content: space-between; color: #9aa5b4; font: 8px/1 Arial; }
 .chart__axis--x { top: auto; right: 15px; bottom: 7px; left: 36px; flex-direction: row; }
+.live-clearance-chart svg { position: absolute; inset: 17px 19px 24px 38px; width: calc(100% - 57px); height: calc(100% - 41px); overflow: visible; }
+.live-clearance-chart path { fill: none; stroke: var(--primary); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.live-clearance-chart circle { fill: #fff; stroke: var(--primary); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.live-clearance-chart__status { position: absolute; top: 10px; right: 12px; max-width: 55%; padding: 5px 8px; overflow: hidden; color: #8a641c; border: 1px solid #f0dfb1; border-radius: 8px; background: rgba(255, 248, 229, .94); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
 .empty-state--compact { padding: 11px 18px; border-radius: 11px; background: rgba(251,252,254,.9); }
 .legend { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 9px; }
 .legend i { width: 12px; height: 2px; border-radius: 2px; background: var(--primary); }

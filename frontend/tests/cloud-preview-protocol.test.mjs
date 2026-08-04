@@ -35,7 +35,7 @@ test("rejects truncated and oversized PCV1 frames", () => {
   assert.throws(() => parseCloudPreviewBinary(wrongLength));
 });
 
-test("accepts only sensor-local stream descriptions", () => {
+test("accepts only local ENU stream descriptions", () => {
   const stream = parseCloudPreviewText(JSON.stringify({
     type: "stream_info",
     protocol: "PCV1",
@@ -44,11 +44,16 @@ test("accepts only sensor-local stream descriptions", () => {
     point_format: "xyz_float32_le",
     point_stride: 12,
     max_points: 10_000,
-    frame_id: "device0/odom",
-    coordinate_mode: "sensor_local",
+    frame_id: "lidar_local_enu",
+    coordinate_mode: "local_enu",
     sensor_clock: "device_boot",
     color_mode: "single",
   }));
   assert.equal(stream.type, "stream_info");
-  assert.equal(stream.frame_id, "device0/odom");
+  assert.equal(stream.frame_id, "lidar_local_enu");
+
+  assert.throws(() => parseCloudPreviewText(JSON.stringify({
+    ...stream,
+    coordinate_mode: "sensor_local",
+  })));
 });

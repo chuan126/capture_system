@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { useClearanceSocket } from "@/components/clearance/useClearanceSocket";
+import type { ClearanceSnapshot } from "@/components/clearance/clearanceProtocol";
 import PointCloudViewer from "@/components/point-cloud/PointCloudViewer";
 import type { PointCloudViewMode } from "@/components/point-cloud/PointCloudViewer";
 import { useRtkSocket } from "@/components/rtk/useRtkSocket";
@@ -103,6 +104,97 @@ function EmptyChart({
             ? "当前数值显示在右侧，曲线等待任务里程链路"
             : "采集开始后在此显示实时结果"}
       />
+    </div>
+  );
+}
+
+type LiveClearanceSample = {
+  sequence: number;
+  heightM: number | null;
+};
+
+function LiveClearanceChart({
+  snapshot,
+  streaming,
+  detail,
+}: {
+  snapshot: ClearanceSnapshot | null;
+  streaming: boolean;
+  detail: string;
+}) {
+  const [samples, setSamples] = useState<LiveClearanceSample[]>([]);
+
+  useEffect(() => {
+    if (!snapshot) return;
+    const heightM = snapshot.valid && snapshot.lidar_to_top_m !== null
+      ? snapshot.lidar_to_top_m
+      : null;
+    setSamples((current) => {
+      if (current.at(-1)?.sequence === snapshot.sequence) return current;
+      return [...current, { sequence: snapshot.sequence, heightM }].slice(-120);
+    });
+  }, [snapshot]);
+
+  const chart = useMemo(() => {
+    const values = samples
+      .map((sample) => sample.heightM)
+      .filter((height): height is number => height !== null);
+    if (values.length === 0) return null;
+
+    const valueMin = Math.min(...values);
+    const valueMax = Math.max(...values);
+    const padding = Math.max((valueMax - valueMin) * 0.2, 0.1);
+    const yMin = Math.max(0, valueMin - padding);
+    const yMax = valueMax + padding;
+    const xFor = (index: number) => samples.length <= 1
+      ? 50
+      : 8 + index / (samples.length - 1) * 90;
+    const yFor = (height: number) => 92 - (height - yMin) / (yMax - yMin) * 84;
+
+    const segments: string[] = [];
+    let segment = "";
+    samples.forEach((sample, index) => {
+      if (sample.heightM === null) {
+        if (segment) segments.push(segment);
+        segment = "";
+        return;
+      }
+      const point = `${xFor(index).toFixed(2)} ${yFor(sample.heightM).toFixed(2)}`;
+      segment += `${segment ? " L" : "M"}${point}`;
+    });
+    if (segment) segments.push(segment);
+
+    const latestIndex = samples.findLastIndex((sample) => sample.heightM !== null);
+    const latest = latestIndex >= 0 && samples[latestIndex].heightM !== null
+      ? { x: xFor(latestIndex), y: yFor(samples[latestIndex].heightM!) }
+      : null;
+    return { yMin, yMax, segments, latest };
+  }, [samples]);
+
+  if (!chart) {
+    return <EmptyChart clearanceActive={streaming} />;
+  }
+
+  return (
+    <div className="chart live-clearance-chart" aria-label="实时净空高度曲线">
+      <div className="chart__grid" />
+      <div className="chart__axis chart__axis--y">
+        <span>{chart.yMax.toFixed(2)}</span>
+        <span>{((chart.yMax + chart.yMin) / 2).toFixed(2)}</span>
+        <span>{chart.yMin.toFixed(2)}</span>
+      </div>
+      <div className="chart__axis chart__axis--x">
+        <span>较早</span><span>最近120帧</span><span>当前</span>
+      </div>
+      <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+        {chart.segments.map((path, index) => (
+          <path key={`${samples[0]?.sequence}-${index}`} d={path} />
+        ))}
+        {chart.latest && <circle cx={chart.latest.x} cy={chart.latest.y} r="1.25" />}
+      </svg>
+      {!streaming && (
+        <div className="live-clearance-chart__status" role="status">{detail}</div>
+      )}
     </div>
   );
 }
@@ -283,15 +375,18 @@ function Dashboard() {
           <article className="panel">
             <PanelHead
               title="实时净空高度曲线"
-              description="当前任务的净空变化与高度阈值"
+              description="最近120帧有效高度与无效帧断点"
               trailing={
                 <div className="legend">
                   <span><i />实时净空</span>
-                  <span><i />高度阈值</span>
                 </div>
               }
             />
-            <EmptyChart clearanceActive={clearanceStreaming} />
+            <LiveClearanceChart
+              snapshot={clearanceSnapshot}
+              streaming={clearanceStreaming}
+              detail={clearance.detail}
+            />
           </article>
         </div>
 

@@ -43,7 +43,7 @@ class TestClearanceEngineNode(unittest.TestCase):
     def test_publishes_valid_result_for_synthetic_plane(self):
         qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
         publisher = self.node.create_publisher(
-            PointCloud2, "/capture/lidar/points_raw", qos
+            PointCloud2, "/capture/lidar/points_compensated_enu", qos
         )
         results = []
         self.node.create_subscription(
@@ -54,10 +54,12 @@ class TestClearanceEngineNode(unittest.TestCase):
         )
 
         points = []
-        for y_index in range(-20, 21):
-            for z_index in range(-20, 21):
-                points.append((2.0, y_index * 0.05, z_index * 0.05))
-        message = point_cloud2.create_cloud_xyz32(Header(frame_id="lidar_test"), points)
+        for east_index in range(-20, 21):
+            for north_index in range(-20, 21):
+                points.append((east_index * 0.05, north_index * 0.05, 2.0))
+        message = point_cloud2.create_cloud_xyz32(
+            Header(frame_id="lidar_local_enu"), points
+        )
 
         deadline = time.monotonic() + 10.0
         while time.monotonic() < deadline and not results:

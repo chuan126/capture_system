@@ -9,8 +9,9 @@ float64 selected_area_m2
 float64 selected_tilt_deg
 float64 residual_median_m
 float64 residual_p95_m
-float64 minimum_position_y_m
-float64 minimum_position_z_m
+float64 minimum_position_east_m
+float64 minimum_position_north_m
+float64 minimum_position_up_m
 float64 valid_point_ratio
 string invalid_reason
 float64 processing_time_ms

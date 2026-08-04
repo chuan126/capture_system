@@ -12,15 +12,16 @@ namespace
 {
 
 std::vector<Point3f> makePlane(
-  const double center_height, const double slope_y = 0.0, const double slope_z = 0.0,
+  const double center_height, const double slope_east = 0.0, const double slope_north = 0.0,
   const double half_extent_m = 1.0, const double step_m = 0.05)
 {
   std::vector<Point3f> points;
-  for (double y = -half_extent_m; y <= half_extent_m + 1e-9; y += step_m) {
-    for (double z = -half_extent_m; z <= half_extent_m + 1e-9; z += step_m) {
-      const double x = center_height + slope_y * y + slope_z * z;
-      points.push_back(Point3f{
-        static_cast<float>(x), static_cast<float>(y), static_cast<float>(z)});
+  for (double east = -half_extent_m; east <= half_extent_m + 1e-9; east += step_m) {
+    for (double north = -half_extent_m; north <= half_extent_m + 1e-9; north += step_m) {
+      const double up = center_height + slope_east * east + slope_north * north;
+      points.push_back(
+        Point3f{
+            static_cast<float>(east), static_cast<float>(north), static_cast<float>(up)});
     }
   }
   return points;
@@ -82,9 +83,10 @@ TEST(ClearanceEstimatorTest, FiltersInvalidAndOutsideRoiPoints)
 {
   auto points = makePlane(2.0);
   points.push_back(Point3f{0.0F, 0.0F, 0.0F});
-  points.push_back(Point3f{
-    std::numeric_limits<float>::quiet_NaN(), 0.0F, 0.0F});
-  points.push_back(Point3f{2.0F, 20.0F, 0.0F});
+  points.push_back(
+    Point3f{
+        std::numeric_limits<float>::quiet_NaN(), 0.0F, 0.0F});
+  points.push_back(Point3f{20.0F, 0.0F, 2.0F});
 
   ClearanceEstimator estimator(ClearanceConfig{});
   const auto result = estimator.estimate(points);

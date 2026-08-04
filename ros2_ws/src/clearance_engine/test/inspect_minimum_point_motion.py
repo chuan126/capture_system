@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-"""输出一次最低净空原始点及其对应的 IMU、里程计数据。"""
+"""输出一次局部东北天最低净空点及其对应的 IMU、里程计数据。"""
 
 import argparse
 from collections import deque
@@ -20,6 +20,7 @@ from sensor_msgs_py import point_cloud2
 
 MessageT = TypeVar("MessageT")
 Nanoseconds = int
+EXPECTED_ENU_FRAME_ID = "lidar_local_enu"
 
 
 def stamp_to_nanoseconds(stamp) -> Nanoseconds:
@@ -52,7 +53,7 @@ class MinimumPointMotionInspector(Node):
 
         self.create_subscription(
             PointCloud2,
-            "/capture/lidar/points_raw",
+            "/capture/lidar/points_compensated_enu",
             self._cloud_callback,
             cloud_qos,
         )
@@ -76,6 +77,12 @@ class MinimumPointMotionInspector(Node):
         )
 
     def _cloud_callback(self, message: PointCloud2) -> None:
+        if message.header.frame_id != EXPECTED_ENU_FRAME_ID:
+            self.last_invalid_reason = (
+                "unexpected cloud frame: "
+                f"{message.header.frame_id!r}, expected {EXPECTED_ENU_FRAME_ID!r}"
+            )
+            return
         self.cloud_cache.append(message)
         self._try_output()
 
@@ -93,9 +100,9 @@ class MinimumPointMotionInspector(Node):
             return
 
         fitted_position = (
-            message.lidar_to_top_m,
-            message.minimum_position_y_m,
-            message.minimum_position_z_m,
+            message.minimum_position_east_m,
+            message.minimum_position_north_m,
+            message.minimum_position_up_m,
         )
         if not all(math.isfinite(value) for value in fitted_position):
             self.last_invalid_reason = "clearance result contains non-finite coordinates"
@@ -131,7 +138,7 @@ class MinimumPointMotionInspector(Node):
         return nearest, difference_ns
 
     @staticmethod
-    def _find_nearest_raw_point(
+    def _find_nearest_enu_point(
         cloud: PointCloud2, target: Tuple[float, float, float]
     ) -> Tuple[Optional[Tuple[float, float, float]], float]:
         nearest_point: Optional[Tuple[float, float, float]] = None
@@ -178,39 +185,53 @@ class MinimumPointMotionInspector(Node):
             return
 
         fitted_position = (
-            float(result.lidar_to_top_m),
-            float(result.minimum_position_y_m),
-            float(result.minimum_position_z_m),
+            float(result.minimum_position_east_m),
+            float(result.minimum_position_north_m),
+            float(result.minimum_position_up_m),
         )
-        raw_point, _ = self._find_nearest_raw_point(cloud, fitted_position)
-        if raw_point is None:
-            self.last_invalid_reason = "matched cloud contains no valid XYZ point"
+        enu_point, point_difference_m = self._find_nearest_enu_point(
+            cloud, fitted_position
+        )
+        if enu_point is None:
+            self.last_invalid_reason = "matched ENU cloud contains no valid XYZ point"
             self.pending_result = None
             return
 
         self._print_result(
-            raw_point,
+            result,
+            enu_point,
+            point_difference_m,
             imu,
+            imu_difference_ns,
             odom,
+            odom_difference_ns,
         )
         self.done = True
 
     @staticmethod
     def _print_result(
-        raw_point: Tuple[float, float, float],
+        result: ClearanceResult,
+        enu_point: Tuple[float, float, float],
+        point_difference_m: float,
         imu: Imu,
+        imu_difference_ns: int,
         odom: Odometry,
+        odom_difference_ns: int,
     ) -> None:
         angular = imu.angular_velocity
         acceleration = imu.linear_acceleration
         quaternion = odom.pose.pose.orientation
 
         # 运行时标签仅使用 ASCII，避免远程终端缺少 CJK 字形时出现空白字符。
-        print("\nMinimum raw point coordinates (m):")
-        print(f"  x: {raw_point[0]:.6f}")
-        print(f"  y: {raw_point[1]:.6f}")
-        print(f"  z: {raw_point[2]:.6f}")
-        print("\nIMU:")
+        print("\nMinimum clearance point in local ENU (m):")
+        print(f"  east  (x): {enu_point[0]:.6f}")
+        print(f"  north (y): {enu_point[1]:.6f}")
+        print(f"  up    (z): {enu_point[2]:.6f}")
+        print(f"  lidar_to_top: {result.lidar_to_top_m:.6f}")
+        print(f"  nearest_point_difference: {point_difference_m:.6f}")
+        print(f"  frame_id: {result.header.frame_id}")
+        # IMU 数值仍是传感器体坐标XYZ；这里只验证同一时刻的转换输入，不冒充ENU。
+        print(f"\nIMU (time difference {imu_difference_ns / 1_000_000.0:.3f} ms):")
         print("  angular_velocity rad/s:")
         print(f"    x: {angular.x:.6f}")
         print(f"    y: {angular.y:.6f}")
@@ -219,7 +240,10 @@ class MinimumPointMotionInspector(Node):
         print(f"    x: {acceleration.x:.6f}")
         print(f"    y: {acceleration.y:.6f}")
         print(f"    z: {acceleration.z:.6f}")
-        print("\nOdometry quaternion (x, y, z, w):")
+        print(
+            "\nOdometry quaternion "
+            f"(time difference {odom_difference_ns / 1_000_000.0:.3f} ms; x, y, z, w):"
+        )
         print(f"  x: {quaternion.x:.6f}")
         print(f"  y: {quaternion.y:.6f}")
         print(f"  z: {quaternion.z:.6f}")
@@ -228,7 +252,7 @@ class MinimumPointMotionInspector(Node):
 
 def parse_arguments() -> Tuple[argparse.Namespace, list]:
     parser = argparse.ArgumentParser(
-        description="Print one matched clearance, raw point, IMU and odometry sample"
+        description="Print one matched local-ENU clearance point, IMU and odometry sample"
     )
     parser.add_argument(
         "--timeout-sec",

@@ -22,7 +22,9 @@ public:
   {
     enabled_ = declare_parameter<bool>("enabled", true);
     input_topic_ = declare_parameter<std::string>(
-      "input_topic", "/capture/lidar/points_raw");
+      "input_topic", "/capture/lidar/points_compensated_enu");
+    expected_frame_id_ = declare_parameter<std::string>(
+      "expected_frame_id", "lidar_local_enu");
     output_topic_ = declare_parameter<std::string>(
       "output_topic", "/capture/visualization/cloud_preview");
     publish_rate_hz_ = declare_parameter<double>("publish_rate_hz", 5.0);
@@ -60,8 +62,9 @@ public:
 
     RCLCPP_INFO(
       get_logger(),
-      "实时点云预览已启动：输入=%s，输出=%s，频率=%.2f Hz，最大点数=%zu，启用=%s",
+      "实时点云预览已启动：输入=%s，期望坐标帧=%s，输出=%s，频率=%.2f Hz，最大点数=%zu，启用=%s",
       input_topic_.c_str(),
+      expected_frame_id_.c_str(),
       output_topic_.c_str(),
       publish_rate_hz_,
       max_points_,
@@ -77,6 +80,9 @@ private:
     if (output_topic_.empty()) {
       throw std::invalid_argument("参数output_topic不能为空");
     }
+    if (expected_frame_id_.empty()) {
+      throw std::invalid_argument("参数expected_frame_id不能为空");
+    }
     if (publish_rate_hz_ < 1.0 || publish_rate_hz_ > 10.0) {
       throw std::invalid_argument("参数publish_rate_hz必须位于[1.0, 10.0] Hz");
     }
@@ -87,6 +93,13 @@ private:
 
   void on_cloud(const sensor_msgs::msg::PointCloud2::ConstSharedPtr message)
   {
+    if (message->header.frame_id != expected_frame_id_) {
+      RCLCPP_ERROR_THROTTLE(
+        get_logger(), *get_clock(), 5000,
+        "点云预览拒绝非东北天坐标帧：实际=%s，期望=%s",
+        message->header.frame_id.c_str(), expected_frame_id_.c_str());
+      return;
+    }
     // 锁内只替换共享指针，避免约10 Hz输入链路同步执行整帧复制。
     std::lock_guard<std::mutex> lock(latest_cloud_mutex_);
     latest_cloud_ = message;
@@ -128,6 +141,7 @@ private:
 
   bool enabled_{true};
   std::string input_topic_;
+  std::string expected_frame_id_;
   std::string output_topic_;
   double publish_rate_hz_{5.0};
   std::size_t max_points_{10000U};

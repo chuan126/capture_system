@@ -113,7 +113,8 @@ TEST(AttitudeMatrixTest, CurrentPlacementInitializesLocalEnu)
   // 当前放置被直接规定为X=East、Y=North、Z=Up，因此初始化时坐标数值不变。
   const RadarPoint3d lidar_point{1.25, -0.75, 2.5};
   EnuPoint3d enu{};
-  ASSERT_TRUE(transformRadarPointToLocalEnu(
+  ASSERT_TRUE(
+    transformRadarPointToLocalEnu(
       lidar_point, qx, qy, qz, qw, Cenu_odom, enu));
   EXPECT_NEAR(enu.east, lidar_point.x, 1.0e-9);
   EXPECT_NEAR(enu.north, lidar_point.y, 1.0e-9);
@@ -139,12 +140,42 @@ TEST(AttitudeMatrixTest, CurrentRadarAxesAreDefinedAsEnu)
   }
 }
 
+TEST(AttitudeMatrixTest, GravityAlignedReferenceRemovesOnlyInitialYaw)
+{
+  double attitude[3]{0.30, -0.20, 0.70};
+  double quaternion_wxyz[4];
+  a2qua(attitude, quaternion_wxyz);
+
+  double Cenu_odom[9];
+  ASSERT_TRUE(
+    initializeGravityAlignedEnuReference(
+      quaternion_wxyz[1], quaternion_wxyz[2], quaternion_wxyz[3], quaternion_wxyz[0],
+      Cenu_odom));
+
+  double Codom_lidar[9];
+  ASSERT_TRUE(
+    rosQuaternionToMatrix(
+      quaternion_wxyz[1], quaternion_wxyz[2], quaternion_wxyz[3], quaternion_wxyz[0],
+      Codom_lidar));
+  double Cenu_lidar[9];
+  MatMul(Cenu_odom, Codom_lidar, Cenu_lidar, 3, 3, 3);
+
+  // 初始航向被归零，但横滚和俯仰仍保留，防止把初始倾斜错误定义成水平。
+  EXPECT_NEAR(std::atan2(Cenu_lidar[3], Cenu_lidar[0]), 0.0, 1.0e-12);
+  EXPECT_GT(std::abs(Cenu_lidar[6]), 0.10);
+  EXPECT_GT(std::abs(Cenu_lidar[7]), 0.10);
+  EXPECT_DOUBLE_EQ(Cenu_odom[6], 0.0);
+  EXPECT_DOUBLE_EQ(Cenu_odom[7], 0.0);
+  EXPECT_DOUBLE_EQ(Cenu_odom[8], 1.0);
+}
+
 TEST(AttitudeMatrixTest, RejectsNonFinitePoint)
 {
   const RadarPoint3d lidar_point{std::numeric_limits<double>::quiet_NaN(), 0.0, 0.0};
   EnuPoint3d output{};
   const double identity[9]{1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0};
-  EXPECT_FALSE(transformRadarPointToLocalEnu(
+  EXPECT_FALSE(
+    transformRadarPointToLocalEnu(
       lidar_point, 0.0, 0.0, 0.0, 1.0, identity, output));
   EXPECT_TRUE(std::isnan(output.east));
   EXPECT_TRUE(std::isnan(output.north));

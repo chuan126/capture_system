@@ -1,14 +1,15 @@
 clearance_engine_node:
   ros__parameters:
-    input_topic: /capture/lidar/points_raw
+    input_topic: /capture/lidar/points_compensated_enu
     output_topic: /capture/clearance/result
+    expected_frame_id: lidar_local_enu
 
     filter.min_range_m: 0.20
 
     roi.min_up_height_m: 0.20
     roi.max_up_height_m: 15.0
-    roi.lateral_half_angle_deg: 55.0
-    roi.longitudinal_half_angle_deg: 35.0
+    roi.east_half_angle_deg: 55.0
+    roi.north_half_angle_deg: 35.0
 
     ransac.max_normal_angle_deg: 15.0
     ransac.distance_threshold_m: 0.04

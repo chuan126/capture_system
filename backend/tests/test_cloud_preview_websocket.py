@@ -26,7 +26,7 @@ def test_websocket_sends_status_stream_info_and_binary_frame(
         sequence=7,
         sensor_stamp_ns=123,
         point_count=1,
-        frame_id="device0/odom",
+        frame_id="lidar_local_enu",
         binary=b"PCV1-binary-frame",
     )
     application.state.cloud_preview_hub.set_ros_availability(True)
@@ -42,8 +42,8 @@ def test_websocket_sends_status_stream_info_and_binary_frame(
             binary = websocket.receive_bytes()
 
     assert status["state"] == "streaming"
-    assert stream_info["coordinate_mode"] == "sensor_local"
-    assert stream_info["frame_id"] == "device0/odom"
+    assert stream_info["coordinate_mode"] == "local_enu"
+    assert stream_info["frame_id"] == "lidar_local_enu"
     assert binary == frame.binary
 
 
@@ -74,7 +74,7 @@ def test_websocket_remains_open_while_waiting_for_first_frame(
         sequence=1,
         sensor_stamp_ns=1,
         point_count=1,
-        frame_id="device0/odom",
+        frame_id="lidar_local_enu",
         binary=b"first-frame",
     )
 

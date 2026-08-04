@@ -65,6 +65,17 @@ p_enu(t) = C(q0)ᵀ × C(qt) × p_lidar
 无RTK或绝对航向源时，`East/North`只是当前雷达`X/Y`轴的局部名称；`Up`直接采用
 当前雷达`Z`轴。若要求`Up`严格沿重力反方向，初始化时必须另做水平度校验。
 
+生产净空链路使用`initializeGravityAlignedEnuReference`。该接口只消除初始化航向：
+
+```text
+Cenu_odom = Rz(-yaw0)
+p_enu(t) = Rz(-yaw0) × C(qt) × p_lidar
+```
+
+它不会消除里程计坐标中的横滚和俯仰，因此即使初始化时雷达存在倾斜，`Up`仍沿
+里程计重力方向。旧的`initializeLocalEnuReference`保留给“启动时xyz原样对应
+East/North/Up”的局部零姿态用途，不能混用于严格重力高度计算。
+
 ## 构建与测试
 
 ```bash

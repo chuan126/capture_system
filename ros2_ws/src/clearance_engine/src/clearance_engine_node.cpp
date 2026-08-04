@@ -41,9 +41,13 @@ public:
   : Node("clearance_engine_node"), estimator_(loadConfig())
   {
     const auto input_topic = declare_parameter<std::string>(
-      "input_topic", "/capture/lidar/points_raw");
+      "input_topic", "/capture/lidar/points_compensated_enu");
     const auto output_topic = declare_parameter<std::string>(
       "output_topic", "/capture/clearance/result");
+    expected_frame_id_ = declare_parameter<std::string>("expected_frame_id", "lidar_local_enu");
+    if (expected_frame_id_.empty()) {
+      throw std::invalid_argument("expected_frame_id不能为空");
+    }
 
     result_publisher_ = create_publisher<interfaces::msg::ClearanceResult>(
       output_topic, rclcpp::QoS(rclcpp::KeepLast(10)).reliable());
@@ -76,10 +80,10 @@ private:
       "roi.min_up_height_m", config.min_up_height_m);
     config.max_up_height_m = declare_parameter<double>(
       "roi.max_up_height_m", config.max_up_height_m);
-    config.lateral_half_angle_deg = declare_parameter<double>(
-      "roi.lateral_half_angle_deg", config.lateral_half_angle_deg);
-    config.longitudinal_half_angle_deg = declare_parameter<double>(
-      "roi.longitudinal_half_angle_deg", config.longitudinal_half_angle_deg);
+    config.east_half_angle_deg = declare_parameter<double>(
+      "roi.east_half_angle_deg", config.east_half_angle_deg);
+    config.north_half_angle_deg = declare_parameter<double>(
+      "roi.north_half_angle_deg", config.north_half_angle_deg);
     config.max_normal_angle_deg = declare_parameter<double>(
       "ransac.max_normal_angle_deg", config.max_normal_angle_deg);
     config.distance_threshold_m = declare_parameter<double>(
@@ -119,8 +123,9 @@ private:
     output.selected_tilt_deg = nan;
     output.residual_median_m = nan;
     output.residual_p95_m = nan;
-    output.minimum_position_y_m = nan;
-    output.minimum_position_z_m = nan;
+    output.minimum_position_east_m = nan;
+    output.minimum_position_north_m = nan;
+    output.minimum_position_up_m = nan;
     output.valid_point_ratio = 0.0;
     output.invalid_reason = reason;
     output.processing_time_ms = processing_time_ms;
@@ -130,6 +135,10 @@ private:
   void pointCloudCallback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr message)
   {
     const auto start = std::chrono::steady_clock::now();
+    if (message->header.frame_id != expected_frame_id_) {
+      publishInvalid(message->header, "INVALID_POINT_CLOUD_FRAME", 0.0);
+      return;
+    }
     if (message->is_bigendian || !hasFloat32Field(*message, "x") ||
       !hasFloat32Field(*message, "y") || !hasFloat32Field(*message, "z") ||
       message->point_step == 0U || message->data.size() <
@@ -146,6 +155,7 @@ private:
       sensor_msgs::PointCloud2ConstIterator<float> y(*message, "y");
       sensor_msgs::PointCloud2ConstIterator<float> z(*message, "z");
       for (; x != x.end(); ++x, ++y, ++z) {
+        // 补偿后点云字段固定为x=East、y=North、z=Up。
         points.push_back(Point3f{*x, *y, *z});
       }
     } catch (const std::runtime_error & error) {
@@ -173,8 +183,9 @@ private:
       output.selected_tilt_deg = estimate.selected.tilt_deg;
       output.residual_median_m = estimate.selected.residual_median_m;
       output.residual_p95_m = estimate.selected.residual_p95_m;
-      output.minimum_position_y_m = estimate.selected.min_position_y_m;
-      output.minimum_position_z_m = estimate.selected.min_position_z_m;
+      output.minimum_position_east_m = estimate.selected.min_position_east_m;
+      output.minimum_position_north_m = estimate.selected.min_position_north_m;
+      output.minimum_position_up_m = estimate.selected.min_position_up_m;
     } else {
       const double nan = std::numeric_limits<double>::quiet_NaN();
       output.lidar_to_top_m = nan;
@@ -182,13 +193,15 @@ private:
       output.selected_tilt_deg = nan;
       output.residual_median_m = nan;
       output.residual_p95_m = nan;
-      output.minimum_position_y_m = nan;
-      output.minimum_position_z_m = nan;
+      output.minimum_position_east_m = nan;
+      output.minimum_position_north_m = nan;
+      output.minimum_position_up_m = nan;
     }
     result_publisher_->publish(output);
   }
 
   ClearanceEstimator estimator_;
+  std::string expected_frame_id_;
   rclcpp::Publisher<interfaces::msg::ClearanceResult>::SharedPtr result_publisher_;
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr point_cloud_subscription_;
 };

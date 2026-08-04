@@ -1,0 +1,13 @@
+enu_cloud_transform_node:
+  ros__parameters:
+    input_cloud_topic: /capture/lidar/points_raw
+    odometry_topic: /capture/odometry/high_rate
+    imu_topic: /capture/imu/data
+    output_cloud_topic: /capture/lidar/points_compensated_enu
+    output_frame_id: lidar_local_enu
+    pose_cache_duration_s: 2.0
+    max_interpolation_gap_s: 0.02
+    use_odometry_translation: false
+    min_gravity_norm_m_s2: 7.0
+    max_gravity_norm_m_s2: 12.0
+    pending_cloud_limit: 2

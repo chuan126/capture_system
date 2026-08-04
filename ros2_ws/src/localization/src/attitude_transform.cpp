@@ -75,6 +75,36 @@ bool initializeLocalEnuReference(
   return true;
 }
 
+bool initializeGravityAlignedEnuReference(
+  double quaternion_x, double quaternion_y, double quaternion_z, double quaternion_w,
+  double Cenu_odom[9]) noexcept
+{
+  if (Cenu_odom == nullptr) {
+    return false;
+  }
+
+  double Codom_lidar[9];
+  if (!rosQuaternionToMatrix(
+      quaternion_x, quaternion_y, quaternion_z, quaternion_w, Codom_lidar))
+  {
+    setInvalidMatrix(Cenu_odom);
+    return false;
+  }
+
+  // 只消除初始化航向，不消除横滚和俯仰；因此ENU的Z轴始终沿里程计Up。
+  const double initial_yaw = std::atan2(Codom_lidar[3], Codom_lidar[0]);
+  const double cosine = std::cos(initial_yaw);
+  const double sine = std::sin(initial_yaw);
+  const double yaw_only_reference[9]{
+    cosine, sine, 0.0,
+    -sine, cosine, 0.0,
+    0.0, 0.0, 1.0};
+  for (int index = 0; index < 9; ++index) {
+    Cenu_odom[index] = yaw_only_reference[index];
+  }
+  return true;
+}
+
 bool radarToLocalEnuMatrix(
   double quaternion_x, double quaternion_y, double quaternion_z, double quaternion_w,
   const double Cenu_odom[9], double Cenu_radar[9]) noexcept

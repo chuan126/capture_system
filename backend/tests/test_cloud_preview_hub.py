@@ -14,7 +14,7 @@ def make_frame(sequence: int) -> CloudPreviewFrame:
         sequence=sequence,
         sensor_stamp_ns=sequence,
         point_count=1,
-        frame_id="device0/odom",
+        frame_id="lidar_local_enu",
         binary=b"frame-" + bytes([sequence]),
     )
 

@@ -128,6 +128,10 @@ if ! ros2 pkg prefix clearance_engine >/dev/null 2>&1; then
   print_error "未找到clearance_engine包，请重新构建业务ROS 2工作空间。"
   exit 1
 fi
+if ! ros2 pkg prefix motion_compensation >/dev/null 2>&1; then
+  print_error "未找到motion_compensation包，请重新构建业务ROS 2工作空间。"
+  exit 1
+fi
 
 echo "正在启动ODIN雷达驱动……"
 setsid --wait ros2 launch sensor_adapter odin_driver.launch.py \

@@ -86,6 +86,8 @@ backend/                                      # FastAPI后端源码与测试根�
 
 FastAPI依赖 `/capture/visualization/cloud_preview` 遵守固定首版契约，不检查
 PointCloud2布局、不逐点解析、不坐标转换、不做过滤或降采样。
+该Topic当前必须使用`frame_id=lidar_local_enu`，PCV1流描述以
+`coordinate_mode=local_enu`声明XYZ分别为东、北、天。
 
 协议见
 [PCV1点云预览协议](../docs/interfaces/PCV1点云预览协议.md)。

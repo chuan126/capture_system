@@ -11,9 +11,9 @@ namespace clearance_engine
 
 struct Point3f
 {
-  float x;
-  float y;
-  float z;
+  float east;
+  float north;
+  float up;
 };
 
 struct ClearanceConfig
@@ -21,8 +21,8 @@ struct ClearanceConfig
   double min_range_m{0.20};
   double min_up_height_m{0.20};
   double max_up_height_m{15.0};
-  double lateral_half_angle_deg{55.0};
-  double longitudinal_half_angle_deg{35.0};
+  double east_half_angle_deg{55.0};
+  double north_half_angle_deg{35.0};
 
   double max_normal_angle_deg{15.0};
   double distance_threshold_m{0.04};
@@ -49,8 +49,9 @@ struct PlaneCandidate
   double residual_median_m{0.0};
   double residual_p95_m{0.0};
   double min_height_m{0.0};
-  double min_position_y_m{0.0};
-  double min_position_z_m{0.0};
+  double min_position_east_m{0.0};
+  double min_position_north_m{0.0};
+  double min_position_up_m{0.0};
 };
 
 struct ClearanceEstimate
