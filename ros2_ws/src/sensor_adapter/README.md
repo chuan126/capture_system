@@ -58,6 +58,12 @@ ros2 launch sensor_adapter odin_driver.launch.py \
 `enable_image0`、`enable_image1`、`enable_imu` 和 `enable_odom`。通道选择只允许
 在启动前配置，运行过程中修改参数不会重启雷达数据流。
 
+`enable_slam_odom_sync` 是独立的厂商 SDK 行为参数，默认为 `false`。当前
+ODIN1 Lite 固件的两类帧号不能持续一一匹配，预览和业务启动
+入口不得开启该同步器，否则 SLAM 点云会等待里程计并产生队列满警告。
+当前网页预览与净空计算均使用原始点云，开发预览入口因此同时关闭SLAM点云通道；
+IMU和里程计通道继续开启，供后续运动补偿使用。
+
 同时启动雷达驱动和 RViz2 预览：
 
 ```bash

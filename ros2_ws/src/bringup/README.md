@@ -11,6 +11,7 @@ bringup/                                      # ROS 2业务节点启动编排包
 ├── package.xml                               # ROS 2包元数据与运行依赖
 ├── README.md                                 # 包职责、构建和启动说明
 └── launch/                                   # 系统Launch入口目录
+    ├── clearance_preview.launch.py           # 首版实时净空计算节点启动入口
     └── cloud_preview.launch.py               # 浏览器SLAM点云预览节点启动入口
 ```
 
@@ -31,3 +32,12 @@ ros2 launch bringup cloud_preview.launch.py \
 
 该Launch只启动 `cloud_visualization_node`，不启动厂商驱动、FastAPI或核心测量
 节点，便于保持独立故障边界。
+
+## 首版净空计算启动
+
+```bash
+ros2 launch bringup clearance_preview.launch.py
+```
+
+该Launch订阅原始点云并输出`/capture/clearance/result`，用于当前静止朝上实机
+验证和网页显示。车辆动态测量必须在运动补偿完成后调整输入链路。

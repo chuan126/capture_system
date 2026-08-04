@@ -6,6 +6,10 @@ from urllib.parse import urlsplit
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from backend.websocket.clearance_hub import (
+    ClearanceClientLimitReachedError,
+    ClearanceHub,
+)
 from backend.websocket.cloud_preview_hub import (
     ClientLimitReachedError,
     CloudPreviewHub,
@@ -190,6 +194,59 @@ async def system_status_socket(websocket: WebSocket) -> None:
             while not session.queue.empty():
                 snapshot = session.queue.get_nowait()
             await asyncio.wait_for(websocket.send_json(snapshot.to_message()), timeout=0.5)
+    except WebSocketDisconnect:
+        pass
+    except (asyncio.TimeoutError, RuntimeError):
+        pass
+    finally:
+        hub.unregister(session)
+
+
+@router.websocket("/ws/v1/clearance")
+async def clearance_socket(websocket: WebSocket) -> None:
+    await websocket.accept()
+    if not _is_same_origin(websocket):
+        await websocket.close(code=1008, reason="仅允许同源浏览器连接")
+        return
+
+    hub: ClearanceHub = websocket.app.state.clearance_hub
+    try:
+        session = hub.register()
+    except ClearanceClientLimitReachedError:
+        await websocket.send_json(
+            {
+                "type": "status",
+                "state": "degraded",
+                "reason": "CLIENT_LIMIT_REACHED",
+                "detail": "净空结果最多允许四个浏览器客户端",
+            }
+        )
+        await websocket.close(code=1013, reason="净空结果客户端数量已达到上限")
+        return
+
+    last_state: str | None = None
+    last_status_sent = 0.0
+    next_snapshot_sent = 0.0
+    try:
+        while True:
+            now = time.monotonic()
+            status = hub.current_status()
+            if status["state"] != last_state or now - last_status_sent >= 1.0:
+                await websocket.send_json(status)
+                last_state = status["state"]
+                last_status_sent = now
+            try:
+                snapshot = await asyncio.wait_for(session.queue.get(), timeout=0.1)
+            except asyncio.TimeoutError:
+                continue
+
+            delay = next_snapshot_sent - time.monotonic()
+            if delay > 0:
+                await asyncio.sleep(delay)
+            while not session.queue.empty():
+                snapshot = session.queue.get_nowait()
+            await asyncio.wait_for(websocket.send_json(snapshot.to_message()), timeout=0.5)
+            next_snapshot_sent = time.monotonic() + 0.1
     except WebSocketDisconnect:
         pass
     except (asyncio.TimeoutError, RuntimeError):

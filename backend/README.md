@@ -1,7 +1,8 @@
 # Web后端
 
 FastAPI是浏览器访问RK3588的唯一HTTP和WebSocket入口。当前已实现静态前端托管、
-`/api/health`、ROS 2点云桥、RTK详情桥、统一系统状态桥及相应实时WebSocket。
+`/api/health`、ROS 2点云桥、RTK详情桥、净空结果桥、统一系统状态桥及相应实时
+WebSocket。
 
 ## TXT下载链路测试
 
@@ -29,22 +30,28 @@ backend/                                      # FastAPI后端源码与测试根�
 ├── main.py                                   # 应用生命周期、ROS桥和静态页面装配
 ├── protocols/                               # 浏览器二进制与文本协议目录
 │   ├── __init__.py                           # 协议Python包初始化文件
+│   ├── clearance_v1.py                       # 净空有效性与质量字段JSON协议
 │   ├── cloud_preview_v1.py                   # PCV1固定头、流描述和状态消息实现
 │   ├── rtk_v1.py                             # RTK定位详情快照与ROS字段机械映射
 │   └── system_status_v1.py                   # 四类设备诊断的网页快照协议
 ├── ros_bridge/                              # ROS 2后台线程桥目录
 │   ├── __init__.py                           # ROS桥Python包初始化文件
+│   ├── clearance_bridge.py                   # 净空结果Topic订阅和网页快照映射桥
 │   ├── cloud_preview_bridge.py               # 轻量点云订阅和PCV1一次编码实现
 │   ├── rtk_bridge.py                         # RTK状态和fix定位详情订阅桥
 │   └── system_status_bridge.py               # system_monitor统一诊断订阅桥
 ├── websocket/                               # WebSocket会话和背压管理目录
 │   ├── __init__.py                           # WebSocket Python包初始化文件
+│   ├── clearance_hub.py                      # 每客户端容量1的净空结果广播中心
 │   ├── cloud_preview_hub.py                  # 每客户端容量1的最新帧广播中心
 │   ├── rtk_hub.py                            # 每客户端容量1的RTK最新值广播中心
 │   ├── system_status_hub.py                  # 系统诊断超时与最新值广播中心
-│   └── routes.py                             # 三类同源WebSocket发送路由
+│   └── routes.py                             # 四类同源WebSocket发送路由
 ├── tests/                                   # 后端单元与集成测试目录
 │   ├── test_main.py                          # 健康接口与静态页面测试
+│   ├── test_clearance_protocol.py             # 净空字段和无效数值映射测试
+│   ├── test_clearance_hub.py                  # 净空最新结果覆盖和状态测试
+│   ├── test_clearance_websocket.py            # 净空同源JSON快照发送测试
 │   ├── test_cloud_preview_protocol.py        # PCV1帧头和世界坐标语义测试
 │   ├── test_cloud_preview_hub.py             # 最新帧覆盖和状态测试
 │   ├── test_cloud_preview_websocket.py       # 点云同源与二进制发送测试
@@ -100,6 +107,13 @@ PointCloud2布局、不逐点解析、不坐标转换、不做过滤或降采样
 
 协议见[系统状态网页协议](../docs/interfaces/系统状态网页协议.md)。
 
+## 净空结果WebSocket
+
+同源地址为`/ws/v1/clearance`。ROS桥订阅`/capture/clearance/result`，最多以
+10 Hz向浏览器发送最新结果。每个客户端只保留最新一帧，超过1秒未收到结果时
+状态变为`degraded`。无效帧的NaN字段转换为JSON `null`，同时保留算法给出的
+`invalid_reason`；后端不补值、不累计任务最小值，也不参与净空计算。
+
 ## 运行
 
 正式运行使用项目脚本，它会加载ROS 2和两个工作空间：
@@ -118,7 +132,7 @@ cd /home/cat/Project/capture_system
 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python -m pytest backend/tests -q
 ```
 
-当前后端自动化结果为21项通过。端到端雷达实测见
+当前后端自动化结果为27项通过。端到端雷达实测见
 [浏览器点云预览端到端实机测试](../docs/testing/浏览器点云预览端到端实机测试_2026-07-31.md)。
 
 ## 边界
@@ -127,4 +141,4 @@ PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python -m pytest backend/tests -q
 - 不复制 `task_manager` 状态机；
 - 不向浏览器发送带RGB的原始SLAM消息；
 - 网络客户端断开不得停止设备端任务；
-- WebSocket只承担点云预览和RTK状态展示，不参与净空或定位质量计算。
+- WebSocket只承担点云、RTK、系统状态和净空结果展示，不参与净空或定位质量计算。

@@ -74,7 +74,7 @@ export default function PointCloudViewer({
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
       renderer.outputColorSpace = THREE.SRGBColorSpace;
       renderer.domElement.className = "cloud-canvas";
-      renderer.domElement.setAttribute("aria-label", "SLAM点云三维预览");
+      renderer.domElement.setAttribute("aria-label", "实时点云三维预览");
       renderer.domElement.tabIndex = 0;
       host.appendChild(renderer.domElement);
 
@@ -83,12 +83,13 @@ export default function PointCloudViewer({
       scene.fog = new THREE.FogExp2(0xf5f8fc, 0.01);
 
       const perspectiveCamera = new THREE.PerspectiveCamera(48, 1, 0.01, 2_000);
-      perspectiveCamera.up.set(0, 0, 1);
-      perspectiveCamera.position.set(12, -12, 8);
+      // 雷达安装方向以+X为竖直向上；保留原始点坐标，仅调整Three.js观察坐标约定。
+      perspectiveCamera.up.set(1, 0, 0);
+      perspectiveCamera.position.set(8, -12, 12);
 
       const topCamera = new THREE.OrthographicCamera(-10, 10, 10, -10, -500, 500);
-      topCamera.up.set(0, 1, 0);
-      topCamera.position.set(0, 0, 20);
+      topCamera.up.set(0, 0, 1);
+      topCamera.position.set(20, 0, 0);
       topCamera.lookAt(0, 0, 0);
 
       const positions = new Float32Array(PCV1_MAX_POINTS * 3);
@@ -109,7 +110,8 @@ export default function PointCloudViewer({
       scene.add(points);
 
       const grid = new THREE.GridHelper(100, 100, 0x9fb8d8, 0xd8e2ef);
-      grid.rotation.x = Math.PI / 2;
+      // GridHelper默认位于XZ平面，旋转到与竖直X轴垂直的YZ平面。
+      grid.rotation.z = -Math.PI / 2;
       grid.material.transparent = true;
       grid.material.opacity = 0.68;
       scene.add(grid);
@@ -166,12 +168,12 @@ export default function PointCloudViewer({
 
         if (mode === "top") {
           const aspect = Math.max(host.clientWidth / Math.max(host.clientHeight, 1), 0.2);
-          const verticalSpan = Math.max(size.y, size.x / aspect, 2) * 1.25;
+          const verticalSpan = Math.max(size.z, size.y / aspect, 2) * 1.25;
           topCamera.left = -verticalSpan * aspect / 2;
           topCamera.right = verticalSpan * aspect / 2;
           topCamera.top = verticalSpan / 2;
           topCamera.bottom = -verticalSpan / 2;
-          topCamera.position.set(center.x, center.y, center.z + span * 2);
+          topCamera.position.set(center.x + span * 2, center.y, center.z);
           topCamera.lookAt(center);
           topCamera.updateProjectionMatrix();
           controls.object = topCamera;
@@ -180,9 +182,9 @@ export default function PointCloudViewer({
         } else {
           const distance = span * 1.45;
           perspectiveCamera.position.set(
-            center.x + distance,
+            center.x + distance * 0.75,
             center.y - distance,
-            center.z + distance * 0.75,
+            center.z + distance,
           );
           controls.object = perspectiveCamera;
           controls.target.copy(center);
@@ -277,7 +279,7 @@ export default function PointCloudViewer({
         </div>
       )}
       <div className="cloud-stage__footer">
-        <span>SLAM世界坐标系 · frame: {connection.frameId}</span>
+        <span>雷达局部坐标系 · X轴向上 · frame: {connection.frameId}</span>
         <span>
           {connection.pointCount.toLocaleString("zh-CN")}点
           {" · "}

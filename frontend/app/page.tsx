@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 
+import { useClearanceSocket } from "@/components/clearance/useClearanceSocket";
 import PointCloudViewer from "@/components/point-cloud/PointCloudViewer";
 import type { PointCloudViewMode } from "@/components/point-cloud/PointCloudViewer";
 import { useRtkSocket } from "@/components/rtk/useRtkSocket";
@@ -72,7 +73,13 @@ function PanelHead({
   );
 }
 
-function EmptyChart({ historical = false }: { historical?: boolean }) {
+function EmptyChart({
+  historical = false,
+  clearanceActive = false,
+}: {
+  historical?: boolean;
+  clearanceActive?: boolean;
+}) {
   return (
     <div className="chart">
       <div className="chart__grid" />
@@ -85,8 +92,16 @@ function EmptyChart({ historical = false }: { historical?: boolean }) {
       <EmptyState
         compact
         icon="⌁"
-        title={historical ? "请选择任务查看净空曲线" : "等待净空测量数据"}
-        description={historical ? "历史任务接入后显示" : "采集开始后在此显示实时结果"}
+        title={historical
+          ? "请选择任务查看净空曲线"
+          : clearanceActive
+            ? "实时高度已经接入"
+            : "等待净空测量数据"}
+        description={historical
+          ? "历史任务接入后显示"
+          : clearanceActive
+            ? "当前数值显示在右侧，曲线等待任务里程链路"
+            : "采集开始后在此显示实时结果"}
       />
     </div>
   );
@@ -139,11 +154,13 @@ function Dashboard() {
   const [viewMode, setViewMode] = useState<ViewMode>("3d");
   const rtk = useRtkSocket();
   const rtkSnapshot = rtk.snapshot;
+  const clearance = useClearanceSocket();
+  const clearanceSnapshot = clearance.snapshot;
   const systemStatus = useSystemStatusSocket();
   const systemSnapshot = systemStatus.snapshot;
   const modes: Array<{ id: ViewMode; label: string; disabled?: boolean }> = [
     { id: "3d", label: "三维视图" },
-    { id: "top", label: "俯视图" },
+    { id: "top", label: "沿X轴俯视" },
     { id: "section", label: "断面视图", disabled: true },
   ];
 
@@ -213,6 +230,12 @@ function Dashboard() {
           ? "ok"
           : "unknown";
   const aggregateText = {ok: "系统正常", warn: "系统有告警", error: "系统异常", stale: "系统异常", unknown: "系统检查中"}[aggregateState];
+  const clearanceStreaming = clearance.connection === "connected" && clearance.streamState === "streaming";
+  const clearanceValid = clearanceStreaming && clearanceSnapshot?.valid === true &&
+    clearanceSnapshot.lidar_to_top_m !== null;
+  const currentHeightText = clearanceValid
+    ? clearanceSnapshot.lidar_to_top_m!.toFixed(3)
+    : "--";
 
   return (
     <div className="page-stack dashboard-page">
@@ -268,22 +291,18 @@ function Dashboard() {
                 </div>
               }
             />
-            <EmptyChart />
+            <EmptyChart clearanceActive={clearanceStreaming} />
           </article>
         </div>
 
         <aside className="panel measurement-panel measurement-control-panel">
           <PanelHead
             title="测量与任务控制"
-            description="关键结果、RTK质量和当前任务操作"
-            trailing={<StatusPill>待机</StatusPill>}
+            description="实时顶面高度、RTK质量和当前任务操作"
           />
           <section className="measurement-primary">
-            <span>当前净空高度</span>
-            <strong>-- <small>m</small></strong>
-          </section>
-          <section className="measurement-summary">
-            <div><span>任务最低净空</span><strong>-- m</strong></div>
+            <span>雷达到当前最低顶面</span>
+            <strong>{currentHeightText} <small>m</small></strong>
           </section>
           <section className="measurement-details" aria-label="RTK定位质量">
             <div className="measurement-details__head">

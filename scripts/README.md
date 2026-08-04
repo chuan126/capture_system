@@ -7,7 +7,7 @@ scripts/                                      # 工程构建、部署、运行�
 │   ├── build_web.sh                          # 前后端依赖安装与设备静态页面构建入口
 │   └── test_web.sh                           # 前端、设备构建和后端自动化测试入口
 └── operation/                                # 开发运行和健康检查入口目录
-    ├── run_lan_preview.sh                    # 雷达、RTK、预览节点和局域网页面一键启动脚本
+    ├── run_lan_preview.sh                    # 雷达、RTK、净空、预览和局域网页面一键启动脚本
     └── run_web.sh                            # 仅启动FastAPI网页服务的底层脚本
 ```
 
@@ -22,4 +22,5 @@ scripts/operation/run_lan_preview.sh
 ```
 
 脚本以前台方式运行，不安装或启用systemd服务。终端会打印当前设备可访问的
-局域网地址；按 `Ctrl+C` 会统一停止本次启动的雷达、RTK、点云预览和网页组件。
+局域网地址；按 `Ctrl+C` 会统一停止本次启动的雷达、RTK、净空计算、点云预览和
+网页组件。

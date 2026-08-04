@@ -41,7 +41,7 @@ def test_encodes_fixed_header_and_unchanged_xyz_payload() -> None:
 def test_stream_info_declares_slam_world_coordinates() -> None:
     stream_info = encode_cloud_preview(make_message(), 1).stream_info()
 
-    assert stream_info["coordinate_mode"] == "slam_odom"
+    assert stream_info["coordinate_mode"] == "sensor_local"
     assert stream_info["frame_id"] == "device0/odom"
     assert stream_info["point_format"] == "xyz_float32_le"
     assert stream_info["max_points"] == 10_000

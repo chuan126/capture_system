@@ -24,7 +24,7 @@ cleanup() {
   fi
 
   echo
-  echo "正在停止雷达驱动、RTK驱动、系统监控、点云预览和网页服务……"
+  echo "正在停止雷达驱动、RTK驱动、净空计算、系统监控、点云预览和网页服务……"
 
   # 每个组件运行在独立进程组中，向进程组发送信号可同时停止ROS子进程。
   for pid in "${child_pids[@]}"; do
@@ -124,13 +124,22 @@ if ! ros2 pkg prefix system_monitor >/dev/null 2>&1; then
   print_error "未找到system_monitor包，请重新构建业务ROS 2工作空间。"
   exit 1
 fi
+if ! ros2 pkg prefix clearance_engine >/dev/null 2>&1; then
+  print_error "未找到clearance_engine包，请重新构建业务ROS 2工作空间。"
+  exit 1
+fi
 
 echo "正在启动ODIN雷达驱动……"
-setsid --wait ros2 launch sensor_adapter odin_driver.launch.py enable_slam_point:=true &
+setsid --wait ros2 launch sensor_adapter odin_driver.launch.py \
+  enable_slam_point:=false enable_slam_odom_sync:=false &
 child_pids+=("$!")
 
-echo "正在启动SLAM点云预览节点……"
+echo "正在启动实时点云预览节点……"
 setsid --wait ros2 launch bringup cloud_preview.launch.py &
+child_pids+=("$!")
+
+echo "正在启动首版实时净空计算节点……"
+setsid --wait ros2 launch bringup clearance_preview.launch.py &
 child_pids+=("$!")
 
 echo "正在启动RTK驱动……"
@@ -177,7 +186,7 @@ done < <(
     awk '{split($4, parts, "/"); print $2, parts[1]}'
 )
 echo
-echo "按 Ctrl+C 可统一停止雷达驱动、RTK驱动、点云预览和网页服务。"
+echo "按 Ctrl+C 可统一停止雷达驱动、RTK驱动、净空计算、点云预览和网页服务。"
 
 set +e
 wait -n "${child_pids[@]}"

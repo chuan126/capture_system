@@ -42,6 +42,10 @@ test("renders the tunnel clearance terminal shell", async () => {
   assert.match(html, />暂停<\/button>/);
   assert.match(html, />停止<\/button>/);
   assert.match(html, /测量与任务控制/);
+  assert.match(html, /雷达到当前最低顶面/);
+  assert.doesNotMatch(html, /有效候选面/);
+  assert.doesNotMatch(html, /单帧算法耗时/);
+  assert.doesNotMatch(html, /净空计算状态/);
   assert.match(html, /卫星数 \/ HDOP \/ PDOP/);
   assert.match(html, /当前坐标/);
   assert.match(html, /RMC --/);
@@ -99,4 +103,16 @@ test("keeps dashboard visualizations visible at responsive breakpoints", async (
   assert.match(tabletRules, /\.dashboard-main > \.panel > \.chart\s*\{[^}]*min-height:\s*168px/i);
   assert.match(mobileRules, /\.dashboard-cloud-panel \.dashboard-cloud-stage\s*\{[^}]*flex-basis:\s*340px[^}]*min-height:\s*340px/i);
   assert.match(mobileRules, /\.dashboard-main > \.panel > \.chart\s*\{[^}]*min-height:\s*190px/i);
+});
+
+test("uses the lidar X axis as the point-cloud vertical axis", async () => {
+  const viewer = await readFile(
+    new URL("../components/point-cloud/PointCloudViewer.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(viewer, /perspectiveCamera\.up\.set\(1, 0, 0\)/);
+  assert.match(viewer, /topCamera\.position\.set\(center\.x \+ span \* 2, center\.y, center\.z\)/);
+  assert.match(viewer, /grid\.rotation\.z = -Math\.PI \/ 2/);
+  assert.match(viewer, /雷达局部坐标系 · X轴向上/);
 });

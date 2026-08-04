@@ -35,6 +35,9 @@ def test_driver_launch_declares_expected_topic_contract():
         "enable_imu": "true",
         "enable_odom": "true",
     }
+    assert module.DRIVER_BEHAVIOR_ARGUMENT_DEFAULTS == {
+        "enable_slam_odom_sync": "false",
+    }
     assert module.generate_launch_description() is not None
 
 

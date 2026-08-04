@@ -27,6 +27,11 @@ CHANNEL_ARGUMENT_DEFAULTS = {
     "enable_odom": "true",
 }
 
+DRIVER_BEHAVIOR_ARGUMENT_DEFAULTS = {
+    # ODIN1 Lite 当前固件的 SLAM 与 odom 帧号并非持续一一对应，禁止阻塞 SLAM 发布。
+    "enable_slam_odom_sync": "false",
+}
+
 
 def generate_launch_description():
     vendor_device_prefix = LaunchConfiguration("vendor_device_prefix")
@@ -37,7 +42,7 @@ def generate_launch_description():
     image_format = LaunchConfiguration("image_format")
     channel_parameters = {
         name: ParameterValue(LaunchConfiguration(name), value_type=bool)
-        for name in CHANNEL_ARGUMENT_DEFAULTS
+        for name in (*CHANNEL_ARGUMENT_DEFAULTS, *DRIVER_BEHAVIOR_ARGUMENT_DEFAULTS)
     }
 
     # remap 直接作用于厂商发布器，不创建中继节点，也不复制点云消息。
@@ -89,7 +94,9 @@ def generate_launch_description():
             DeclareLaunchArgument("image_format", default_value="mjpeg"),
             *[
                 DeclareLaunchArgument(name, default_value=default_value)
-                for name, default_value in CHANNEL_ARGUMENT_DEFAULTS.items()
+                for name, default_value in (
+                    CHANNEL_ARGUMENT_DEFAULTS | DRIVER_BEHAVIOR_ARGUMENT_DEFAULTS
+                ).items()
             ],
             driver,
         ]

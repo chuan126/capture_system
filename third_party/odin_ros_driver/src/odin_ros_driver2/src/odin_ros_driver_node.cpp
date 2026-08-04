@@ -472,6 +472,7 @@ class odinRosDriver {
     enable_image1_ = true;
     enable_imu_ = true;
     enable_odom_ = true;
+    enable_slam_odom_sync_ = false;
 
     // Try to load from control_command.yaml
     std::string pkg_path = getPackageSourceDirectory();
@@ -519,6 +520,9 @@ class odinRosDriver {
     enable_image1_ = GetParam<bool>("enable_image1", enable_image1_);
     enable_imu_ = GetParam<bool>("enable_imu", enable_imu_);
     enable_odom_ = GetParam<bool>("enable_odom", enable_odom_);
+    // 设备固件并不保证 SLAM 与里程计帧号持续一一对应，默认不得阻塞 SLAM 发布。
+    enable_slam_odom_sync_ =
+        GetParam<bool>("enable_slam_odom_sync", enable_slam_odom_sync_);
   }
 
   void AdvertiseTopics() {
@@ -894,8 +898,13 @@ class odinRosDriver {
     QueryAndPrintSensorCapabilities();
 
     // Step 5: Configure all data streams (query capability per channel)
-    // 只有 SLAM 与里程计通道同时开启时才需要帧同步，否则 SDK 会无意义地积压单边数据。
-    sdk::EnableSlamOdomSyncForDevice(device_handle_, enable_slam_point_ && enable_odom_, 10);
+    // 同步器会等待相同帧号；仅在部署明确验证帧号连续匹配后才允许开启。
+    const bool slam_odom_sync_enabled =
+        enable_slam_odom_sync_ && enable_slam_point_ && enable_odom_;
+    sdk::EnableSlamOdomSyncForDevice(device_handle_, slam_odom_sync_enabled, 10);
+    LogInfo("SLAM-Odom sync: %s (requested=%d, slam=%d, odom=%d)",
+            slam_odom_sync_enabled ? "enabled" : "disabled",
+            enable_slam_odom_sync_, enable_slam_point_, enable_odom_);
     ConfigureStreams(sdk::OdinTransportMode::kUdp);
 
     return true;
@@ -1974,6 +1983,7 @@ class odinRosDriver {
   bool enable_image1_ = true;
   bool enable_imu_ = true;
   bool enable_odom_ = true;
+  bool enable_slam_odom_sync_ = false;
 #if defined(ODIN_ROS2)
   rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr param_callback_handle_;
 #else

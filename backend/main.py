@@ -10,9 +10,11 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from backend.ros_bridge.clearance_bridge import ClearanceBridge
 from backend.ros_bridge.cloud_preview_bridge import CloudPreviewBridge
 from backend.ros_bridge.rtk_bridge import RtkBridge
 from backend.ros_bridge.system_status_bridge import SystemStatusBridge
+from backend.websocket.clearance_hub import ClearanceHub
 from backend.websocket.cloud_preview_hub import CloudPreviewHub
 from backend.websocket.rtk_hub import RtkHub
 from backend.websocket.system_status_hub import SystemStatusHub
@@ -39,6 +41,7 @@ def create_app(
     bridge_factory: Callable[..., CloudPreviewBridge] = CloudPreviewBridge,
     rtk_bridge_factory: Callable[..., RtkBridge] = RtkBridge,
     system_status_bridge_factory: Callable[..., SystemStatusBridge] = SystemStatusBridge,
+    clearance_bridge_factory: Callable[..., ClearanceBridge] = ClearanceBridge,
 ) -> FastAPI:
     site_directory = (static_dir or resolve_static_dir()).resolve()
     tasks_directory = (task_data_root or DEFAULT_TASK_DATA_ROOT).resolve()
@@ -48,6 +51,7 @@ def create_app(
     hub = CloudPreviewHub()
     rtk_hub = RtkHub()
     system_status_hub = SystemStatusHub()
+    clearance_hub = ClearanceHub()
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
@@ -61,6 +65,7 @@ def create_app(
         bridge: CloudPreviewBridge | None = None
         rtk_bridge: RtkBridge | None = None
         system_status_bridge: SystemStatusBridge | None = None
+        clearance_bridge: ClearanceBridge | None = None
         if start_ros_bridge:
             loop = asyncio.get_running_loop()
             bridge = bridge_factory(
@@ -78,10 +83,16 @@ def create_app(
             )
             system_started = system_status_bridge.start()
             system_status_hub.set_ros_availability(system_started, system_status_bridge.error)
+            clearance_bridge = clearance_bridge_factory(
+                lambda snapshot: loop.call_soon_threadsafe(clearance_hub.publish, snapshot)
+            )
+            clearance_started = clearance_bridge.start()
+            clearance_hub.set_ros_availability(clearance_started, clearance_bridge.error)
         else:
             application.state.cloud_preview_hub = hub
             application.state.rtk_hub = rtk_hub
             application.state.system_status_hub = system_status_hub
+            application.state.clearance_hub = clearance_hub
 
         try:
             yield
@@ -92,6 +103,8 @@ def create_app(
                 rtk_bridge.stop()
             if system_status_bridge is not None:
                 system_status_bridge.stop()
+            if clearance_bridge is not None:
+                clearance_bridge.stop()
 
     application = FastAPI(
         title="Capture System Web API",
@@ -101,6 +114,7 @@ def create_app(
     application.state.cloud_preview_hub = hub
     application.state.rtk_hub = rtk_hub
     application.state.system_status_hub = system_status_hub
+    application.state.clearance_hub = clearance_hub
 
     @application.get("/api/health", tags=["system"])
     async def health() -> dict[str, str]:

@@ -35,7 +35,7 @@ test("rejects truncated and oversized PCV1 frames", () => {
   assert.throws(() => parseCloudPreviewBinary(wrongLength));
 });
 
-test("accepts only SLAM world stream descriptions", () => {
+test("accepts only sensor-local stream descriptions", () => {
   const stream = parseCloudPreviewText(JSON.stringify({
     type: "stream_info",
     protocol: "PCV1",
@@ -45,7 +45,7 @@ test("accepts only SLAM world stream descriptions", () => {
     point_stride: 12,
     max_points: 10_000,
     frame_id: "device0/odom",
-    coordinate_mode: "slam_odom",
+    coordinate_mode: "sensor_local",
     sensor_clock: "device_boot",
     color_mode: "single",
   }));

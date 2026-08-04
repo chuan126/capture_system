@@ -15,7 +15,8 @@ namespace
 
 sensor_msgs::msg::PointCloud2 make_fixed_layout_cloud(
   const std::size_t point_count,
-  const bool is_dense = true)
+  const bool is_dense = true,
+  const std::uint32_t point_step = 16U)
 {
   sensor_msgs::msg::PointCloud2 cloud;
   cloud.header.stamp.sec = 123;
@@ -35,7 +36,7 @@ sensor_msgs::msg::PointCloud2 make_fixed_layout_cloud(
   }
 
   cloud.is_bigendian = false;
-  cloud.point_step = 16U;
+  cloud.point_step = point_step;
   cloud.row_step = cloud.width * cloud.point_step;
   cloud.is_dense = is_dense;
   cloud.data.resize(cloud.row_step);
@@ -50,7 +51,7 @@ sensor_msgs::msg::PointCloud2 make_fixed_layout_cloud(
     std::memcpy(
       cloud.data.data() + point_index * cloud.point_step,
       values.data(),
-      cloud.point_step);
+      std::min<std::size_t>(values.size() * sizeof(float), cloud.point_step));
   }
 
   return cloud;
@@ -126,6 +127,24 @@ TEST(CloudPreviewConverterTest, ProducesEmptyOutputForEmptyFixedLayoutCloud)
   EXPECT_EQ(output.width, 0U);
   EXPECT_EQ(output.row_step, 0U);
   EXPECT_TRUE(output.data.empty());
+}
+
+TEST(CloudPreviewConverterTest, ReadsRawPointCloudWithEighteenBytePointStep)
+{
+  const auto input = make_fixed_layout_cloud(3U, true, 18U);
+  const auto output = CloudPreviewConverter{}.convert(input, 10U);
+
+  ASSERT_EQ(output.width, 3U);
+  EXPECT_EQ(read_xyz(output, 1U), (std::array<float, 3U>{1.0F, 1.25F, -1.0F}));
+  EXPECT_EQ(read_xyz(output, 2U), (std::array<float, 3U>{2.0F, 2.25F, -2.0F}));
+}
+
+TEST(CloudPreviewConverterTest, RejectsMissingCoordinateField)
+{
+  auto input = make_fixed_layout_cloud(1U);
+  input.fields.erase(input.fields.begin() + 2);
+
+  EXPECT_THROW(CloudPreviewConverter{}.convert(input, 10U), std::invalid_argument);
 }
 
 }  // 结束匿名命名空间

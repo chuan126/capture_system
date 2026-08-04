@@ -42,7 +42,7 @@ def test_websocket_sends_status_stream_info_and_binary_frame(
             binary = websocket.receive_bytes()
 
     assert status["state"] == "streaming"
-    assert stream_info["coordinate_mode"] == "slam_odom"
+    assert stream_info["coordinate_mode"] == "sensor_local"
     assert stream_info["frame_id"] == "device0/odom"
     assert binary == frame.binary
 

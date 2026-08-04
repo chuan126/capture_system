@@ -20,8 +20,10 @@
 
 - ROS 参数 `enable_raw_point`、`enable_slam_point`、`enable_image0`、
   `enable_image1`、`enable_imu`、`enable_odom` 可以覆盖厂商
-  `control_command.yaml`，用于关闭净空采集不需要的图像及 SLAM 通道；SLAM 或
-  里程计关闭时同步关闭 SDK 的 SLAM/里程计同步器，避免单边数据积压；
+  `control_command.yaml`，用于关闭净空采集不需要的图像及 SLAM 通道；新增
+  `enable_slam_odom_sync` 参数且默认关闭。当前固件的 SLAM 与里程计帧号并非
+  持续一一对应，开启 SDK 同步器会阻塞 SLAM 点云并反复产生队列满警告；只有
+  经实机确认两类帧号可持续匹配的部署才允许显式开启；
 - 关闭过程中先禁止新回调入队，再让设备待机并调用 `DisconnectDevice`，最后
   停止异步队列；停止后的队列拒绝新数据并丢弃退出阶段的积压项；
 - UDP socket 设置 `SO_RCVBUF` 后读取并记录实际值，低于 8 MiB 时明确报警，

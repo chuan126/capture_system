@@ -524,15 +524,6 @@ th { color: #7f8b9e; background: #fafbfd; font-weight: 600; white-space: nowrap;
 .measurement-primary > span { color: var(--muted); font-size: 11px; }
 .measurement-primary > strong { display: block; margin-top: 7px; color: #185f92; font: 800 clamp(38px, 3vw, 54px)/1 Arial; letter-spacing: -1.5px; }
 .measurement-primary > strong small { margin-left: 5px; color: #8090a2; font-size: 13px; letter-spacing: 0; }
-.measurement-summary { display: grid; grid-template-columns: 1fr; gap: 1px; padding: 13px 0; border-bottom: 1px solid var(--line-soft); background: var(--line-soft); }
-.measurement-summary > div { display: grid; gap: 6px; padding: 0 12px; background: #fff; }
-.measurement-summary > div:first-child { padding-left: 2px; }
-.measurement-summary span { color: var(--muted); font-size: 10px; }
-.measurement-summary strong { font: 800 17px/1 Arial; }
-.measurement-validity { padding: 13px 2px; border-bottom: 1px solid var(--line-soft); }
-.measurement-validity > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.measurement-validity > div > span { font-size: 11px; font-weight: 700; }
-.measurement-validity p { margin: 8px 0 0; color: var(--muted); font-size: 10px; line-height: 1.55; }
 .measurement-details { min-height: 0; padding: 13px 2px 4px; }
 .measurement-details h3 { margin: 0; font-size: 11px; }
 .measurement-details__head { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 28px; }

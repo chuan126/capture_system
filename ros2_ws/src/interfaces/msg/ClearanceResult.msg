@@ -1,0 +1,16 @@
+# 单帧可靠顶部视场内的最低近水平顶面测量结果。
+std_msgs/Header header
+
+bool valid
+float64 lidar_to_top_m
+uint32 candidate_count
+uint32 selected_inlier_count
+float64 selected_area_m2
+float64 selected_tilt_deg
+float64 residual_median_m
+float64 residual_p95_m
+float64 minimum_position_y_m
+float64 minimum_position_z_m
+float64 valid_point_ratio
+string invalid_reason
+float64 processing_time_ms

@@ -27,6 +27,7 @@ def generate_launch_description():
     enable_image1 = LaunchConfiguration("enable_image1")
     enable_imu = LaunchConfiguration("enable_imu")
     enable_odom = LaunchConfiguration("enable_odom")
+    enable_slam_odom_sync = LaunchConfiguration("enable_slam_odom_sync")
     rviz_config = LaunchConfiguration("rviz_config")
 
     driver = IncludeLaunchDescription(
@@ -44,6 +45,7 @@ def generate_launch_description():
             "enable_image1": enable_image1,
             "enable_imu": enable_imu,
             "enable_odom": enable_odom,
+            "enable_slam_odom_sync": enable_slam_odom_sync,
         }.items(),
     )
 
@@ -73,6 +75,7 @@ def generate_launch_description():
             DeclareLaunchArgument("enable_image1", default_value="false"),
             DeclareLaunchArgument("enable_imu", default_value="true"),
             DeclareLaunchArgument("enable_odom", default_value="true"),
+            DeclareLaunchArgument("enable_slam_odom_sync", default_value="false"),
             DeclareLaunchArgument(
                 "rviz_config",
                 default_value=default_rviz_config,

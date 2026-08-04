@@ -40,7 +40,7 @@ class CloudPreviewFrame:
             "point_stride": PCV1_POINT_STRIDE,
             "max_points": PCV1_MAX_POINTS,
             "frame_id": self.frame_id,
-            "coordinate_mode": "slam_odom",
+            "coordinate_mode": "sensor_local",
             "sensor_clock": "device_boot",
             "color_mode": "single",
         }
