@@ -111,13 +111,13 @@ TEST(AttitudeMatrixTest, CurrentPlacementInitializesLocalEnu)
   ASSERT_TRUE(initializeLocalEnuReference(qx, qy, qz, qw, Cenu_odom));
 
   // 当前放置被直接规定为X=East、Y=North、Z=Up，因此初始化时坐标数值不变。
-  const Point3d lidar_point{1.25, -0.75, 2.5};
-  Point3d enu{};
+  const RadarPoint3d lidar_point{1.25, -0.75, 2.5};
+  EnuPoint3d enu{};
   ASSERT_TRUE(transformRadarPointToLocalEnu(
       lidar_point, qx, qy, qz, qw, Cenu_odom, enu));
-  EXPECT_NEAR(enu.x, lidar_point.x, 1.0e-9);
-  EXPECT_NEAR(enu.y, lidar_point.y, 1.0e-9);
-  EXPECT_NEAR(enu.z, lidar_point.z, 1.0e-9);
+  EXPECT_NEAR(enu.east, lidar_point.x, 1.0e-9);
+  EXPECT_NEAR(enu.north, lidar_point.y, 1.0e-9);
+  EXPECT_NEAR(enu.up, lidar_point.z, 1.0e-9);
 }
 
 TEST(AttitudeMatrixTest, CurrentRadarAxesAreDefinedAsEnu)
@@ -141,14 +141,14 @@ TEST(AttitudeMatrixTest, CurrentRadarAxesAreDefinedAsEnu)
 
 TEST(AttitudeMatrixTest, RejectsNonFinitePoint)
 {
-  const Point3d lidar_point{std::numeric_limits<double>::quiet_NaN(), 0.0, 0.0};
-  Point3d output{};
+  const RadarPoint3d lidar_point{std::numeric_limits<double>::quiet_NaN(), 0.0, 0.0};
+  EnuPoint3d output{};
   const double identity[9]{1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0};
   EXPECT_FALSE(transformRadarPointToLocalEnu(
       lidar_point, 0.0, 0.0, 0.0, 1.0, identity, output));
-  EXPECT_TRUE(std::isnan(output.x));
-  EXPECT_TRUE(std::isnan(output.y));
-  EXPECT_TRUE(std::isnan(output.z));
+  EXPECT_TRUE(std::isnan(output.east));
+  EXPECT_TRUE(std::isnan(output.north));
+  EXPECT_TRUE(std::isnan(output.up));
 }
 
 }  // namespace

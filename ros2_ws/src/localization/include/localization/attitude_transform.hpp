@@ -4,11 +4,18 @@
 namespace localization
 {
 
-struct Point3d
+struct RadarPoint3d
 {
   double x;
   double y;
   double z;
+};
+
+struct EnuPoint3d
+{
+  double east;
+  double north;
+  double up;
 };
 
 // 将ROS的[x, y, z, w]四元数归一化后，通过独立姿态库生成体坐标到局部水平系矩阵。
@@ -27,8 +34,8 @@ bool radarToLocalEnuMatrix(
 
 // 输出顺序明确为[East, North, Up]；初始化姿态下输出数值与雷达[x, y, z]相同。
 bool transformRadarPointToLocalEnu(
-  const Point3d & lidar_point, double quaternion_x, double quaternion_y, double quaternion_z,
-  double quaternion_w, const double Cenu_odom[9], Point3d & enu_point) noexcept;
+  const RadarPoint3d & lidar_point, double quaternion_x, double quaternion_y, double quaternion_z,
+  double quaternion_w, const double Cenu_odom[9], EnuPoint3d & enu_point) noexcept;
 
 }  // namespace localization
 

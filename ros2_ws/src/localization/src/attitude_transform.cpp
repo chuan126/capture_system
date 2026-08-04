@@ -18,10 +18,10 @@ void setInvalidMatrix(double matrix[9]) noexcept
   }
 }
 
-void setInvalidPoint(Point3d & point) noexcept
+void setInvalidPoint(EnuPoint3d & point) noexcept
 {
   const double nan = std::numeric_limits<double>::quiet_NaN();
-  point = Point3d{nan, nan, nan};
+  point = EnuPoint3d{nan, nan, nan};
 }
 
 }  // namespace
@@ -108,8 +108,8 @@ bool radarToLocalEnuMatrix(
 }
 
 bool transformRadarPointToLocalEnu(
-  const Point3d & lidar_point, double quaternion_x, double quaternion_y, double quaternion_z,
-  double quaternion_w, const double Cenu_odom[9], Point3d & enu_point) noexcept
+  const RadarPoint3d & lidar_point, double quaternion_x, double quaternion_y, double quaternion_z,
+  double quaternion_w, const double Cenu_odom[9], EnuPoint3d & enu_point) noexcept
 {
   if (!std::isfinite(lidar_point.x) || !std::isfinite(lidar_point.y) ||
     !std::isfinite(lidar_point.z))
@@ -129,7 +129,10 @@ bool transformRadarPointToLocalEnu(
   double input[3]{lidar_point.x, lidar_point.y, lidar_point.z};
   double output[3];
   MatMul(Cenu_radar, input, output, 3, 3, 1);
-  enu_point = Point3d{output[0], output[1], output[2]};
+  // 矩阵输出的三个分量在此被明确赋予东北天语义。
+  enu_point.east = output[0];
+  enu_point.north = output[1];
+  enu_point.up = output[2];
   return true;
 }
 

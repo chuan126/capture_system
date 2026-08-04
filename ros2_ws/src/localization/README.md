@@ -43,6 +43,10 @@ localization/                                      # 定位与局部水平姿态
 雷达Z = Up
 ```
 
+公共接口分别使用`RadarPoint3d{x,y,z}`表示雷达体坐标，使用
+`EnuPoint3d{east,north,up}`表示局部东北天坐标，避免仅靠数组下标或注释区分
+两种坐标语义。
+
 任务初始化时保存当前姿态矩阵的转置：
 
 ```text
