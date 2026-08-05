@@ -8,23 +8,16 @@ import { PCV1_MAX_POINTS } from "./cloudPreviewProtocol";
 import type { CloudPreviewFrame } from "./cloudPreviewProtocol";
 import { useCloudPreviewSocket } from "./useCloudPreviewSocket";
 
-export type PointCloudViewMode = "3d" | "top";
-
 type ViewerResources = {
   renderer: THREE.WebGLRenderer;
   scene: THREE.Scene;
-  perspectiveCamera: THREE.PerspectiveCamera;
-  topCamera: THREE.OrthographicCamera;
+  camera: THREE.PerspectiveCamera;
   controls: OrbitControls;
   geometry: THREE.BufferGeometry;
   positionAttribute: THREE.BufferAttribute;
   requestRender: () => void;
-  fitView: (mode: PointCloudViewMode) => void;
+  fitView: () => void;
   resize: () => void;
-};
-
-type PointCloudViewerProps = {
-  viewMode: PointCloudViewMode;
 };
 
 function makeAxisLabel(text: string, color: string): THREE.Sprite {
@@ -57,20 +50,15 @@ function makeAxisLabel(text: string, color: string): THREE.Sprite {
   return sprite;
 }
 
-export default function PointCloudViewer({
-  viewMode,
-}: PointCloudViewerProps) {
+export default function PointCloudViewer() {
   const hostRef = useRef<HTMLDivElement>(null);
   const resourcesRef = useRef<ViewerResources | null>(null);
-  const viewModeRef = useRef(viewMode);
   const firstFrameRef = useRef(true);
   const [webglError, setWebglError] = useState<string | null>(null);
 
   const handleFrame = useCallback((frame: CloudPreviewFrame) => {
     const resources = resourcesRef.current;
-    if (!resources) {
-      return;
-    }
+    if (!resources) return;
 
     const target = resources.positionAttribute.array as Float32Array;
     target.set(frame.positions, 0);
@@ -81,16 +69,14 @@ export default function PointCloudViewer({
 
     if (firstFrameRef.current) {
       firstFrameRef.current = false;
-      resources.fitView(viewModeRef.current);
+      resources.fitView();
     }
     resources.requestRender();
   }, []);
 
   useEffect(() => {
     const host = hostRef.current;
-    if (!host) {
-      return;
-    }
+    if (!host) return;
 
     let animationFrame: number | null = null;
     let disposed = false;
@@ -115,15 +101,9 @@ export default function PointCloudViewer({
       enuSceneRoot.name = "lidar-local-enu";
       scene.add(enuSceneRoot);
 
-      const perspectiveCamera = new THREE.PerspectiveCamera(48, 1, 0.01, 2_000);
-      // 补偿点云约定X=东、Y=北、Z=天，Three.js世界坐标直接采用同一语义。
-      perspectiveCamera.up.set(0, 0, 1);
-      perspectiveCamera.position.set(8, -12, 12);
-
-      const topCamera = new THREE.OrthographicCamera(-10, 10, 10, -10, -500, 500);
-      topCamera.up.set(0, 1, 0);
-      topCamera.position.set(0, 0, 20);
-      topCamera.lookAt(0, 0, 0);
+      const camera = new THREE.PerspectiveCamera(48, 1, 0.01, 2_000);
+      camera.up.set(0, 0, 1);
+      camera.position.set(8, -12, 12);
 
       const positions = new Float32Array(PCV1_MAX_POINTS * 3);
       const positionAttribute = new THREE.BufferAttribute(positions, 3);
@@ -143,13 +123,11 @@ export default function PointCloudViewer({
       enuSceneRoot.add(points);
 
       const grid = new THREE.GridHelper(100, 100, 0x9fb8d8, 0xd8e2ef);
-      // GridHelper默认位于XZ平面，旋转为东-北水平面，法向即+天方向。
       grid.rotation.x = Math.PI / 2;
       grid.material.transparent = true;
       grid.material.opacity = 0.68;
       enuSceneRoot.add(grid);
 
-      // 坐标轴作为世界场景对象参与同一相机变换，会随点云一起旋转、平移和缩放。
       const axes = new THREE.AxesHelper(2.0);
       enuSceneRoot.add(axes);
       const eastLabel = makeAxisLabel("东 E", "#d43e50");
@@ -160,19 +138,14 @@ export default function PointCloudViewer({
       upLabel.position.set(0, 0, 2.45);
       enuSceneRoot.add(eastLabel, northLabel, upLabel);
 
-      const controls = new OrbitControls(perspectiveCamera, renderer.domElement);
+      const controls = new OrbitControls(camera, renderer.domElement);
       controls.enableDamping = false;
       controls.screenSpacePanning = true;
       controls.target.set(3, 1, 1);
 
-      const activeCamera = () => (
-        viewModeRef.current === "top" ? topCamera : perspectiveCamera
-      );
       const render = () => {
         animationFrame = null;
-        if (!disposed) {
-          renderer.render(scene, activeCamera());
-        }
+        if (!disposed) renderer.render(scene, camera);
       };
       const requestRender = () => {
         if (animationFrame === null) {
@@ -183,22 +156,13 @@ export default function PointCloudViewer({
       const resize = () => {
         const width = Math.max(host.clientWidth, 1);
         const height = Math.max(host.clientHeight, 1);
-        const aspect = width / height;
         renderer.setSize(width, height, false);
-        perspectiveCamera.aspect = aspect;
-        perspectiveCamera.updateProjectionMatrix();
-
-        const verticalSpan = Math.max(
-          topCamera.top - topCamera.bottom,
-          1,
-        );
-        topCamera.left = -verticalSpan * aspect / 2;
-        topCamera.right = verticalSpan * aspect / 2;
-        topCamera.updateProjectionMatrix();
+        camera.aspect = width / height;
+        camera.updateProjectionMatrix();
         requestRender();
       };
 
-      const fitView = (mode: PointCloudViewMode) => {
+      const fitView = () => {
         const box = geometry.boundingBox;
         if (!box || box.isEmpty()) {
           requestRender();
@@ -208,31 +172,14 @@ export default function PointCloudViewer({
         const center = box.getCenter(new THREE.Vector3());
         const size = box.getSize(new THREE.Vector3());
         const span = Math.max(size.x, size.y, size.z, 2);
-
-        if (mode === "top") {
-          const aspect = Math.max(host.clientWidth / Math.max(host.clientHeight, 1), 0.2);
-          const verticalSpan = Math.max(size.y, size.x / aspect, 2) * 1.25;
-          topCamera.left = -verticalSpan * aspect / 2;
-          topCamera.right = verticalSpan * aspect / 2;
-          topCamera.top = verticalSpan / 2;
-          topCamera.bottom = -verticalSpan / 2;
-          topCamera.position.set(center.x, center.y, center.z + span * 2);
-          topCamera.lookAt(center);
-          topCamera.updateProjectionMatrix();
-          controls.object = topCamera;
-          controls.target.copy(center);
-          controls.update();
-        } else {
-          const distance = span * 1.45;
-          perspectiveCamera.position.set(
-            center.x + distance * 0.75,
-            center.y - distance,
-            center.z + distance,
-          );
-          controls.object = perspectiveCamera;
-          controls.target.copy(center);
-          controls.update();
-        }
+        const distance = span * 1.45;
+        camera.position.set(
+          center.x + distance * 0.75,
+          center.y - distance,
+          center.z + distance,
+        );
+        controls.target.copy(center);
+        controls.update();
         requestRender();
       };
 
@@ -243,8 +190,7 @@ export default function PointCloudViewer({
       resourcesRef.current = {
         renderer,
         scene,
-        perspectiveCamera,
-        topCamera,
+        camera,
         controls,
         geometry,
         positionAttribute,
@@ -259,9 +205,7 @@ export default function PointCloudViewer({
         resizeObserver.disconnect();
         controls.removeEventListener("change", requestRender);
         controls.dispose();
-        if (animationFrame !== null) {
-          window.cancelAnimationFrame(animationFrame);
-        }
+        if (animationFrame !== null) window.cancelAnimationFrame(animationFrame);
         geometry.dispose();
         material.dispose();
         axes.dispose();
@@ -280,25 +224,10 @@ export default function PointCloudViewer({
         ? error.message
         : "浏览器无法创建WebGL上下文";
       queueMicrotask(() => {
-        if (!disposed) {
-          setWebglError(detail);
-        }
+        if (!disposed) setWebglError(detail);
       });
     }
   }, []);
-
-  useEffect(() => {
-    viewModeRef.current = viewMode;
-    const resources = resourcesRef.current;
-    if (!resources) {
-      return;
-    }
-
-    resources.controls.object = viewMode === "top"
-      ? resources.topCamera
-      : resources.perspectiveCamera;
-    resources.fitView(viewMode);
-  }, [viewMode]);
 
   const connection = useCloudPreviewSocket(handleFrame);
   const isStreaming = connection.streamState === "streaming" && !webglError;
@@ -310,7 +239,7 @@ export default function PointCloudViewer({
     || connection.streamState === "ros_unavailable";
 
   return (
-    <div className={`cloud-stage dashboard-cloud-stage cloud-stage--${viewMode}`}>
+    <div className="cloud-stage dashboard-cloud-stage cloud-stage--3d">
       <div ref={hostRef} className="cloud-canvas-host" />
       <div className={`cloud-live-badge cloud-live-badge--${connection.streamState}`}>
         <i />
@@ -327,16 +256,6 @@ export default function PointCloudViewer({
           </small>
         </div>
       )}
-      <div className="cloud-stage__footer">
-        <span>雷达局部东北天 · X=东 · Y=北 · Z=天 · frame: {connection.frameId}</span>
-        <span>
-          {connection.pointCount.toLocaleString("zh-CN")}点
-          {" · "}
-          {connection.receiveFps.toFixed(1)} FPS
-          {" · "}
-          序号丢帧估计 {connection.droppedFrames}
-        </span>
-      </div>
     </div>
   );
 }

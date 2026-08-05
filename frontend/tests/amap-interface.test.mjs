@@ -154,11 +154,11 @@ test("globals.css includes amap layout and marker styles", async () => {
   assert.match(css, /\.amap-container/);
   assert.match(css, /\.amap-empty/);
   assert.match(css, /\.amap-status-row/);
-  assert.match(css, /\.amap-coordinate/);
+  assert.match(css, /\.amap-map-tip/);
   assert.match(css, /\.amap-vehicle-marker/);
   assert.match(css, /\.map-modal-mask/);
   assert.match(css, /\.map-modal-panel/);
-  assert.match(css, /\.map-settings-button/);
+  assert.match(css, /\.amap-chip--button/);
 });
 
 test("globals.css responsive breakpoints preserve amap layout", async () => {

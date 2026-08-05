@@ -6,15 +6,14 @@ import { useClearanceSocket } from "@/components/clearance/useClearanceSocket";
 import type { ClearanceSnapshot } from "@/components/clearance/clearanceProtocol";
 import RealtimeAmap from "@/components/map/RealtimeAmap";
 import PointCloudViewer from "@/components/point-cloud/PointCloudViewer";
-import type { PointCloudViewMode } from "@/components/point-cloud/PointCloudViewer";
 import { useRtkSocket } from "@/components/rtk/useRtkSocket";
 import { useSystemStatusSocket } from "@/components/system-status/useSystemStatusSocket";
+import { isDeviceConnected } from "@/components/system-status/systemStatusProtocol";
 import type { DeviceStatus, HealthState } from "@/components/system-status/systemStatusProtocol";
 
 type PageId = "dashboard" | "tasks" | "playback" | "report";
 type PlaybackTab = "result" | "history" | "logs";
 type TaskTab = "pending" | "completed" | "abnormal";
-type ViewMode = "3d" | "top" | "section";
 type ReportLoadState = "idle" | "loading" | "ready" | "error";
 
 type ReportTestData = {
@@ -72,6 +71,37 @@ function PanelHead({
       </div>
       {trailing}
     </div>
+  );
+}
+
+function ExpandButton({
+  expanded,
+  label,
+  onClick,
+}: {
+  expanded: boolean;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="panel-expand-button"
+      aria-label={expanded ? `退出${label}放大显示` : `放大显示${label}`}
+      aria-pressed={expanded}
+      title={expanded ? "退出放大显示" : "放大显示"}
+      onClick={onClick}
+    >
+      {expanded ? (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" />
+        </svg>
+      ) : (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5" />
+        </svg>
+      )}
+    </button>
   );
 }
 
@@ -244,21 +274,31 @@ function Header({ page }: { page: PageId }) {
 }
 
 function Dashboard() {
-  const [viewMode, setViewMode] = useState<ViewMode>("3d");
+  const [expandedVisual, setExpandedVisual] = useState<"cloud" | "map" | null>(null);
   const rtk = useRtkSocket();
   const rtkSnapshot = rtk.snapshot;
   const clearance = useClearanceSocket();
   const clearanceSnapshot = clearance.snapshot;
   const systemStatus = useSystemStatusSocket();
   const systemSnapshot = systemStatus.snapshot;
-  const modes: Array<{ id: ViewMode; label: string; disabled?: boolean }> = [
-    { id: "3d", label: "三维视图" },
-    { id: "top", label: "沿X轴俯视" },
-    { id: "section", label: "断面视图", disabled: true },
-  ];
+
+  useEffect(() => {
+    if (!expandedVisual) return;
+
+    const previousOverflow = document.body.style.overflow;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setExpandedVisual(null);
+    };
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [expandedVisual]);
 
   const systemStreamAvailable = systemStatus.connection === "connected" && systemStatus.streamState === "streaming";
-  const rtkDeviceText = systemStreamAvailable ? systemSnapshot?.rtk.message ?? "检查中" : "系统检查中";
+  const rtkDeviceText = systemStreamAvailable ? systemSnapshot?.rtk.message ?? "检查中" : "检查中";
   const rtkTone = !systemStreamAvailable
     ? "idle"
     : systemSnapshot?.rtk.state === "ok"
@@ -276,9 +316,9 @@ function Dashboard() {
     5: "RTK浮动",
   };
   const gpsState = rtkSnapshot?.gps_state;
-  const solutionText = gpsState === null || gpsState === undefined
-    ? "等待RTK数据"
-    : `${solutionLabels[gpsState] ?? "状态码"}（${gpsState}）`;
+  const rtkCardValue = gpsState === null || gpsState === undefined
+    ? "--"
+    : solutionLabels[gpsState] ?? `状态 ${gpsState}`;
   const rmcCharacter = rtkSnapshot?.rmc_validity
     ? String.fromCharCode(rtkSnapshot.rmc_validity)
     : null;
@@ -300,16 +340,14 @@ function Dashboard() {
     : "--";
   const altitudeText = hasFix ? `${formatMetric(rtkSnapshot?.altitude)} m` : "--";
   const monitorUnavailable = !systemStreamAvailable;
-  const statusText = (device: DeviceStatus | undefined, fallback: string) =>
-    monitorUnavailable ? fallback : device?.message ?? "检查中";
-  const statusState = (device: DeviceStatus | undefined): HealthState =>
-    monitorUnavailable ? "unknown" : device?.state ?? "unknown";
+  const lidarConnected = !monitorUnavailable && isDeviceConnected("lidar", systemSnapshot?.lidar);
+  const rtkConnected = !monitorUnavailable && isDeviceConnected("rtk", systemSnapshot?.rtk);
+  const controllerConnected = !monitorUnavailable && isDeviceConnected("controller", systemSnapshot?.controller);
+  const storageConnected = !monitorUnavailable && isDeviceConnected("storage", systemSnapshot?.storage);
   const availableBytes = Number(systemSnapshot?.storage.values?.available_bytes);
-  const storageText = monitorUnavailable
-    ? "检查中"
-    : Number.isFinite(availableBytes)
-      ? `${(availableBytes / 1024 ** 3).toFixed(1)} GiB 可用`
-      : systemSnapshot?.storage.message ?? "检查中";
+  const storageText = !monitorUnavailable && Number.isFinite(availableBytes)
+    ? `${(availableBytes / 1024 ** 3).toFixed(1)} GiB`
+    : "--";
   const devices = systemSnapshot
     ? [systemSnapshot.lidar, systemSnapshot.rtk, systemSnapshot.controller, systemSnapshot.storage]
     : [];
@@ -322,62 +360,137 @@ function Dashboard() {
         : devices.length === 4 && devices.every((device) => device.state === "ok")
           ? "ok"
           : "unknown";
-  const aggregateText = {ok: "系统正常", warn: "系统有告警", error: "系统异常", stale: "系统异常", unknown: "系统检查中"}[aggregateState];
+  const aggregateText = {ok: "系统正常", warn: "系统告警", error: "系统异常", stale: "系统异常", unknown: "检查中"}[aggregateState];
   const clearanceStreaming = clearance.connection === "connected" && clearance.streamState === "streaming";
   const clearanceValid = clearanceStreaming && clearanceSnapshot?.valid === true &&
     clearanceSnapshot.lidar_to_top_m !== null;
   const currentHeightText = clearanceValid
     ? clearanceSnapshot.lidar_to_top_m!.toFixed(3)
     : "--";
-
+  const deviceValue = (device: DeviceStatus | undefined, key: string) =>
+    monitorUnavailable ? null : device?.values?.[key] ?? null;
+  const formatPercentValue = (device: DeviceStatus | undefined, key: string) => {
+    const value = Number(deviceValue(device, key));
+    return Number.isFinite(value) && value >= 0 ? `${value.toFixed(1)}%` : "--";
+  };
+  const controllerCpuText = formatPercentValue(systemSnapshot?.controller, "cpu_percent");
   return (
     <div className="page-stack dashboard-page">
-      <section className="dashboard-health-bar" aria-label="系统状态与当前告警">
-        <div className="health-alert">
-          <span>…</span>
-          <div>
-            <strong className={`device-state device-state--${aggregateState}`}>{aggregateText}</strong>
+      <section className="dashboard-health-bar" aria-label="系统状态栏">
+        <div className="health-overview">
+          <div className="health-overview__summary">
+            <div className={`health-overview__icon health-overview__icon--${aggregateState}`} aria-hidden="true">
+              <svg viewBox="0 0 48 48" focusable="false">
+                <rect x="7" y="9" width="34" height="25" rx="5" />
+                <path d="M13 24h6l3-7 5 13 3-6h5" />
+                <path d="M18 40h12M24 34v6" />
+              </svg>
+            </div>
+            <div className="health-overview__copy">
+              <span>系统状态</span>
+              <strong className={`device-state device-state--${aggregateState}`}>{aggregateText}</strong>
+            </div>
+          </div>
+
+          <div className="health-kpi-grid" aria-label="实时测量摘要">
+            <article className="health-kpi-card health-kpi-card--primary">
+              <span>当前净空高度</span>
+              <strong>{currentHeightText}<small>m</small></strong>
+            </article>
+            <article className="health-kpi-card health-kpi-card--placeholder">
+              <span>预留指标一</span>
+              <strong>--</strong>
+            </article>
+            <article className="health-kpi-card health-kpi-card--placeholder">
+              <span>预留指标二</span>
+              <strong>--</strong>
+            </article>
           </div>
         </div>
-        <div className="health-devices">
-          <span><b>雷达</b><strong className={`device-state device-state--${statusState(systemSnapshot?.lidar)}`} title={systemSnapshot?.lidar.message}>{statusText(systemSnapshot?.lidar, "检查中")}</strong></span>
-          <span><b>RTK</b><strong className={`device-state device-state--${statusState(systemSnapshot?.rtk)}`} title={systemSnapshot?.rtk.message}>{statusText(systemSnapshot?.rtk, "检查中")}</strong></span>
-          <span><b>控制器</b><strong className={`device-state device-state--${statusState(systemSnapshot?.controller)}`} title={systemSnapshot?.controller.message}>{statusText(systemSnapshot?.controller, "检查中")}</strong></span>
-          <span><b>存储</b><strong className={`device-state device-state--${statusState(systemSnapshot?.storage)}`} title={systemSnapshot?.storage.message}>{storageText}</strong></span>
+
+        <div className="health-device-grid">
+          <article className={`health-device-card${lidarConnected ? " health-device-card--connected" : ""}`}>
+            <div className="health-device-card__identity">
+              <span className="health-device-card__icon">LDR</span>
+              <div><b>雷达</b><small>Odin1 Lite</small></div>
+            </div>
+            <div className="health-device-card__value health-device-card__value--empty" aria-hidden="true" />
+            <i className="health-device-card__lamp" aria-label={lidarConnected ? "已连接" : "未连接"} />
+          </article>
+
+          <article className={`health-device-card${rtkConnected ? " health-device-card--connected" : ""}`}>
+            <div className="health-device-card__identity">
+              <span className="health-device-card__icon">RTK</span>
+              <div><b>RTK</b><small>卫星定位</small></div>
+            </div>
+            <div className="health-device-card__value">
+              <span>定位状态</span>
+              <strong>{rtkCardValue}</strong>
+            </div>
+            <i className="health-device-card__lamp" aria-label={rtkConnected ? "已连接" : "未连接"} />
+          </article>
+
+          <article className={`health-device-card${controllerConnected ? " health-device-card--connected" : ""}`}>
+            <div className="health-device-card__identity">
+              <span className="health-device-card__icon">RK</span>
+              <div><b>主控板</b><small>RK3588</small></div>
+            </div>
+            <div className="health-device-card__value">
+              <span>CPU 占用</span>
+              <strong>{controllerCpuText}</strong>
+            </div>
+            <i className="health-device-card__lamp" aria-label={controllerConnected ? "已连接" : "未连接"} />
+          </article>
+
+          <article className={`health-device-card${storageConnected ? " health-device-card--connected" : ""}`}>
+            <div className="health-device-card__identity">
+              <span className="health-device-card__icon">SSD</span>
+              <div><b>数据存储</b><small>采集磁盘</small></div>
+            </div>
+            <div className="health-device-card__value health-device-card__value--storage">
+              <span>可用容量</span>
+              <strong>{storageText}</strong>
+            </div>
+            <i className="health-device-card__lamp" aria-label={storageConnected ? "已连接" : "未连接"} />
+          </article>
         </div>
       </section>
+
+      {expandedVisual && (
+        <button
+          type="button"
+          className="visual-panel-backdrop"
+          aria-label="退出放大显示"
+          onClick={() => setExpandedVisual(null)}
+        />
+      )}
 
       <section className="dashboard-layout">
         <div className="dashboard-main">
           <section className="dashboard-visual-grid" aria-label="点云与实时地图">
-            <article className="panel cloud-panel dashboard-cloud-panel">
+            <article className={`panel cloud-panel dashboard-cloud-panel${expandedVisual === "cloud" ? " visual-panel--expanded" : ""}`}>
               <div className="cloud-toolbar">
                 <div>
                   <h2>点云实时预览</h2>
                 </div>
-                <div className="segmented segmented--small" aria-label="点云视角">
-                  {modes.map((mode) => (
-                    <button
-                      type="button"
-                      key={mode.id}
-                      className={viewMode === mode.id ? "active" : ""}
-                      disabled={mode.disabled}
-                      title={mode.disabled ? "等待真实断面接口接入" : undefined}
-                      onClick={() => setViewMode(mode.id)}
-                    >
-                      {mode.label}
-                    </button>
-                  ))}
+                <div className="cloud-toolbar__actions">
+                  <span className="panel-tag panel-tag--muted">三维视图</span>
+                  <ExpandButton
+                    expanded={expandedVisual === "cloud"}
+                    label="点云实时预览"
+                    onClick={() => setExpandedVisual((current) => current === "cloud" ? null : "cloud")}
+                  />
                 </div>
-                <span className="panel-tag panel-tag--muted">预览链路</span>
               </div>
-              <PointCloudViewer viewMode={viewMode as PointCloudViewMode} />
+              <PointCloudViewer />
             </article>
 
             <RealtimeAmap
               snapshot={rtkSnapshot}
               hasFix={hasFix && rmcCharacter !== "V"}
               connectionDetail={rtk.detail}
+              expanded={expandedVisual === "map"}
+              onToggleExpanded={() => setExpandedVisual((current) => current === "map" ? null : "map")}
             />
           </section>
 
@@ -399,55 +512,87 @@ function Dashboard() {
           </article>
         </div>
 
-        <aside className="panel measurement-panel measurement-control-panel">
-          <PanelHead
-            title="测量与任务控制"
-            description="实时顶面高度、RTK质量和当前任务操作"
-          />
-          <section className="measurement-primary">
-            <span>雷达到当前最低顶面</span>
-            <strong>{currentHeightText} <small>m</small></strong>
-          </section>
-          <section className="measurement-details" aria-label="RTK定位质量">
-            <div className="measurement-details__head">
-              <h3>RTK 定位质量</h3>
-              <StatusPill tone={rtkTone}>{rtkDeviceText}</StatusPill>
+        <aside className="dashboard-side-stack" aria-label="定位与任务控制">
+          <article className="panel rtk-control-panel">
+            <PanelHead
+              title="RTK 定位"
+              description="实时定位质量与进出洞坐标"
+              trailing={<StatusPill tone={rtkTone}>{rtkDeviceText}</StatusPill>}
+            />
+
+            <section className="rtk-solution-hero" aria-label="RTK当前解状态">
+              <div>
+                <span>定位状态</span>
+                <strong>{rtkCardValue}</strong>
+                <small>{rmcText}</small>
+              </div>
+              <div className="rtk-satellite-count">
+                <span>卫星数</span>
+                <strong>{rtkSnapshot?.satellite_count ?? "--"}</strong>
+              </div>
+            </section>
+
+            <div className="rtk-quality-grid" aria-label="RTK质量指标">
+              <div><span>HDOP</span><strong>{formatMetric(rtkSnapshot?.hdop)}</strong></div>
+              <div><span>PDOP</span><strong>{formatMetric(rtkSnapshot?.pdop)}</strong></div>
+              <div><span>高度</span><strong>{altitudeText}</strong></div>
+              <div><span>坐标系</span><strong>WGS84</strong></div>
             </div>
-            <div><span>解状态</span><strong>{solutionText} · {rmcText}</strong></div>
-            <div>
-              <span>卫星数 / HDOP / PDOP</span>
-              <strong>
-                {rtkSnapshot?.satellite_count ?? "--"} / {formatMetric(rtkSnapshot?.hdop)} / {formatMetric(rtkSnapshot?.pdop)}
-              </strong>
+
+            <div className="rtk-position-block">
+              <span>当前坐标</span>
+              <strong>{coordinateText}</strong>
             </div>
-            <div><span>当前坐标</span><strong className="rtk-coordinate">{coordinateText}</strong></div>
-            <div><span>高度</span><strong>{altitudeText}</strong></div>
-            <div><span>入口坐标</span><strong>未标记</strong></div>
-            <div><span>出口坐标</span><strong>未标记</strong></div>
-          </section>
-          <section className="task-control-section" aria-label="当前任务与采集控制">
-            <div className="task-control-section__head">
-              <h3>当前任务</h3>
+
+            <div className="rtk-marker-grid" aria-label="隧道进出洞坐标">
+              <div><span>入口坐标</span><strong>未标记</strong></div>
+              <div><span>出口坐标</span><strong>未标记</strong></div>
             </div>
-            <div className="task-control-current">
-              <div><span>任务名称</span><strong>尚未选择任务</strong></div>
-              <StatusPill>待机</StatusPill>
-            </div>
-            <div className="task-information-grid" aria-label="任务重要信息">
+          </article>
+
+          <article className="panel task-operation-panel">
+            <PanelHead
+              title="任务控制"
+              description="任务选择、采集条件与操作"
+              trailing={<StatusPill>待机</StatusPill>}
+            />
+
+            <section className="task-operation-current">
+              <span className="task-operation-current__icon" aria-hidden="true">任</span>
+              <div>
+                <span>当前任务</span>
+                <strong>尚未选择任务</strong>
+                <small>请在任务管理中创建或选择任务</small>
+              </div>
+            </section>
+
+            <div className="task-operation-info" aria-label="当前任务信息">
               <div><span>任务编号</span><strong>--</strong></div>
               <div><span>隧道名称</span><strong>--</strong></div>
               <div><span>检测车道</span><strong>--</strong></div>
-              <div><span>参数方案</span><strong>--</strong></div>
-              <div><span>计划日期</span><strong>--</strong></div>
               <div><span>采集时长</span><strong>--:--</strong></div>
             </div>
-            <div className="task-control-actions">
-              <button type="button" className="button button--green" disabled title="请选择任务并完成采集前检查">开始</button>
+
+            <section className="task-readiness" aria-label="采集条件">
+              <div className="task-readiness__head">
+                <h3>采集条件</h3>
+                <span>全部满足后允许开始</span>
+              </div>
+              <div className="task-readiness__signals">
+                <span className={lidarConnected ? "is-ready" : ""}><i />雷达</span>
+                <span className={rtkConnected ? "is-ready" : ""}><i />RTK</span>
+                <span className={storageConnected ? "is-ready" : ""}><i />存储</span>
+              </div>
+            </section>
+
+            <div className="task-operation-actions">
+              <button type="button" className="button button--green" disabled title="请选择任务并完成采集前检查">开始采集</button>
               <button type="button" className="button button--warning" disabled>暂停</button>
               <button type="button" className="button button--danger" disabled>停止</button>
             </div>
-          </section>
-          <p className="measurement-footnote">浏览器断开不会终止RK3588上的采集与计算任务。</p>
+
+            <p className="task-operation-footnote">浏览器断开不会终止 RK3588 上的采集与计算任务。</p>
+          </article>
         </aside>
       </section>
     </div>

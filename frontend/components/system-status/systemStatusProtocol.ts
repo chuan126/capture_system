@@ -25,6 +25,23 @@ export type SystemStreamStatus = {
 
 export type SystemStatusMessage = SystemStatusSnapshot | SystemStreamStatus;
 
+export type SystemDeviceKind = "lidar" | "rtk" | "controller" | "storage";
+
+export function isDeviceConnected(kind: SystemDeviceKind, device: DeviceStatus | undefined): boolean {
+  if (!device) return false;
+  if (kind === "lidar") {
+    const publishers = Number(device.values?.online_publishers);
+    return device.state === "ok" && Number.isFinite(publishers) && publishers > 0;
+  }
+  if (kind === "rtk") {
+    return device.state === "ok" && !/未连接|断开|等待|超时|重试/.test(device.message);
+  }
+  if (kind === "controller") {
+    return device.state === "ok" || device.state === "warn";
+  }
+  return device.values?.writable === "true";
+}
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }

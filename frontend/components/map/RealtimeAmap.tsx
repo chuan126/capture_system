@@ -4,14 +4,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { RtkSnapshot } from "@/components/rtk/rtkProtocol";
 
-/* ------------------------------------------------------------------ */
-/*  WGS-84 → GCJ-02 坐标转换（高德地图标准算法）                        */
-/* ------------------------------------------------------------------ */
-
 const PI = Math.PI;
-const X_PI = (PI * 3000.0) / 180.0;
-const A = 6378245.0; // 长半轴
-const EE = 0.00669342162296594323; // 扁率
+const A = 6378245.0;
+const EE = 0.00669342162296594323;
 
 function isOutOfChina(lat: number, lon: number): boolean {
   return lon < 72.004 || lon > 137.8347 || lat < 0.8293 || lat > 55.8271;
@@ -58,9 +53,8 @@ function transformLon(x: number, y: number): number {
 }
 
 function wgs84ToGcj02(lat: number, lon: number): [number, number] {
-  if (isOutOfChina(lat, lon)) {
-    return [lon, lat];
-  }
+  if (isOutOfChina(lat, lon)) return [lon, lat];
+
   let dLat = transformLat(lon - 105.0, lat - 35.0);
   let dLon = transformLon(lon - 105.0, lat - 35.0);
   const radLat = (lat / 180.0) * PI;
@@ -72,12 +66,9 @@ function wgs84ToGcj02(lat: number, lon: number): [number, number] {
   return [lon + dLon, lat + dLat];
 }
 
-/* ------------------------------------------------------------------ */
-/*  常量                                                               */
-/* ------------------------------------------------------------------ */
-
 const MAX_TRACK_POINTS = 2500;
-const AMAP_JS_URL = "https://webapi.amap.com/maps?v=2.0";
+const AMAP_JS_URL =
+  "https://webapi.amap.com/maps?v=2.0&plugin=AMap.Scale,AMap.ToolBar";
 const STORAGE_KEY_KEY = "amap_js_key";
 const STORAGE_KEY_CODE = "amap_security_code";
 
@@ -91,105 +82,161 @@ type TrackPoint = {
   lat: number;
 };
 
-/* ------------------------------------------------------------------ */
-/*  加载高德 JS API                                                    */
-/* ------------------------------------------------------------------ */
+type AmapMapLike = {
+  add?: (overlay: unknown) => void;
+  addControl?: (control: unknown) => void;
+  destroy?: () => void;
+  resize?: () => void;
+  setCenter?: (center: [number, number]) => void;
+  setZoomAndCenter?: (zoom: number, center: [number, number]) => void;
+};
 
 function loadAmapScript(key: string, securityCode: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    // 如果已经挂载但 key 变化则先卸载
     const existing = document.querySelector(
       'script[src*="webapi.amap.com"]',
     ) as HTMLScriptElement | null;
+
     if (existing) {
       existing.remove();
-      // 同时清理 AMap 全局变量
       delete (window as unknown as Record<string, unknown>)._AMapSecurityConfig;
       delete (window as unknown as Record<string, unknown>).AMap;
     }
 
-    // 安全密钥必须在脚本加载前设置
     (window as unknown as Record<string, unknown>)._AMapSecurityConfig = {
       securityJsCode: securityCode,
     };
 
     const script = document.createElement("script");
-    script.src = `${AMAP_JS_URL}&key=${key}`;
+    script.src = `${AMAP_JS_URL}&key=${encodeURIComponent(key)}`;
     script.async = true;
-    const timeoutId = setTimeout(() => {
+
+    const timeoutId = window.setTimeout(() => {
       script.remove();
-      reject(new Error(`高德地图JS API加载超时（15秒），请检查网络或 Key`));
+      reject(new Error("高德地图 JS API 加载超时，请检查网络、Key 和域名白名单"));
     }, 15000);
+
     script.onload = () => {
-      clearTimeout(timeoutId);
+      window.clearTimeout(timeoutId);
       resolve();
     };
     script.onerror = () => {
-      clearTimeout(timeoutId);
-      reject(new Error("高德地图JS API加载失败，请检查网络连接和 Key 是否正确"));
+      window.clearTimeout(timeoutId);
+      reject(new Error("高德地图 JS API 加载失败，请检查网络和 Key"));
     };
+
     document.head.appendChild(script);
   });
 }
 
-/* ------------------------------------------------------------------ */
-/*  车辆 SVG 标记                                                      */
-/* ------------------------------------------------------------------ */
-
-function VehicleSvg() {
-  return (
-    <svg
-      viewBox="0 0 42 58"
-      xmlns="http://www.w3.org/2000/svg"
-      aria-hidden="true"
-    >
-      {/* 方向指示 */}
-      <polygon
-        className="amap-vehicle-marker__heading"
-        points="21,0 12,18 30,18"
-      />
-      {/* 车身 */}
-      <g className="amap-vehicle-marker__body">
-        <rect x="8" y="18" width="26" height="38" rx="6" />
-        <path d="M16 56 L16 44 Q16 39 21 38 L21 38 Q26 39 26 44 L26 56 Z" />
-        <path d="M10 18 L10 24 L32 24 L32 18 Z" />
-        {/* 车窗 */}
-        <rect x="14" y="24" width="5" height="10" rx="2" />
-        <rect x="23" y="24" width="5" height="10" rx="2" />
+function vehicleMarkerMarkup(): string {
+  return `
+    <svg viewBox="0 0 48 66" aria-label="检测车辆">
+      <defs>
+        <linearGradient id="captureCarBodyGradient" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#4b9cff"/>
+          <stop offset="58%" stop-color="#176bff"/>
+          <stop offset="100%" stop-color="#0d47b8"/>
+        </linearGradient>
+        <linearGradient id="captureCarGlassGradient" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#e8f4ff"/>
+          <stop offset="100%" stop-color="#9ac7ef"/>
+        </linearGradient>
+        <filter id="captureCarShadow" x="-40%" y="-30%" width="180%" height="190%">
+          <feDropShadow dx="0" dy="3" stdDeviation="2.4" flood-color="#173667" flood-opacity=".34"/>
+        </filter>
+      </defs>
+      <g class="vehicle-direction">
+        <path d="M24 1 L30 11 H18 Z" fill="#176bff" opacity=".72"/>
+        <circle cx="24" cy="9" r="8" fill="none" stroke="#176bff" stroke-width="1.5" opacity=".22"/>
       </g>
-    </svg>
-  );
+      <g filter="url(#captureCarShadow)">
+        <rect x="6" y="17" width="36" height="45" rx="13" fill="#ffffff"/>
+        <rect x="8" y="18" width="32" height="42" rx="11" fill="url(#captureCarBodyGradient)"/>
+        <path d="M14 27 Q16 21 21 20 H27 Q32 21 34 27 L36 39 H12 Z"
+              fill="url(#captureCarGlassGradient)" stroke="#ffffff" stroke-width="1.2"/>
+        <path d="M14 40 H34 L32 50 Q30 56 24 57 Q18 56 16 50 Z"
+              fill="#dcecff" opacity=".93"/>
+        <rect x="5" y="27" width="4" height="11" rx="2" fill="#24334a"/>
+        <rect x="39" y="27" width="4" height="11" rx="2" fill="#24334a"/>
+        <rect x="5" y="45" width="4" height="10" rx="2" fill="#24334a"/>
+        <rect x="39" y="45" width="4" height="10" rx="2" fill="#24334a"/>
+        <ellipse cx="15" cy="22" rx="4" ry="2" fill="#fff4b8"/>
+        <ellipse cx="33" cy="22" rx="4" ry="2" fill="#fff4b8"/>
+        <ellipse cx="15" cy="56" rx="4" ry="2" fill="#ff9cac"/>
+        <ellipse cx="33" cy="56" rx="4" ry="2" fill="#ff9cac"/>
+        <rect x="18" y="13" width="12" height="7" rx="3.5" fill="#0f9f6e" stroke="#fff" stroke-width="1.3"/>
+        <circle cx="24" cy="16.5" r="2" fill="#bff7df"/>
+      </g>
+    </svg>`;
 }
-
-/* ------------------------------------------------------------------ */
-/*  组件 Props                                                         */
-/* ------------------------------------------------------------------ */
 
 type RealtimeAmapProps = {
   snapshot: RtkSnapshot | null;
   hasFix: boolean;
   connectionDetail: string;
+  laneLabel?: string;
+  expanded?: boolean;
+  onToggleExpanded?: () => void;
 };
 
-/* ------------------------------------------------------------------ */
-/*  组件                                                               */
-/* ------------------------------------------------------------------ */
+function MapExpandButton({
+  expanded,
+  onClick,
+}: {
+  expanded: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="panel-expand-button"
+      aria-label={expanded ? "退出实时地图放大显示" : "放大显示实时地图"}
+      aria-pressed={expanded}
+      title={expanded ? "退出放大显示" : "放大显示"}
+      onClick={onClick}
+    >
+      {expanded ? (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" />
+        </svg>
+      ) : (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5" />
+        </svg>
+      )}
+    </button>
+  );
+}
 
 export default function RealtimeAmap({
   snapshot,
   hasFix,
   connectionDetail,
+  laneLabel = "待任务接入",
+  expanded = false,
+  onToggleExpanded = () => undefined,
 }: RealtimeAmapProps) {
-  /* ---- 配置状态 ---- */
   const [config, setConfig] = useState<AmapConfig>({ key: "", securityCode: "" });
   const [configHydrated, setConfigHydrated] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [draftKey, setDraftKey] = useState("");
   const [draftCode, setDraftCode] = useState("");
+  const [mapState, setMapState] = useState<
+    "no_key" | "loading" | "error" | "ready"
+  >("no_key");
+  const [trackPointCount, setTrackPointCount] = useState(0);
 
-  // 客户端挂载后从 localStorage / env 读取 Key，避免 SSR hydration 错配
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const mapRef = useRef<AmapMapLike | null>(null);
+  const markerRef = useRef<unknown>(null);
+  const polylineRef = useRef<unknown>(null);
+  const trackPointsRef = useRef<TrackPoint[]>([]);
+  const lastPositionRef = useRef<[number, number] | null>(null);
+
   useEffect(() => {
     if (typeof window === "undefined") return;
+
     const storedKey =
       localStorage.getItem(STORAGE_KEY_KEY) ??
       process.env.NEXT_PUBLIC_AMAP_KEY ??
@@ -198,337 +245,320 @@ export default function RealtimeAmap({
       localStorage.getItem(STORAGE_KEY_CODE) ??
       process.env.NEXT_PUBLIC_AMAP_SECURITY_CODE ??
       "";
+
     setConfig({ key: storedKey, securityCode: storedCode });
     setDraftKey(storedKey);
     setDraftCode(storedCode);
+    setMapState(storedKey ? "loading" : "no_key");
     setConfigHydrated(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ---- 地图状态 ---- */
-  const [mapState, setMapState] = useState<
-    "no_key" | "loading" | "error" | "ready"
-  >(config.key ? "loading" : "no_key");
-
-  /* ---- refs ---- */
-  const containerRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<unknown>(null);
-  const markerRef = useRef<unknown>(null);
-  const polylineRef = useRef<unknown>(null);
-  const trackPointsRef = useRef<TrackPoint[]>([]);
-  const lastPositionRef = useRef<[number, number] | null>(null);
-  const configRef = useRef(config);
-  configRef.current = config;
-
-  /* ---- 初始化地图 ---- */
   const initMap = useCallback(async (key: string, code: string) => {
     if (!containerRef.current) return;
+
     setMapState("loading");
     try {
       await loadAmapScript(key, code);
       const AMap = (window as unknown as Record<string, unknown>).AMap as
         | Record<string, unknown>
         | undefined;
-      if (!AMap || typeof (AMap as Record<string, unknown>).Map !== "function") {
-        const detail = AMap
-          ? "AMap 已挂载但缺少 Map 构造函数，请检查 Key 和安全密钥是否正确"
-          : "window.AMap 未挂载，JS API 脚本可能未正确执行";
-        throw new Error(detail);
+      const MapConstructor = AMap?.Map as (new (...args: unknown[]) => AmapMapLike) | undefined;
+
+      if (!AMap || !MapConstructor) {
+        throw new Error("AMap.Map 不可用，请检查 Key、安全密钥和域名白名单");
       }
 
-      // 销毁旧实例
-      if (mapRef.current) {
-        const old = mapRef.current as { destroy?: () => void };
-        old.destroy?.();
-      }
+      mapRef.current?.destroy?.();
+      markerRef.current = null;
+      polylineRef.current = null;
+      trackPointsRef.current = [];
+      setTrackPointCount(0);
 
-      const mapInstance = new (AMap.Map as new (...args: unknown[]) => unknown)(
-        containerRef.current,
-        {
-          zoom: 15,
-          center: [118.0894, 24.4798], // 默认厦门，有定位后会更新
-          resizeEnable: true,
-        },
-      );
+      const mapInstance = new MapConstructor(containerRef.current, {
+        viewMode: "2D",
+        zoom: 13,
+        center: [118.0829, 24.5008],
+        mapStyle: "amap://styles/whitesmoke",
+        resizeEnable: true,
+      });
       mapRef.current = mapInstance;
 
-      // 重置轨迹
-      trackPointsRef.current = [];
-      polylineRef.current = null;
+      const Scale = AMap.Scale as (new (...args: unknown[]) => unknown) | undefined;
+      const ToolBar = AMap.ToolBar as (new (...args: unknown[]) => unknown) | undefined;
+      if (Scale) mapInstance.addControl?.(new Scale());
+      if (ToolBar) {
+        mapInstance.addControl?.(
+          new ToolBar({ position: { top: "72px", right: "12px" } }),
+        );
+      }
 
-      // 如果有上次有效位置，尝试恢复
       if (lastPositionRef.current) {
-        const [lng, lat] = lastPositionRef.current;
-        (mapInstance as { setCenter?: (c: [number, number]) => void }).setCenter?.([lng, lat]);
+        mapInstance.setZoomAndCenter?.(17, lastPositionRef.current);
       }
 
       setMapState("ready");
-    } catch (err) {
-      console.error("高德地图初始化失败:", err);
+      window.setTimeout(() => mapInstance.resize?.(), 0);
+    } catch (error) {
+      console.error("高德地图初始化失败", error);
       setMapState("error");
     }
   }, []);
 
-  // 首次挂载且 config 水合完成后，如果有 key 就自动初始化
   useEffect(() => {
     if (configHydrated && config.key) {
       void initMap(config.key, config.securityCode);
     }
   }, [configHydrated, config.key, config.securityCode, initMap]);
 
-  /* ---- 保存配置 ---- */
+  const openSettings = useCallback(() => {
+    setDraftKey(config.key);
+    setDraftCode(config.securityCode);
+    setShowSettings(true);
+  }, [config.key, config.securityCode]);
+
   const saveConfig = useCallback(() => {
     const key = draftKey.trim();
-    const code = draftCode.trim();
+    const securityCode = draftCode.trim();
     if (!key) return;
-    localStorage.setItem(STORAGE_KEY_KEY, key);
-    localStorage.setItem(STORAGE_KEY_CODE, code);
-    setConfig({ key, securityCode: code });
-    setShowSettings(false);
-    void initMap(key, code);
-  }, [draftKey, draftCode, initMap]);
 
-  /* ---- RTK 快照更新 → 地图标记 & 轨迹 ---- */
+    localStorage.setItem(STORAGE_KEY_KEY, key);
+    localStorage.setItem(STORAGE_KEY_CODE, securityCode);
+    setConfig({ key, securityCode });
+    setShowSettings(false);
+    void initMap(key, securityCode);
+  }, [draftCode, draftKey, initMap]);
+
   useEffect(() => {
     if (mapState !== "ready") return;
-    const map = mapRef.current as
-      | (Record<string, unknown> & { setCenter?: (c: [number, number]) => void })
-      | null;
+
+    const map = mapRef.current;
     const AMap = (window as unknown as Record<string, unknown>).AMap as
       | Record<string, unknown>
       | undefined;
     if (!map || !AMap) return;
 
-    if (hasFix && snapshot?.latitude != null && snapshot?.longitude != null) {
-      const gcj = wgs84ToGcj02(snapshot.latitude, snapshot.longitude);
-      lastPositionRef.current = gcj;
+    if (
+      !hasFix ||
+      snapshot?.latitude === null ||
+      snapshot?.latitude === undefined ||
+      snapshot.longitude === null ||
+      snapshot.longitude === undefined
+    ) {
+      return;
+    }
 
-      // 更新 / 创建 marker
-      if (markerRef.current) {
-        const m = markerRef.current as { setPosition?: (p: [number, number]) => void };
-        m.setPosition?.(gcj);
-      } else {
-        // 创建车辆标记元素
-        const el = document.createElement("div");
-        el.className = "amap-vehicle-marker";
-        el.innerHTML = `<svg viewBox="0 0 42 58" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-          <polygon class="amap-vehicle-marker__heading" points="21,0 12,18 30,18"/>
-          <g class="amap-vehicle-marker__body">
-            <rect x="8" y="18" width="26" height="38" rx="6"/>
-            <path d="M16 56 L16 44 Q16 39 21 38 L21 38 Q26 39 26 44 L26 56 Z"/>
-            <path d="M10 18 L10 24 L32 24 L32 18 Z"/>
-            <rect x="14" y="24" width="5" height="10" rx="2"/>
-            <rect x="23" y="24" width="5" height="10" rx="2"/>
-          </g>
-        </svg>`;
+    const gcj = wgs84ToGcj02(snapshot.latitude, snapshot.longitude);
+    lastPositionRef.current = gcj;
 
-        const Marker = (AMap as Record<string, unknown>).Marker as
-          | (new (...args: unknown[]) => unknown)
-          | undefined;
-        if (Marker) {
-          const marker = new Marker({
-            position: gcj,
-            content: el,
-            offset: [-21, -29], // 锚点居中偏下
-            zIndex: 100,
-          });
-          const mapSetMap = (map as Record<string, unknown>).add as
-            | ((o: unknown) => void)
-            | undefined;
-          mapSetMap?.(marker);
-          markerRef.current = marker;
-        }
+    if (markerRef.current) {
+      const marker = markerRef.current as {
+        setAngle?: (angle: number) => void;
+        setPosition?: (position: [number, number]) => void;
+      };
+      marker.setPosition?.(gcj);
+      marker.setAngle?.(snapshot.track_degrees ?? 0);
+    } else {
+      const markerElement = document.createElement("div");
+      markerElement.className = "amap-vehicle-marker";
+      markerElement.innerHTML = vehicleMarkerMarkup();
+
+      const Marker = AMap.Marker as (new (...args: unknown[]) => unknown) | undefined;
+      if (Marker) {
+        const marker = new Marker({
+          position: gcj,
+          content: markerElement,
+          offset: [-24, -33],
+          zIndex: 120,
+        });
+        map.add?.(marker);
+        markerRef.current = marker;
+        (marker as { setAngle?: (angle: number) => void }).setAngle?.(
+          snapshot.track_degrees ?? 0,
+        );
       }
+    }
 
-      // 更新 marker 朝向
-      if (markerRef.current && snapshot.track_degrees != null) {
-        const m = markerRef.current as { setAngle?: (a: number) => void };
-        m.setAngle?.(snapshot.track_degrees);
-      } else if (markerRef.current) {
-        const m = markerRef.current as { setAngle?: (a: number) => void };
-        m.setAngle?.(0);
+    const points = trackPointsRef.current;
+    const last = points.at(-1);
+    if (!last || last.lng !== gcj[0] || last.lat !== gcj[1]) {
+      points.push({ lng: gcj[0], lat: gcj[1] });
+      if (points.length > MAX_TRACK_POINTS) {
+        points.splice(0, points.length - MAX_TRACK_POINTS);
       }
+      setTrackPointCount(points.length);
+    }
 
-      // 更新轨迹
-      const points = trackPointsRef.current;
-      if (
-        points.length === 0 ||
-        points[points.length - 1].lng !== gcj[0] ||
-        points[points.length - 1].lat !== gcj[1]
-      ) {
-        points.push({ lng: gcj[0], lat: gcj[1] });
-        if (points.length > MAX_TRACK_POINTS) {
-          points.splice(0, points.length - MAX_TRACK_POINTS);
-        }
+    const path = points.map((point) => [point.lng, point.lat] as [number, number]);
+    if (polylineRef.current) {
+      (polylineRef.current as { setPath?: (value: [number, number][]) => void })
+        .setPath?.(path);
+    } else if (path.length >= 2) {
+      const Polyline = AMap.Polyline as (new (...args: unknown[]) => unknown) | undefined;
+      if (Polyline) {
+        const polyline = new Polyline({
+          path,
+          strokeColor: "#176bff",
+          strokeWeight: 5,
+          strokeOpacity: 0.88,
+          lineJoin: "round",
+          lineCap: "round",
+          zIndex: 90,
+        });
+        map.add?.(polyline);
+        polylineRef.current = polyline;
       }
+    }
 
-      if (polylineRef.current) {
-        const pl = polylineRef.current as { setPath?: (p: [number, number][]) => void };
-        pl.setPath?.(points.map((p) => [p.lng, p.lat] as [number, number]));
-      } else if (points.length >= 2) {
-        const Polyline = (AMap as Record<string, unknown>).Polyline as
-          | (new (...args: unknown[]) => unknown)
-          | undefined;
-        if (Polyline) {
-          const pl = new Polyline({
-            path: points.map((p) => [p.lng, p.lat]),
-            strokeColor: "#1769ee",
-            strokeWeight: 3,
-            strokeOpacity: 0.7,
-            lineJoin: "round",
-            zIndex: 50,
-          });
-          const mapAdd = (map as Record<string, unknown>).add as
-            | ((o: unknown) => void)
-            | undefined;
-          mapAdd?.(pl);
-          polylineRef.current = pl;
-        }
-      }
-
-      // 地图跟随
+    if (points.length === 1) {
+      map.setZoomAndCenter?.(17, gcj);
+    } else {
       map.setCenter?.(gcj);
     }
-    // hasFix 为 false 时保持最后位置，不增加轨迹点
-  }, [snapshot, hasFix, mapState]);
+  }, [hasFix, mapState, snapshot]);
 
-  /* ---- RTK 状态文字 ---- */
-  const fixText = hasFix ? "RTK 定位有效" : "RTK 无定位";
+  useEffect(() => {
+    const resize = () => mapRef.current?.resize?.();
+    window.addEventListener("resize", resize);
+    return () => window.removeEventListener("resize", resize);
+  }, []);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || typeof ResizeObserver === "undefined") return;
+
+    const observer = new ResizeObserver(() => mapRef.current?.resize?.());
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (mapState !== "ready") return;
+    const frame = window.requestAnimationFrame(() => mapRef.current?.resize?.());
+    const timer = window.setTimeout(() => mapRef.current?.resize?.(), 180);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(timer);
+    };
+  }, [expanded, mapState]);
+
   const coordinateText =
-    hasFix && snapshot?.latitude != null && snapshot?.longitude != null
+    hasFix && snapshot?.latitude != null && snapshot.longitude != null
       ? `${snapshot.latitude.toFixed(8)}°, ${snapshot.longitude.toFixed(8)}°`
-      : "--";
+      : lastPositionRef.current
+        ? "保留最后有效位置"
+        : "等待有效 RTK 坐标";
+  const positionModeText = hasFix ? "RTK 绝对定位" : "RTK 无效";
+  const trackStateText =
+    mapState !== "ready"
+      ? "等待地图配置"
+      : hasFix
+        ? trackPointCount > 0
+          ? `实时绘制 · ${trackPointCount} 点`
+          : "等待 RTK"
+        : "轨迹已暂停";
+  const mapSubtitle = hasFix
+    ? "仅在 RTK 有效时绘制绝对轨迹"
+    : "保留最后有效位置，暂停轨迹更新";
+  const mapTip = hasFix
+    ? "RTK 原始 WGS84 坐标转换为 GCJ-02 后显示。定位失效时保留最后有效位置，并停止增加轨迹点。"
+    : "当前 RTK 无效。地图保留最后有效位置和已有轨迹，不继续推算车辆绝对位置。";
 
-  /* ---- 渲染 ---- */
   return (
     <>
-      <article className="panel dashboard-map-panel">
-        {/* 头部 */}
+      <article className={`panel dashboard-map-panel${expanded ? " visual-panel--expanded" : ""}`}>
         <div className="map-panel-head">
           <div>
-            <h2>实时地图</h2>
-            <p>高德地图 · 车辆位置与轨迹</p>
+            <h2>RTK 实时地图</h2>
+            <p>{mapSubtitle}</p>
           </div>
-          <button
-            type="button"
-            className="map-settings-button"
-            onClick={() => {
-              setDraftKey(config.key);
-              setDraftCode(config.securityCode);
-              setShowSettings(true);
-            }}
-          >
-            地图设置
-          </button>
+          <MapExpandButton expanded={expanded} onClick={onToggleExpanded} />
         </div>
 
-        {/* 地图区域 */}
         <div className="amap-stage">
-          {/* 未配置 Key */}
-          {mapState === "no_key" && (
-            <div className="amap-empty">
-              <span>⌂</span>
-              <strong>高德地图未配置</strong>
-              <small>
-                点击右上角"地图设置"填写高德Web端JS API
-                Key和安全密钥后开始使用。也可构建时通过环境变量提供初始值。
-              </small>
-              <button
-                type="button"
-                onClick={() => {
-                  setDraftKey(config.key);
-                  setDraftCode(config.securityCode);
-                  setShowSettings(true);
-                }}
-              >
-                立即配置
-              </button>
-            </div>
-          )}
-
-          {/* 加载中 */}
-          {mapState === "loading" && (
-            <div className="amap-empty">
-              <span>⌛</span>
-              <strong>地图加载中</strong>
-              <small>正在连接高德地图服务…</small>
-            </div>
-          )}
-
-          {/* 加载失败 */}
-          {mapState === "error" && (
-            <div className="amap-empty">
-              <span>⚠</span>
-              <strong>地图加载失败</strong>
-              <small>请检查Key和安全密钥是否正确，或网络连接是否正常。</small>
-              <button
-                type="button"
-                onClick={() => {
-                  setDraftKey(config.key);
-                  setDraftCode(config.securityCode);
-                  setShowSettings(true);
-                }}
-              >
-                重新配置
-              </button>
-            </div>
-          )}
-
-          {/* AMap 容器（始终渲染，ready 时填充） */}
           <div ref={containerRef} className="amap-container" />
 
-          {/* 状态标记（地图就绪后叠加） */}
-          {mapState === "ready" && (
-            <>
-              <div className="amap-status-row">
+          {mapState === "no_key" && (
+            <div className="amap-empty">
+              <div>
+                <strong>高德地图尚未配置</strong>
                 <span>
-                  <i>●</i>
-                  <strong>{fixText}</strong>
+                  填写 Web 端 JS API Key 和 securityJsCode 后显示车辆位置与绝对轨迹。
                 </span>
-                <span>
-                  <i>⏤</i>
-                  {trackPointsRef.current.length} 轨迹点
-                </span>
+                <button type="button" onClick={openSettings}>地图设置</button>
               </div>
-              <div className="amap-coordinate">
-                <span>WGS84</span>
-                <small>{coordinateText}</small>
-                <span>{connectionDetail}</span>
-              </div>
-            </>
+            </div>
           )}
+
+          {mapState === "loading" && (
+            <div className="amap-empty">
+              <div>
+                <strong>高德地图正在加载</strong>
+                <span>正在连接地图服务并初始化实时轨迹图层。</span>
+              </div>
+            </div>
+          )}
+
+          {mapState === "error" && (
+            <div className="amap-empty">
+              <div>
+                <strong>高德地图加载失败</strong>
+                <span>请检查网络、Key、securityJsCode 和域名白名单。</span>
+                <button type="button" onClick={openSettings}>重新配置</button>
+              </div>
+            </div>
+          )}
+
+          <div className="amap-status-row">
+            <span className="amap-chip">
+              定位模式 <strong>{positionModeText}</strong>
+            </span>
+            <span className="amap-chip">
+              作业车道 <strong>{laneLabel}</strong>
+            </span>
+            <span className="amap-chip">
+              轨迹 <strong>{trackStateText}</strong>
+            </span>
+            <button type="button" className="amap-chip amap-chip--button" onClick={openSettings}>
+              地图设置
+            </button>
+          </div>
+
+          <div className="amap-map-tip">
+            <strong>WGS84 · {coordinateText}</strong>
+            <span>{mapTip}</span>
+            <small>{connectionDetail}</small>
+          </div>
         </div>
       </article>
 
-      {/* 设置弹窗 */}
       {showSettings && (
         <div
           className="map-modal-mask"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setShowSettings(false);
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="map-settings-title"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) setShowSettings(false);
           }}
         >
           <div className="map-modal-panel">
             <div className="map-modal-head">
               <div>
-                <h2>地图设置</h2>
-                <p>
-                  配置高德Web端JS API
-                  Key，Key和安全密钥可在高德开放平台控制台获取。
-                </p>
+                <h2 id="map-settings-title">地图设置</h2>
+                <p>配置高德 Web 端 JS API Key 和 securityJsCode。</p>
               </div>
-              <button type="button" onClick={() => setShowSettings(false)}>
+              <button type="button" aria-label="关闭地图设置" onClick={() => setShowSettings(false)}>
                 ×
               </button>
             </div>
 
             <label>
-              <span>JS API Key（Web端）</span>
+              <span>JS API Key（Web 端）</span>
               <input
                 type="text"
                 value={draftKey}
-                onChange={(e) => setDraftKey(e.target.value)}
-                placeholder="输入高德Web端Key"
+                onChange={(event) => setDraftKey(event.target.value)}
+                placeholder="输入高德 Web 端 Key"
                 autoFocus
               />
             </label>
@@ -538,22 +568,17 @@ export default function RealtimeAmap({
               <input
                 type="text"
                 value={draftCode}
-                onChange={(e) => setDraftCode(e.target.value)}
-                placeholder="输入securityJsCode（可选）"
+                onChange={(event) => setDraftCode(event.target.value)}
+                placeholder="输入 securityJsCode"
               />
             </label>
 
             <div className="map-security-note">
-              正式部署应在高德控制台限制允许访问的域名。更换Key或安全密钥后，页面会销毁旧地图实例并重新加载JS
-              API。
+              正式部署应在高德控制台限制允许访问的域名，并通过部署环境提供初始配置。浏览器本地设置仅用于设备端调试。
             </div>
 
             <div className="map-modal-actions">
-              <button
-                type="button"
-                className="button button--soft"
-                onClick={() => setShowSettings(false)}
-              >
+              <button type="button" className="button button--soft" onClick={() => setShowSettings(false)}>
                 取消
               </button>
               <button

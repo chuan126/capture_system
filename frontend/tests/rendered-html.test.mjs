@@ -87,7 +87,7 @@ test("keeps the 1920x1080 capture dashboard inside the viewport", async () => {
 
   assert.match(css, /\.main--dashboard\s*\{[^}]*overflow:\s*hidden/i);
   assert.match(css, /\.main--dashboard \.page-content\s*\{[^}]*height:\s*100dvh/i);
-  assert.match(css, /\.dashboard-page\s*\{[^}]*grid-template-rows:\s*64px minmax\(0, 1fr\)/i);
+  assert.match(css, /\.dashboard-page\s*\{[^}]*grid-template-rows:\s*clamp\(190px, 15vh, 216px\) minmax\(0, 1fr\)/i);
   assert.match(css, /@media \(max-width:\s*1180px\)[\s\S]*?\.main--dashboard\s*\{[^}]*overflow-y:\s*auto/i);
 });
 
@@ -105,21 +105,37 @@ test("keeps dashboard visualizations visible at responsive breakpoints", async (
   assert.match(mobileRules, /\.dashboard-main > \.panel > \.chart\s*\{[^}]*min-height:\s*190px/i);
 });
 
-test("renders the local ENU point cloud and world axes", async () => {
+test("renders the local ENU point cloud as a three-dimensional view", async () => {
   const viewer = await readFile(
     new URL("../components/point-cloud/PointCloudViewer.tsx", import.meta.url),
     "utf8",
   );
 
-  assert.match(viewer, /perspectiveCamera\.up\.set\(0, 0, 1\)/);
-  assert.match(viewer, /topCamera\.position\.set\(center\.x, center\.y, center\.z \+ span \* 2\)/);
+  assert.match(viewer, /camera\.up\.set\(0, 0, 1\)/);
+  assert.doesNotMatch(viewer, /OrthographicCamera|topCamera|沿X轴俯视/);
   assert.match(viewer, /grid\.rotation\.x = Math\.PI \/ 2/);
   assert.match(viewer, /makeAxisLabel\("东 E"/);
   assert.match(viewer, /makeAxisLabel\("北 N"/);
   assert.match(viewer, /makeAxisLabel\("天 U"/);
   assert.match(viewer, /enuSceneRoot\.add\(points\)/);
   assert.match(viewer, /enuSceneRoot\.add\(eastLabel, northLabel, upLabel\)/);
-  assert.match(viewer, /雷达局部东北天 · X=东 · Y=北 · Z=天/);
+  assert.doesNotMatch(viewer, /cloud-stage__footer|雷达局部东北天 · X=东/);
+});
+
+test("supports expanded point cloud and map panels", async () => {
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const map = await readFile(
+    new URL("../components/map/RealtimeAmap.tsx", import.meta.url),
+    "utf8",
+  );
+  const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+
+  assert.match(page, /expandedVisual/);
+  assert.match(page, /panel-expand-button/);
+  assert.match(map, /onToggleExpanded/);
+  assert.match(map, /visual-panel--expanded/);
+  assert.match(css, /\.visual-panel--expanded/);
+  assert.match(css, /\.visual-panel-backdrop/);
 });
 
 test("renders the current clearance value and rolling live chart", async () => {
