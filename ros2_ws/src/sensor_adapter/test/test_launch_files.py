@@ -20,7 +20,7 @@ def test_driver_launch_declares_expected_topic_contract():
         ("cloud/raw", "/capture/lidar/points_raw"),
         ("cloud/slam", "/capture/lidar/points_slam"),
         ("imu", "/capture/imu/data"),
-        ("odometry_hf", "/capture/odometry/high_rate"),
+        ("odometry_hf", "/capture/odometry/high_rate_raw"),
         ("odometry", "/capture/odometry/slam"),
     )
     assert module.DRIVER_EVENT_REMAPPINGS == (

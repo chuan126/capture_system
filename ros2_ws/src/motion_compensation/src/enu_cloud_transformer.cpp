@@ -78,33 +78,40 @@ std::array<double, 4> slerp(
   return result;
 }
 
-bool validRotationMatrix(const RotationMatrix3d & rotation) noexcept
+bool interpolateSamples(
+  const std::vector<PoseSample> & samples, const std::int64_t max_interpolation_gap_ns,
+  const std::int64_t stamp_ns, PoseSample & output) noexcept
 {
-  for (const double value : rotation) {
-    if (!std::isfinite(value)) {
-      return false;
-    }
+  if (samples.empty() || stamp_ns < samples.front().stamp_ns || stamp_ns > samples.back().stamp_ns) {
+    return false;
   }
-
-  constexpr double tolerance = 1.0e-6;
-  for (int row = 0; row < 3; ++row) {
-    for (int other_row = 0; other_row < 3; ++other_row) {
-      double dot = 0.0;
-      for (int col = 0; col < 3; ++col) {
-        dot += rotation[row * 3 + col] * rotation[other_row * 3 + col];
-      }
-      const double expected = row == other_row ? 1.0 : 0.0;
-      if (std::abs(dot - expected) > tolerance) {
-        return false;
-      }
-    }
+  const auto upper = std::lower_bound(
+    samples.begin(), samples.end(), stamp_ns,
+    [](const PoseSample & sample, const std::int64_t target) {
+      return sample.stamp_ns < target;
+    });
+  if (upper != samples.end() && upper->stamp_ns == stamp_ns) {
+    output = *upper;
+    return true;
   }
-
-  const double determinant =
-    rotation[0] * (rotation[4] * rotation[8] - rotation[5] * rotation[7]) -
-    rotation[1] * (rotation[3] * rotation[8] - rotation[5] * rotation[6]) +
-    rotation[2] * (rotation[3] * rotation[7] - rotation[4] * rotation[6]);
-  return std::abs(determinant - 1.0) <= tolerance;
+  if (upper == samples.begin() || upper == samples.end()) {
+    return false;
+  }
+  const auto lower = std::prev(upper);
+  const std::int64_t gap_ns = upper->stamp_ns - lower->stamp_ns;
+  if (gap_ns <= 0 || gap_ns > max_interpolation_gap_ns) {
+    return false;
+  }
+  const double fraction = static_cast<double>(stamp_ns - lower->stamp_ns) /
+    static_cast<double>(gap_ns);
+  output.stamp_ns = stamp_ns;
+  for (std::size_t index = 0; index < 3U; ++index) {
+    output.position_m[index] = lower->position_m[index] +
+      fraction * (upper->position_m[index] - lower->position_m[index]);
+  }
+  output.quaternion_xyzw = slerp(
+    lower->quaternion_xyzw, upper->quaternion_xyzw, fraction);
+  return true;
 }
 
 void multiplyMatrixVector(
@@ -113,6 +120,12 @@ void multiplyMatrixVector(
   output[0] = matrix[0] * input[0] + matrix[1] * input[1] + matrix[2] * input[2];
   output[1] = matrix[3] * input[0] + matrix[4] * input[1] + matrix[5] * input[2];
   output[2] = matrix[6] * input[0] + matrix[7] * input[1] + matrix[8] * input[2];
+}
+
+EnuPoint nanPoint() noexcept
+{
+  const float nan = std::numeric_limits<float>::quiet_NaN();
+  return EnuPoint{nan, nan, nan};
 }
 
 }  // namespace
@@ -131,6 +144,7 @@ bool PoseBuffer::add(const PoseSample & sample) noexcept
   }
   normalizeQuaternion(normalized.quaternion_xyzw);
 
+  std::lock_guard<std::mutex> lock(mutex_);
   if (!samples_.empty() && normalized.stamp_ns < samples_.back().stamp_ns) {
     return false;
   }
@@ -149,67 +163,58 @@ bool PoseBuffer::add(const PoseSample & sample) noexcept
 
 bool PoseBuffer::interpolate(const std::int64_t stamp_ns, PoseSample & output) const noexcept
 {
-  if (samples_.empty() || stamp_ns < samples_.front().stamp_ns ||
-    stamp_ns > samples_.back().stamp_ns)
-  {
-    return false;
-  }
-  const auto upper = std::lower_bound(
-    samples_.begin(), samples_.end(), stamp_ns,
-    [](const PoseSample & sample, const std::int64_t target) {
-      return sample.stamp_ns < target;
-    });
-  if (upper != samples_.end() && upper->stamp_ns == stamp_ns) {
-    output = *upper;
-    return true;
-  }
-  if (upper == samples_.begin() || upper == samples_.end()) {
-    return false;
-  }
-  const auto lower = std::prev(upper);
-  const std::int64_t gap_ns = upper->stamp_ns - lower->stamp_ns;
-  if (gap_ns <= 0 || gap_ns > max_interpolation_gap_ns_) {
-    return false;
-  }
-  const double fraction = static_cast<double>(stamp_ns - lower->stamp_ns) /
-    static_cast<double>(gap_ns);
-  output.stamp_ns = stamp_ns;
-  for (std::size_t index = 0; index < 3U; ++index) {
-    output.position_m[index] = lower->position_m[index] +
-      fraction * (upper->position_m[index] - lower->position_m[index]);
-  }
-  output.quaternion_xyzw = slerp(
-    lower->quaternion_xyzw, upper->quaternion_xyzw, fraction);
-  return true;
+  const auto samples = snapshot();
+  return interpolateSamples(samples, max_interpolation_gap_ns_, stamp_ns, output);
 }
 
 bool PoseBuffer::empty() const noexcept
 {
+  std::lock_guard<std::mutex> lock(mutex_);
   return samples_.empty();
 }
 
 std::int64_t PoseBuffer::oldestStampNs() const noexcept
 {
+  std::lock_guard<std::mutex> lock(mutex_);
   return samples_.empty() ? 0 : samples_.front().stamp_ns;
 }
 
 std::int64_t PoseBuffer::newestStampNs() const noexcept
 {
+  std::lock_guard<std::mutex> lock(mutex_);
   return samples_.empty() ? 0 : samples_.back().stamp_ns;
+}
+
+std::vector<PoseSample> PoseBuffer::snapshot() const
+{
+  std::lock_guard<std::mutex> lock(mutex_);
+  return std::vector<PoseSample>(samples_.begin(), samples_.end());
+}
+
+std::int64_t PoseBuffer::maxInterpolationGapNs() const noexcept
+{
+  return max_interpolation_gap_ns_;
 }
 
 EnuCloudTransformer::EnuCloudTransformer(
   const std::int64_t cache_duration_ns, const std::int64_t max_interpolation_gap_ns,
-  const bool use_odometry_translation, const RotationMatrix3d & lidar_to_odometry_rotation)
+  const bool use_odometry_translation,
+  const double minimum_valid_pose_ratio, const double max_translation_per_scan_m,
+  const bool fallback_to_rotation_only)
 : pose_buffer_(cache_duration_ns, max_interpolation_gap_ns),
   use_odometry_translation_(use_odometry_translation),
-  lidar_to_odometry_rotation_(lidar_to_odometry_rotation)
+  minimum_valid_pose_ratio_(minimum_valid_pose_ratio),
+  max_translation_per_scan_m_(max_translation_per_scan_m),
+  fallback_to_rotation_only_(fallback_to_rotation_only)
 {
   if (cache_duration_ns <= 0 || max_interpolation_gap_ns <= 0) {
     throw std::invalid_argument("时间参数必须为正数");
   }
-  if (!validRotationMatrix(lidar_to_odometry_rotation_)) {
-    throw std::invalid_argument("lidar_to_odometry_rotation必须为正交且行列式为1的3×3旋转矩阵");
+  if (!(minimum_valid_pose_ratio_ > 0.0 && minimum_valid_pose_ratio_ <= 1.0)) {
+    throw std::invalid_argument("minimum_valid_pose_ratio必须位于(0,1]范围内");
+  }
+  if (!(max_translation_per_scan_m_ > 0.0) || !std::isfinite(max_translation_per_scan_m_)) {
+    throw std::invalid_argument("max_translation_per_scan_m必须为有限正数");
   }
 }
 
@@ -235,82 +240,129 @@ std::int64_t EnuCloudTransformer::newestPoseStampNs() const noexcept
 
 bool EnuCloudTransformer::transform(
   const std::int64_t cloud_stamp_ns, const std::vector<TimedRadarPoint> & input,
-  std::vector<EnuPoint> & output, std::string & invalid_reason) const noexcept
+  std::vector<EnuPoint> & output, std::string & invalid_reason,
+  TransformStatistics * statistics) const noexcept
 {
+  TransformStatistics local_statistics;
+  local_statistics.input_point_count = input.size();
   output.clear();
-  if (!initialized()) {
+
+  const auto pose_samples = pose_buffer_.snapshot();
+  if (pose_samples.empty()) {
     invalid_reason = "POSE_NOT_INITIALIZED";
+    if (statistics != nullptr) {
+      *statistics = local_statistics;
+    }
     return false;
   }
   if (cloud_stamp_ns <= 0 || input.empty()) {
     invalid_reason = "INVALID_POINT_CLOUD_TIME";
+    if (statistics != nullptr) {
+      *statistics = local_statistics;
+    }
     return false;
   }
 
+  bool translation_active = use_odometry_translation_;
   PoseSample reference_pose;
-  if (use_odometry_translation_ && !pose_buffer_.interpolate(cloud_stamp_ns, reference_pose)) {
-    invalid_reason = "REFERENCE_POSE_NOT_COVERED";
-    return false;
-  }
-
-  output.reserve(input.size());
-  for (const TimedRadarPoint & point : input) {
-    if (!std::isfinite(point.offset_time_s) || point.offset_time_s < 0.0F) {
-      output.clear();
-      invalid_reason = "INVALID_POINT_TIME";
+  if (translation_active && !interpolateSamples(
+      pose_samples, pose_buffer_.maxInterpolationGapNs(), cloud_stamp_ns, reference_pose))
+  {
+    if (!fallback_to_rotation_only_) {
+      invalid_reason = "REFERENCE_POSE_NOT_COVERED";
+      if (statistics != nullptr) {
+        *statistics = local_statistics;
+      }
       return false;
     }
-    if (!std::isfinite(point.x) || !std::isfinite(point.y) || !std::isfinite(point.z)) {
-      const float nan = std::numeric_limits<float>::quiet_NaN();
-      output.push_back(EnuPoint{nan, nan, nan});
+    translation_active = false;
+    local_statistics.translation_fallback = true;
+  }
+  local_statistics.translation_applied = translation_active;
+
+  output.reserve(input.size());
+  std::int64_t cached_point_stamp_ns = std::numeric_limits<std::int64_t>::min();
+  bool cached_pose_valid = false;
+  double cached_rotation_navigation_from_body[9]{};
+  double cached_translation[3]{};
+
+  for (const TimedRadarPoint & point : input) {
+    if (!std::isfinite(point.offset_time_s) || point.offset_time_s < 0.0F) {
+      ++local_statistics.invalid_time_point_count;
+      output.push_back(nanPoint());
       continue;
     }
-    // 厂商驱动用全零点表示低置信度无效点，不能经过旋转和平移后变成伪有效点。
+    if (!std::isfinite(point.x) || !std::isfinite(point.y) || !std::isfinite(point.z)) {
+      output.push_back(nanPoint());
+      continue;
+    }
+    // 厂商驱动用全零点表示低置信度无效点，保持全零，避免经平移后变成伪有效点。
     if (point.x == 0.0F && point.y == 0.0F && point.z == 0.0F) {
       output.push_back(EnuPoint{});
       continue;
     }
+    ++local_statistics.finite_nonzero_point_count;
 
     const auto offset_ns = static_cast<std::int64_t>(
       std::llround(static_cast<double>(point.offset_time_s) * 1.0e9));
     if (offset_ns < 0 || cloud_stamp_ns > std::numeric_limits<std::int64_t>::max() - offset_ns) {
-      output.clear();
-      invalid_reason = "INVALID_POINT_TIME";
-      return false;
+      ++local_statistics.invalid_time_point_count;
+      output.push_back(nanPoint());
+      continue;
+    }
+    const std::int64_t point_stamp_ns = cloud_stamp_ns + offset_ns;
+
+    // ODIN原始点云约有32个滚动快门时间组。相同offset_time复用一次姿态插值和矩阵计算，
+    // 避免对约49152个点重复执行SLERP和四元数转矩阵。
+    if (point_stamp_ns != cached_point_stamp_ns) {
+      cached_point_stamp_ns = point_stamp_ns;
+      cached_pose_valid = false;
+      PoseSample point_pose;
+      if (interpolateSamples(
+          pose_samples, pose_buffer_.maxInterpolationGapNs(), point_stamp_ns, point_pose) &&
+        localization::rosQuaternionToMatrix(
+          point_pose.quaternion_xyzw[0], point_pose.quaternion_xyzw[1],
+          point_pose.quaternion_xyzw[2], point_pose.quaternion_xyzw[3],
+          cached_rotation_navigation_from_body))
+      {
+        cached_translation[0] = 0.0;
+        cached_translation[1] = 0.0;
+        cached_translation[2] = 0.0;
+        if (translation_active) {
+          double squared_translation = 0.0;
+          for (std::size_t index = 0; index < 3U; ++index) {
+            cached_translation[index] =
+              point_pose.position_m[index] - reference_pose.position_m[index];
+            squared_translation += cached_translation[index] * cached_translation[index];
+          }
+          if (!std::isfinite(squared_translation) ||
+            std::sqrt(squared_translation) > max_translation_per_scan_m_)
+          {
+            cached_pose_valid = false;
+          } else {
+            cached_pose_valid = true;
+          }
+        } else {
+          cached_pose_valid = true;
+        }
+      }
     }
 
-    PoseSample point_pose;
-    if (!pose_buffer_.interpolate(cloud_stamp_ns + offset_ns, point_pose)) {
-      output.clear();
-      invalid_reason = "POINT_POSE_NOT_COVERED";
-      return false;
+    if (!cached_pose_valid) {
+      ++local_statistics.uncovered_point_count;
+      output.push_back(nanPoint());
+      continue;
     }
-
-    // q2mat经rosQuaternionToMatrix输出R_n<-b，即里程计机体系到导航ENU系的旋转矩阵。
-    double rotation_navigation_from_body[9];
-    if (!localization::rosQuaternionToMatrix(
-        point_pose.quaternion_xyzw[0], point_pose.quaternion_xyzw[1],
-        point_pose.quaternion_xyzw[2], point_pose.quaternion_xyzw[3],
-        rotation_navigation_from_body))
-    {
-      output.clear();
-      invalid_reason = "INVALID_INTERPOLATED_QUATERNION";
-      return false;
-    }
+    ++local_statistics.pose_covered_point_count;
 
     const double radar_point[3]{point.x, point.y, point.z};
-    double body_point[3];
-    multiplyMatrixVector(lidar_to_odometry_rotation_.data(), radar_point, body_point);
 
-    // r_n = R_n<-b(t_i) * C0_b<-l * r_l。
+    // 雷达坐标系与里程计机体系方向一致，杆臂按0处理：
+    // r_n = R_n<-b(t_i) * r_l + p_n(t_i) - p_n(t_0)。
     double navigation_point[3];
-    multiplyMatrixVector(rotation_navigation_from_body, body_point, navigation_point);
-
-    if (use_odometry_translation_) {
-      for (std::size_t index = 0; index < 3U; ++index) {
-        navigation_point[index] +=
-          point_pose.position_m[index] - reference_pose.position_m[index];
-      }
+    multiplyMatrixVector(cached_rotation_navigation_from_body, radar_point, navigation_point);
+    for (std::size_t index = 0; index < 3U; ++index) {
+      navigation_point[index] += cached_translation[index];
     }
 
     output.push_back(
@@ -318,6 +370,25 @@ bool EnuCloudTransformer::transform(
         static_cast<float>(navigation_point[0]),
         static_cast<float>(navigation_point[1]),
         static_cast<float>(navigation_point[2])});
+    ++local_statistics.transformed_point_count;
+  }
+
+  if (local_statistics.finite_nonzero_point_count > 0U) {
+    local_statistics.valid_pose_ratio =
+      static_cast<double>(local_statistics.pose_covered_point_count) /
+      static_cast<double>(local_statistics.finite_nonzero_point_count);
+  }
+
+  if (statistics != nullptr) {
+    *statistics = local_statistics;
+  }
+  if (local_statistics.transformed_point_count == 0U) {
+    invalid_reason = "NO_POINT_POSE_COVERED";
+    return false;
+  }
+  if (local_statistics.valid_pose_ratio < minimum_valid_pose_ratio_) {
+    invalid_reason = "INSUFFICIENT_POSE_COVERAGE";
+    return false;
   }
 
   invalid_reason = "NONE";

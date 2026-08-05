@@ -51,14 +51,14 @@ public:
 
     result_publisher_ = create_publisher<interfaces::msg::ClearanceResult>(
       output_topic, rclcpp::QoS(rclcpp::KeepLast(10)).reliable());
-    // Release构建在RK3588上有充足余量；深度2吸收rosbag大消息的短时突发，同时保持有界。
+    // 10 Hz实时测量只保留最新一帧，避免RANSAC耗时波动时累计旧点云。
     point_cloud_subscription_ = create_subscription<sensor_msgs::msg::PointCloud2>(
-      input_topic, rclcpp::QoS(rclcpp::KeepLast(2)).reliable().durability_volatile(),
+      input_topic, rclcpp::QoS(rclcpp::KeepLast(1)).reliable().durability_volatile(),
       std::bind(&ClearanceEngineNode::pointCloudCallback, this, std::placeholders::_1));
 
     RCLCPP_INFO(
       get_logger(),
-      "净空首版节点已启动：input=%s output=%s，车辆自身和confidence过滤未启用。",
+      "单帧风机底面检测已启动：input=%s output=%s；10 Hz最新帧、多候选近水平小平面。",
       input_topic.c_str(), output_topic.c_str());
   }
 
@@ -88,6 +88,8 @@ private:
       "ransac.max_normal_angle_deg", config.max_normal_angle_deg);
     config.distance_threshold_m = declare_parameter<double>(
       "ransac.distance_threshold_m", config.distance_threshold_m);
+    config.voxel_size_m = declare_parameter<double>(
+      "ransac.voxel_size_m", config.voxel_size_m);
     config.max_iterations = declare_parameter<int>(
       "ransac.max_iterations", config.max_iterations);
     config.probability = declare_parameter<double>("ransac.probability", config.probability);

@@ -17,11 +17,13 @@
 | `/manifold/driver/device_online` | `/capture/lidar/device_online` | `std_msgs/String` |
 | `/manifold/driver/device_offline` | `/capture/lidar/device_offline` | `std_msgs/String` |
 | `imu` | `/capture/imu/data` | `sensor_msgs/Imu` |
-| `odometry_hf` | `/capture/odometry/high_rate` | `nav_msgs/Odometry` |
+| `odometry_hf` | `/capture/odometry/high_rate_raw` | `nav_msgs/Odometry` |
 | `odometry` | `/capture/odometry/slam` | `nav_msgs/Odometry` |
 
 `/capture/lidar/points_slam` 仅用于 RViz2 预览和辅助诊断。核心净空计算仍使用
-带逐点 `offset_time` 的 `/capture/lidar/points_raw`。
+带逐点 `offset_time` 的 `/capture/lidar/points_raw`。厂商高频里程计先发布到
+`/capture/odometry/high_rate_raw`，再由业务侧时间适配节点发布
+`/capture/odometry/high_rate`。该处理不修改厂商驱动源码。
 
 `device_online`由厂商SDK在设备发现并成功初始化后发布，其发布器随设备实例创建；
 设备断开时实例和发布器一同销毁。`system_monitor`通过稳定的

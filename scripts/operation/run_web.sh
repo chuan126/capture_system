@@ -21,6 +21,9 @@ fi
 set +u
 source /opt/ros/humble/setup.bash
 source "${project_root}/third_party/odin_ros_driver/install/setup.bash"
+# ODIN驱动使用catkin编译，setup.bash仅设置CMAKE_PREFIX_PATH，
+# 需手动补全AMENT_PREFIX_PATH以支持ros2发现包。
+export AMENT_PREFIX_PATH="${project_root}/third_party/odin_ros_driver/install/odin_ros_driver_rev1:${AMENT_PREFIX_PATH}"
 source "${project_root}/ros2_ws/install/setup.bash"
 set -u
 

@@ -33,11 +33,12 @@ ros2 launch bringup cloud_preview.launch.py \
 该Launch只启动 `cloud_visualization_node`，不启动厂商驱动、FastAPI或核心测量
 节点，便于保持独立故障边界。
 
-## 首版净空计算启动
+## 单帧RANSAC风机底面检测启动
 
 ```bash
 ros2 launch bringup clearance_preview.launch.py
 ```
 
-该Launch订阅原始点云并输出`/capture/clearance/result`，用于当前静止朝上实机
-验证和网页显示。车辆动态测量必须在运动补偿完成后调整输入链路。
+该Launch依次启动高频里程计时间适配、逐点旋转和平移补偿以及单帧多平面RANSAC。
+输入为ODIN约10 Hz原始点云，输出`/capture/clearance/result`。算法只保留最新一帧，
+覆盖当前车道和相邻车道上方区域，并选择本帧最低合格近水平平面。

@@ -23,12 +23,17 @@ target_link_libraries(enu_cloud_transform_node motion_compensation_core)
 ament_target_dependencies(
   enu_cloud_transform_node builtin_interfaces nav_msgs rclcpp sensor_msgs)
 
+add_executable(odometry_timestamp_adapter_node src/odometry_timestamp_adapter_node.cpp)
+ament_target_dependencies(
+  odometry_timestamp_adapter_node builtin_interfaces nav_msgs rclcpp)
+
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   target_compile_options(motion_compensation_core PRIVATE -Wall -Wextra -Wpedantic)
   target_compile_options(enu_cloud_transform_node PRIVATE -Wall -Wextra -Wpedantic)
+  target_compile_options(odometry_timestamp_adapter_node PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
-install(TARGETS motion_compensation_core enu_cloud_transform_node
+install(TARGETS motion_compensation_core enu_cloud_transform_node odometry_timestamp_adapter_node
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION lib/${PROJECT_NAME})

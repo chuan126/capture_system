@@ -13,10 +13,15 @@ def generate_launch_description() -> LaunchDescription:
         / "config"
         / "motion_compensation.yaml"
     )
+    odometry_adapter_parameters = (
+        Path(get_package_share_directory("motion_compensation"))
+        / "config"
+        / "odometry_timestamp_adapter.yaml"
+    )
     default_parameters = (
         Path(get_package_share_directory("clearance_engine"))
         / "config"
-        / "clearance_engine.yaml"
+        / "clearance_engine_small_board_1cm.yaml"
     )
     parameters_file = LaunchConfiguration("parameters_file")
 
@@ -26,6 +31,13 @@ def generate_launch_description() -> LaunchDescription:
                 "parameters_file",
                 default_value=str(default_parameters),
                 description="首版净空算法参数文件绝对路径",
+            ),
+            Node(
+                package="motion_compensation",
+                executable="odometry_timestamp_adapter_node",
+                name="odometry_timestamp_adapter_node",
+                output="screen",
+                parameters=[str(odometry_adapter_parameters)],
             ),
             Node(
                 package="motion_compensation",

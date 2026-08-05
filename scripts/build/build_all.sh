@@ -45,7 +45,7 @@ SDK_MODE_MARKER="${SDK_SRC_DIR}/.capture_build_mode"
 BACKEND_FINGERPRINT_FILE="${VENV_DIR}/.capture_requirements_fingerprint"
 FRONTEND_FINGERPRINT_FILE="${FRONTEND_DIR}/node_modules/.capture_dependency_fingerprint"
 
-AUTO_FIX_CRLF="${AUTO_FIX_CRLF:-0}"
+AUTO_FIX_CRLF="${AUTO_FIX_CRLF:-1}"
 FORCE_REINSTALL_DEPS="${FORCE_REINSTALL_DEPS:-0}"
 
 cd "$PROJECT_ROOT"
@@ -493,6 +493,9 @@ remove_unsafe_driver_dsv_entries
 
 require_file "${THIRD_PARTY_DIR}/install/setup.bash"
 safe_source "${THIRD_PARTY_DIR}/install/setup.bash"
+# ODIN驱动使用catkin编译，setup.bash仅设置CMAKE_PREFIX_PATH，
+# 需手动补全AMENT_PREFIX_PATH以支持ros2 pkg prefix验证。
+export AMENT_PREFIX_PATH="${THIRD_PARTY_DIR}/install/odin_ros_driver_rev1:$AMENT_PREFIX_PATH"
 
 EXPECTED_DRIVER_PREFIX="${THIRD_PARTY_DIR}/install/odin_ros_driver_rev1"
 if ! package_prefix_matches odin_ros_driver_rev1 "$EXPECTED_DRIVER_PREFIX"; then

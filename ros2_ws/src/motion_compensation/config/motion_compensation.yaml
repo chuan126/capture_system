@@ -6,20 +6,42 @@ enu_cloud_transform_node:
     output_frame_id: lidar_local_enu
 
     pose_cache_duration_s: 2.0
-    max_interpolation_gap_s: 0.02
 
-    # false时只执行逐点姿态旋转。当前里程计位置存在漂移，默认关闭平移补偿。
-    use_odometry_translation: false
+    # 高频里程计实测约401 Hz。15 ms约对应6个采样周期。
+    # 超过该间隔不再强行插值，避免高角加速度下产生较大姿态误差。
+    max_interpolation_gap_s: 0.015
 
-    # C0 = R_b<-l。按行排列，将雷达坐标系矢量转换到里程计机体坐标系。
-    # 当前安装关系为x_b=-x_l、y_b=-y_l、z_b=z_l。
-    # lidar_to_odometry_rotation: [-1.0, 0.0, 0.0,
-    #                               0.0, -1.0, 0.0,
-    #                               0.0, 0.0, 1.0]
+    # 使用p_n(t_i)-p_n(t_0)补偿约94 ms滚动扫描期间的车辆平移。
+    # 这里只使用同一帧内的相对位移，不使用累计位置作为最终测距结果。
+    use_odometry_translation: true
 
-    # 雷达坐标系与里程计机体系方向一致，因此C0取单位矩阵。
-    lidar_to_odometry_rotation: [1.0, 0.0, 0.0,
-                              0.0, 1.0, 0.0,
-                              0.0, 0.0, 1.0]
+    # 帧起始位姿无法插值时，本帧退化为仅旋转补偿，避免直接清空整帧。
+    fallback_to_rotation_only: true
 
-    pending_cloud_limit: 2
+    # 有限且非零的雷达点中，至少75%的点需要获得有效姿态。
+    # 覆盖不足的点保留原始排列并写为NaN。
+    minimum_valid_pose_ratio: 0.75
+
+    # 60 km/h时94 ms内位移约1.57 m。2.5 m门限保留加速度和时间误差余量，
+    # 同时拒绝单帧内明显的位置跳变。
+    max_translation_per_scan_m: 2.5
+
+    # 允许点云尾部最多15 ms暂时缺少里程计覆盖。缺少姿态的尾部点写为NaN，
+    # 不再持续等待到队列溢出。
+    allowed_partial_tail_s: 0.015
+
+    # 设备时间偏移标定接口。默认不修正，单位为秒。
+    odometry_time_offset_s: 0.0
+    cloud_time_offset_s: 0.0
+
+    # 点云与里程计回调独立处理，等待队列增加到5帧。
+    pending_cloud_limit: 5
+    processing_period_ms: 2
+
+    # 姿态覆盖率达到75%时，转换器本身会发布含NaN的部分点云。
+    # 低于75%的帧默认丢弃，不把稀疏点云送入净空检测。
+    publish_partial_cloud: false
+
+    # 队列溢出或整帧失败时默认不主动发布width=0的空点云，
+    # 避免网页和RViz被瞬时清空。日志仍会记录失败原因。
+    publish_empty_on_failure: false

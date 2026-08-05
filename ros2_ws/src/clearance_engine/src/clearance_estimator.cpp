@@ -3,6 +3,7 @@
 #include <pcl/ModelCoefficients.h>
 #include <pcl/PointIndices.h>
 #include <pcl/filters/extract_indices.h>
+#include <pcl/filters/voxel_grid.h>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 #include <pcl/segmentation/sac_segmentation.h>
@@ -66,12 +67,11 @@ double radiansToDegrees(const double radians)
   return radians * 180.0 / kPi;
 }
 
-double percentile(std::vector<double> values, const double fraction)
+double percentileFromSorted(const std::vector<double> & values, const double fraction)
 {
   if (values.empty()) {
     return std::numeric_limits<double>::quiet_NaN();
   }
-  std::sort(values.begin(), values.end());
   const double position = fraction * static_cast<double>(values.size() - 1U);
   const auto lower = static_cast<std::size_t>(std::floor(position));
   const auto upper = static_cast<std::size_t>(std::ceil(position));
@@ -92,7 +92,9 @@ void validateConfig(const ClearanceConfig & config)
     throw std::invalid_argument("顶部角度ROI必须位于0至90度之间");
   }
   if (!(config.max_normal_angle_deg > 0.0 && config.max_normal_angle_deg < 90.0) ||
-    !(config.distance_threshold_m > 0.0) || config.max_iterations <= 0 ||
+    !(config.distance_threshold_m > 0.0) || !std::isfinite(config.voxel_size_m) ||
+    !(config.voxel_size_m >= 0.0) ||
+    config.max_iterations <= 0 ||
     !(config.probability > 0.0 && config.probability < 1.0))
   {
     throw std::invalid_argument("RANSAC参数不合法");
@@ -147,6 +149,48 @@ std::vector<std::vector<GridKey>> connectedComponents(const CellPoints & cells)
     components.push_back(std::move(component));
   }
   return components;
+}
+
+pcl::PointCloud<pcl::PointXYZ>::Ptr makeRansacSearchCloud(
+  const pcl::PointCloud<pcl::PointXYZ>::ConstPtr & input, const double voxel_size_m)
+{
+  if (!(voxel_size_m > 0.0)) {
+    return pcl::make_shared<pcl::PointCloud<pcl::PointXYZ>>(*input);
+  }
+
+  auto output = pcl::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
+  pcl::VoxelGrid<pcl::PointXYZ> voxel;
+  voxel.setInputCloud(input);
+  const float leaf = static_cast<float>(voxel_size_m);
+  voxel.setLeafSize(leaf, leaf, leaf);
+  voxel.filter(*output);
+  return output;
+}
+
+pcl::PointIndices::Ptr collectOriginalResolutionInliers(
+  const pcl::PointCloud<pcl::PointXYZ> & cloud,
+  const std::array<double, 4> & coefficients,
+  const double distance_threshold_m)
+{
+  auto inliers = pcl::make_shared<pcl::PointIndices>();
+  const double normal_norm = std::sqrt(
+    coefficients[0] * coefficients[0] + coefficients[1] * coefficients[1] +
+    coefficients[2] * coefficients[2]);
+  if (!(normal_norm > std::numeric_limits<double>::epsilon())) {
+    return inliers;
+  }
+
+  inliers->indices.reserve(cloud.size());
+  for (std::size_t index = 0; index < cloud.size(); ++index) {
+    const auto & point = cloud[index];
+    const double distance = std::abs(
+      coefficients[0] * point.x + coefficients[1] * point.y +
+      coefficients[2] * point.z + coefficients[3]) / normal_norm;
+    if (distance <= distance_threshold_m) {
+      inliers->indices.push_back(static_cast<int>(index));
+    }
+  }
+  return inliers;
 }
 
 RegionAnalysis analyzeRegions(
@@ -270,8 +314,9 @@ RegionAnalysis analyzeRegions(
           region_coefficients[2] * point.z() + region_coefficients[3]));
     }
 
-    const double residual_median = percentile(residuals, 0.50);
-    const double residual_p95 = percentile(residuals, 0.95);
+    std::sort(residuals.begin(), residuals.end());
+    const double residual_median = percentileFromSorted(residuals, 0.50);
+    const double residual_p95 = percentileFromSorted(residuals, 0.95);
     if (!std::isfinite(residual_p95) || residual_p95 > config.max_residual_p95_m) {
       continue;
     }
@@ -385,6 +430,13 @@ ClearanceEstimate ClearanceEstimator::estimate(const std::vector<Point3f> & poin
     remaining->size() >= config_.min_remaining_points;
     ++plane_index)
   {
+    // RANSAC只在体素降采样点云上搜索模型，减少60 km/h工况下的单帧计算时间。
+    // 候选模型随后回到原始ROI点云收集内点，区域拟合和最低高度仍使用原始分辨率。
+    const auto search_cloud = makeRansacSearchCloud(remaining, config_.voxel_size_m);
+    if (search_cloud->size() < 3U) {
+      break;
+    }
+
     pcl::SACSegmentation<pcl::PointXYZ> segmentation;
     segmentation.setOptimizeCoefficients(true);
     segmentation.setModelType(pcl::SACMODEL_PERPENDICULAR_PLANE);
@@ -394,36 +446,44 @@ ClearanceEstimate ClearanceEstimator::estimate(const std::vector<Point3f> & poin
     segmentation.setDistanceThreshold(config_.distance_threshold_m);
     segmentation.setMaxIterations(config_.max_iterations);
     segmentation.setProbability(config_.probability);
-    segmentation.setInputCloud(remaining);
+    segmentation.setInputCloud(search_cloud);
 
-    auto inliers = pcl::make_shared<pcl::PointIndices>();
+    auto search_inliers = pcl::make_shared<pcl::PointIndices>();
     auto coefficients = pcl::make_shared<pcl::ModelCoefficients>();
-    segmentation.segment(*inliers, *coefficients);
-    if (inliers->indices.size() < min_inliers || coefficients->values.size() != 4U) {
+    segmentation.segment(*search_inliers, *coefficients);
+    if (search_inliers->indices.size() < 3U || coefficients->values.size() != 4U) {
       break;
     }
-    plane_model_found = true;
 
     const std::array<double, 4> plane_coefficients{
       coefficients->values[0], coefficients->values[1], coefficients->values[2],
       coefficients->values[3]};
-    auto region_analysis = analyzeRegions(*remaining, *inliers, plane_coefficients, config_);
+    auto inliers = collectOriginalResolutionInliers(
+      *remaining, plane_coefficients, config_.distance_threshold_m);
+    if (inliers->indices.size() < min_inliers) {
+      break;
+    }
+    plane_model_found = true;
 
-    // 最大剩余平面都达不到配置的网格尺寸时，后续更小平面不再参与首版计算。
+    auto region_analysis = analyzeRegions(*remaining, *inliers, plane_coefficients, config_);
     if (!region_analysis.has_size_qualified_region) {
       region_too_small = true;
-      break;
     }
     result.candidates.insert(
       result.candidates.end(), region_analysis.candidates.begin(),
       region_analysis.candidates.end());
 
+    // 即使当前最大平面没有通过面积或残差检查，也删除其内点并继续寻找后续平面。
+    // 这样主体顶面、标志牌或碎片不会阻止后面的风机底层平面进入候选集。
     pcl::ExtractIndices<pcl::PointXYZ> extractor;
     extractor.setInputCloud(remaining);
     extractor.setIndices(inliers);
     extractor.setNegative(true);
     auto next_remaining = pcl::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
     extractor.filter(*next_remaining);
+    if (next_remaining->size() >= remaining->size()) {
+      break;
+    }
     remaining = std::move(next_remaining);
   }
 

@@ -48,14 +48,11 @@ class TestEnuCloudTransformNode(unittest.TestCase):
 
     def test_applies_default_c0_for_identity_odometry_pose(self):
         reliable = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
-        best_effort = QoSProfile(
-            depth=100, reliability=ReliabilityPolicy.BEST_EFFORT
-        )
         cloud_publisher = self.node.create_publisher(
             PointCloud2, "/capture/lidar/points_raw", reliable
         )
         odometry_publisher = self.node.create_publisher(
-            Odometry, "/capture/odometry/high_rate", best_effort
+            Odometry, "/capture/odometry/high_rate", reliable
         )
         outputs = []
         self.node.create_subscription(

@@ -8,7 +8,7 @@ set(DEVICE_SOURCES
     Odin2/odin2.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../command/odin2Command/OdinCommand.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../capture/odinCapture/OdinCaptureBase.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../protocol/odinProtocol/OdinFrameAssembler.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../protocol/OdinProtocol/OdinFrameAssembler.cpp
 )
 
 set(DEVICE_HEADERS
@@ -36,7 +36,7 @@ target_include_directories(odin_device_obj
         ${CMAKE_CURRENT_SOURCE_DIR}/../capture/odinCapture
         ${CMAKE_CURRENT_SOURCE_DIR}/../protocol/IProtocol
         ${CMAKE_CURRENT_SOURCE_DIR}/../protocol/OdinProtocol
-        ${CMAKE_CURRENT_SOURCE_DIR}/../protocol/odinProtocol
+        ${CMAKE_CURRENT_SOURCE_DIR}/../protocol/OdinProtocol
         ${CMAKE_CURRENT_SOURCE_DIR}/../transport/ITransport
         ${CMAKE_CURRENT_SOURCE_DIR}/../transport/Network
         ${CMAKE_CURRENT_SOURCE_DIR}/../logger
@@ -65,7 +65,7 @@ target_include_directories(odin_device
         ${CMAKE_CURRENT_SOURCE_DIR}/../capture/odinCapture
         ${CMAKE_CURRENT_SOURCE_DIR}/../protocol/IProtocol
         ${CMAKE_CURRENT_SOURCE_DIR}/../protocol/OdinProtocol
-        ${CMAKE_CURRENT_SOURCE_DIR}/../protocol/odinProtocol
+        ${CMAKE_CURRENT_SOURCE_DIR}/../protocol/OdinProtocol
         ${CMAKE_CURRENT_SOURCE_DIR}/../transport/ITransport
         ${CMAKE_CURRENT_SOURCE_DIR}/../transport/Network
         ${CMAKE_CURRENT_SOURCE_DIR}/../logger

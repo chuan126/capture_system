@@ -1,0 +1,14 @@
+本次坐标转换修改文件
+
+1. ros2_ws/src/motion_compensation/include/motion_compensation/enu_cloud_transformer.hpp
+2. ros2_ws/src/motion_compensation/src/enu_cloud_transformer.cpp
+3. ros2_ws/src/motion_compensation/src/enu_cloud_transform_node.cpp
+4. ros2_ws/src/motion_compensation/config/motion_compensation.yaml
+5. ros2_ws/src/motion_compensation/test/test_enu_cloud_transformer.cpp
+6. ros2_ws/src/motion_compensation/test/test_enu_cloud_transform_node.py
+7. ros2_ws/src/motion_compensation/README.md
+8. ros2_ws/src/localization/include/localization/attitude_transform.hpp
+9. ros2_ws/src/localization/src/attitude_transform.cpp
+10. COORDINATE_TRANSFORM_CHANGE_NOTE.md
+
+完整项目基于capture_system_small_board_tuned.zip修改，保留此前clearance_engine小木板参数。

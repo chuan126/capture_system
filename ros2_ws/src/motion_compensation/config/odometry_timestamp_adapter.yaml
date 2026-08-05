@@ -1,0 +1,11 @@
+odometry_timestamp_adapter_node:
+  ros__parameters:
+    input_topic: /capture/odometry/high_rate_raw
+    output_topic: /capture/odometry/high_rate
+
+    # 厂商驱动在同一数据包内给多个高频里程计样本使用相同时间戳。
+    # 本节点在业务层展开时间戳，不修改厂商驱动源码。
+    sample_rate_hz: 400.0
+    packet_timestamp_is_first_sample: true
+    flush_timeout_ms: 5
+    maximum_bundle_samples: 64

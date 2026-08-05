@@ -19,23 +19,24 @@ struct Point3f
 struct ClearanceConfig
 {
   double min_range_m{0.20};
-  double min_up_height_m{0.20};
-  double max_up_height_m{15.0};
-  double east_half_angle_deg{55.0};
-  double north_half_angle_deg{35.0};
+  double min_up_height_m{1.0};
+  double max_up_height_m{10.0};
+  double east_half_angle_deg{60.0};
+  double north_half_angle_deg{60.0};
 
-  double max_normal_angle_deg{15.0};
+  double max_normal_angle_deg{20.0};
   double distance_threshold_m{0.04};
-  int max_iterations{500};
+  double voxel_size_m{0.04};
+  int max_iterations{200};
   double probability{0.99};
-  int max_candidate_planes{8};
-  std::size_t min_remaining_points{500};
-  std::size_t min_inliers_absolute{300};
-  double min_inlier_ratio{0.005};
+  int max_candidate_planes{4};
+  std::size_t min_remaining_points{100};
+  std::size_t min_inliers_absolute{60};
+  double min_inlier_ratio{0.0003};
 
-  double region_grid_size_m{0.10};
-  std::size_t min_region_span_cells{9};
-  std::size_t min_region_occupied_cells{81};
+  double region_grid_size_m{0.03};
+  std::size_t min_region_span_cells{4};
+  std::size_t min_region_occupied_cells{12};
   double max_residual_p95_m{0.05};
 };
 

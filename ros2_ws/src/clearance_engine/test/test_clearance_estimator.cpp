@@ -47,6 +47,24 @@ TEST(ClearanceEstimatorTest, SelectsLowestOfMultiplePlanes)
   EXPECT_NEAR(result.selected.min_height_m, 1.5, 0.03);
 }
 
+TEST(ClearanceEstimatorTest, DetectsOffAxisFanBottomBelowTunnelRoof)
+{
+  std::vector<Point3f> points = makePlane(6.2, 0.0, 0.0, 3.0, 0.08);
+  auto fan = makePlane(5.0, 0.0, 0.0, 0.35, 0.025);
+  for (auto & point : fan) {
+    point.east += 2.5F;
+  }
+  append(points, fan);
+
+  ClearanceEstimator estimator(ClearanceConfig{});
+  const auto result = estimator.estimate(points);
+
+  ASSERT_TRUE(result.valid) << result.invalid_reason;
+  EXPECT_GE(result.candidates.size(), 2U);
+  EXPECT_NEAR(result.selected.min_height_m, 5.0, 0.05);
+  EXPECT_GT(result.selected.min_position_east_m, 2.0);
+}
+
 TEST(ClearanceEstimatorTest, UsesLowestHeightInsideObservedTiltedRegion)
 {
   ClearanceConfig config;
@@ -72,8 +90,11 @@ TEST(ClearanceEstimatorTest, RejectsPlaneBeyondNormalAngle)
 
 TEST(ClearanceEstimatorTest, RejectsRegionSmallerThanConfiguredGrid)
 {
-  ClearanceEstimator estimator(ClearanceConfig{});
-  const auto result = estimator.estimate(makePlane(2.0, 0.0, 0.0, 0.25, 0.02));
+  ClearanceConfig config;
+  config.min_region_span_cells = 8;
+  config.min_region_occupied_cells = 64;
+  ClearanceEstimator estimator(config);
+  const auto result = estimator.estimate(makePlane(2.0, 0.0, 0.0, 0.08, 0.01));
 
   EXPECT_FALSE(result.valid);
   EXPECT_EQ(result.invalid_reason, "NO_PLANE_PASSED_REGION_SIZE");

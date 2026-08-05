@@ -105,6 +105,9 @@ fi
 set +u
 source /opt/ros/humble/setup.bash
 source "${project_root}/third_party/odin_ros_driver/install/setup.bash"
+# ODIN驱动使用catkin编译，setup.bash仅设置CMAKE_PREFIX_PATH，
+# 需手动补全AMENT_PREFIX_PATH以支持ros2 pkg/launch发现包。
+export AMENT_PREFIX_PATH="${project_root}/third_party/odin_ros_driver/install/odin_ros_driver_rev1:${AMENT_PREFIX_PATH}"
 source "${project_root}/ros2_ws/install/setup.bash"
 set -u
 
@@ -142,7 +145,7 @@ echo "正在启动实时点云预览节点……"
 setsid --wait ros2 launch bringup cloud_preview.launch.py &
 child_pids+=("$!")
 
-echo "正在启动首版实时净空计算节点……"
+echo "正在启动单帧RANSAC风机底面检测节点……"
 setsid --wait ros2 launch bringup clearance_preview.launch.py &
 child_pids+=("$!")
 

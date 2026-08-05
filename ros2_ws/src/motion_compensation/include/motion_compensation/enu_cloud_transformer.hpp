@@ -5,13 +5,13 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <mutex>
 #include <string>
 #include <vector>
 
 namespace motion_compensation
 {
 
-using RotationMatrix3d = std::array<double, 9>;
 
 struct PoseSample
 {
@@ -35,6 +35,19 @@ struct EnuPoint
   float up{0.0F};
 };
 
+struct TransformStatistics
+{
+  std::size_t input_point_count{0U};
+  std::size_t finite_nonzero_point_count{0U};
+  std::size_t pose_covered_point_count{0U};
+  std::size_t transformed_point_count{0U};
+  std::size_t uncovered_point_count{0U};
+  std::size_t invalid_time_point_count{0U};
+  bool translation_applied{false};
+  bool translation_fallback{false};
+  double valid_pose_ratio{0.0};
+};
+
 class PoseBuffer
 {
 public:
@@ -46,9 +59,13 @@ public:
   std::int64_t oldestStampNs() const noexcept;
   std::int64_t newestStampNs() const noexcept;
 
+  std::vector<PoseSample> snapshot() const;
+  std::int64_t maxInterpolationGapNs() const noexcept;
+
 private:
   std::int64_t cache_duration_ns_;
   std::int64_t max_interpolation_gap_ns_;
+  mutable std::mutex mutex_;
   std::deque<PoseSample> samples_;
 };
 
@@ -57,7 +74,10 @@ class EnuCloudTransformer
 public:
   EnuCloudTransformer(
     std::int64_t cache_duration_ns, std::int64_t max_interpolation_gap_ns,
-    bool use_odometry_translation, const RotationMatrix3d & lidar_to_odometry_rotation);
+    bool use_odometry_translation,
+    double minimum_valid_pose_ratio = 0.85,
+    double max_translation_per_scan_m = 5.0,
+    bool fallback_to_rotation_only = true);
 
   bool addPose(const PoseSample & sample) noexcept;
   bool initialized() const noexcept;
@@ -65,12 +85,15 @@ public:
   std::int64_t newestPoseStampNs() const noexcept;
   bool transform(
     std::int64_t cloud_stamp_ns, const std::vector<TimedRadarPoint> & input,
-    std::vector<EnuPoint> & output, std::string & invalid_reason) const noexcept;
+    std::vector<EnuPoint> & output, std::string & invalid_reason,
+    TransformStatistics * statistics = nullptr) const noexcept;
 
 private:
   PoseBuffer pose_buffer_;
   bool use_odometry_translation_;
-  RotationMatrix3d lidar_to_odometry_rotation_;
+  double minimum_valid_pose_ratio_;
+  double max_translation_per_scan_m_;
+  bool fallback_to_rotation_only_;
 };
 
 }  // namespace motion_compensation

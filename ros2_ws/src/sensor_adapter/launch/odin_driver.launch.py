@@ -9,7 +9,7 @@ TOPIC_REMAPPINGS = (
     ("cloud/raw", "/capture/lidar/points_raw"),
     ("cloud/slam", "/capture/lidar/points_slam"),
     ("imu", "/capture/imu/data"),
-    ("odometry_hf", "/capture/odometry/high_rate"),
+    ("odometry_hf", "/capture/odometry/high_rate_raw"),
     ("odometry", "/capture/odometry/slam"),
 )
 
@@ -33,6 +33,7 @@ DRIVER_BEHAVIOR_ARGUMENT_DEFAULTS = {
 }
 
 
+
 def generate_launch_description():
     vendor_device_prefix = LaunchConfiguration("vendor_device_prefix")
     topic_prefix = LaunchConfiguration("topic_prefix")
@@ -44,6 +45,7 @@ def generate_launch_description():
         name: ParameterValue(LaunchConfiguration(name), value_type=bool)
         for name in (*CHANNEL_ARGUMENT_DEFAULTS, *DRIVER_BEHAVIOR_ARGUMENT_DEFAULTS)
     }
+
 
     # remap 直接作用于厂商发布器，不创建中继节点，也不复制点云消息。
     remappings = [
@@ -95,7 +97,8 @@ def generate_launch_description():
             *[
                 DeclareLaunchArgument(name, default_value=default_value)
                 for name, default_value in (
-                    CHANNEL_ARGUMENT_DEFAULTS | DRIVER_BEHAVIOR_ARGUMENT_DEFAULTS
+                    CHANNEL_ARGUMENT_DEFAULTS
+                    | DRIVER_BEHAVIOR_ARGUMENT_DEFAULTS
                 ).items()
             ],
             driver,
