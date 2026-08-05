@@ -15,14 +15,14 @@ clearance_engine_node:
     ransac.distance_threshold_m: 0.04
     ransac.max_iterations: 500
     ransac.probability: 0.99
-    ransac.max_candidate_planes: 8
+    ransac.max_candidate_planes: 12
     ransac.min_remaining_points: 100
-    ransac.min_inliers_absolute: 50
+    ransac.min_inliers_absolute: 30
     ransac.min_inlier_ratio: 0.0003
 
     # 1 cm网格实验配置。点间距超过约1.4 cm时，连通区域可能破碎。
     # 最低跨度约5 cm，最低占用面积约15 cm²。
-    region.grid_size_m: 0.010
+    region.grid_size_m: 0.020
     region.min_span_cells: 5
     region.min_occupied_cells: 15
     region.max_residual_p95_m: 0.05

@@ -11,10 +11,26 @@ import { useSystemStatusSocket } from "@/components/system-status/useSystemStatu
 import { isDeviceConnected } from "@/components/system-status/systemStatusProtocol";
 import type { DeviceStatus, HealthState } from "@/components/system-status/systemStatusProtocol";
 
-type PageId = "dashboard" | "tasks" | "playback" | "report";
+type PageId = "dashboard" | "playback" | "report";
 type PlaybackTab = "result" | "history" | "logs";
-type TaskTab = "pending" | "completed" | "abnormal";
 type ReportLoadState = "idle" | "loading" | "ready" | "error";
+type CollectionTaskLane = "左车道" | "右车道";
+type CollectionTaskStatus = "待执行" | "采集中" | "已暂停" | "已停止";
+
+type CollectionTaskDraft = {
+  taskId: string;
+  tunnelName: string;
+  mountHeight: string;
+  lane: CollectionTaskLane;
+};
+
+type CollectionTask = {
+  taskId: string;
+  tunnelName: string;
+  mountHeight: number;
+  lane: CollectionTaskLane;
+  status: CollectionTaskStatus;
+};
 
 type ReportTestData = {
   task_id: string;
@@ -32,11 +48,184 @@ type ReportTestData = {
   clearance_points: Array<{ distance_m: number; clearance_m: number }>;
 };
 
+
+const createTaskDraft = (): CollectionTaskDraft => ({
+  taskId: "",
+  tunnelName: "",
+  mountHeight: "1.86",
+  lane: "右车道",
+});
+
+function taskTone(status: CollectionTaskStatus): "idle" | "ok" | "warn" | "danger" {
+  if (status === "采集中") return "ok";
+  if (status === "已暂停") return "warn";
+  if (status === "已停止") return "danger";
+  return "idle";
+}
+
+function TaskCreateDialog({
+  existingTaskIds,
+  onClose,
+  onCreate,
+}: {
+  existingTaskIds: Set<string>;
+  onClose: () => void;
+  onCreate: (drafts: CollectionTaskDraft[]) => void;
+}) {
+  const [rows, setRows] = useState<CollectionTaskDraft[]>(() => [createTaskDraft()]);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
+  const updateRow = <K extends keyof CollectionTaskDraft,>(
+    index: number,
+    key: K,
+    value: CollectionTaskDraft[K],
+  ) => {
+    setRows((current) => current.map((row, rowIndex) =>
+      rowIndex === index ? { ...row, [key]: value } : row,
+    ));
+    setError(null);
+  };
+
+  const validateRows = () => {
+    const taskIds = new Set(existingTaskIds);
+    for (let index = 0; index < rows.length; index += 1) {
+      const row = rows[index];
+      const rowName = `第 ${index + 1} 行`;
+      const taskId = row.taskId.trim();
+      const tunnelName = row.tunnelName.trim();
+      const mountHeight = Number(row.mountHeight);
+
+      if (!taskId) return `${rowName}缺少任务编号`;
+      if (!tunnelName) return `${rowName}缺少隧道名称`;
+      if (!Number.isFinite(mountHeight) || mountHeight <= 0) return `${rowName}的雷达安装高度无效`;
+      if (taskIds.has(taskId)) return `${rowName}的任务编号重复`;
+      taskIds.add(taskId);
+    }
+    return null;
+  };
+
+  const submit = () => {
+    const validationError = validateRows();
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+    onCreate(rows.map((row) => ({
+      ...row,
+      taskId: row.taskId.trim(),
+      tunnelName: row.tunnelName.trim(),
+    })));
+  };
+
+  return (
+    <div
+      className="task-dialog-mask"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="task-dialog-title"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <section className="task-dialog-panel task-dialog-panel--wide">
+        <header className="task-dialog-head">
+          <div>
+            <h2 id="task-dialog-title">创建检测任务</h2>
+            <p>可创建单项或多项任务。所有任务共用任务控制卡片中的高度阈值。</p>
+          </div>
+          <button type="button" onClick={onClose} aria-label="关闭任务创建窗口">×</button>
+        </header>
+
+        <div className="task-dialog-rows">
+          {rows.map((row, index) => (
+            <article className="task-dialog-row" key={`task-draft-${index}`}>
+              <span className="task-dialog-row__index">{String(index + 1).padStart(2, "0")}</span>
+              <label>
+                <span>任务编号</span>
+                <input
+                  value={row.taskId}
+                  onChange={(event) => updateRow(index, "taskId", event.target.value)}
+                  placeholder="例如 HC-2026-001"
+                />
+              </label>
+              <label>
+                <span>隧道名称</span>
+                <input
+                  value={row.tunnelName}
+                  onChange={(event) => updateRow(index, "tunnelName", event.target.value)}
+                  placeholder="请输入隧道名称"
+                />
+              </label>
+              <label>
+                <span>雷达安装高度 / m</span>
+                <input
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  value={row.mountHeight}
+                  onChange={(event) => updateRow(index, "mountHeight", event.target.value)}
+                />
+              </label>
+              <label>
+                <span>作业车道</span>
+                <select
+                  value={row.lane}
+                  onChange={(event) => updateRow(index, "lane", event.target.value as CollectionTaskLane)}
+                >
+                  <option value="左车道">左车道</option>
+                  <option value="右车道">右车道</option>
+                </select>
+              </label>
+              <div className="task-dialog-row__actions">
+                <button
+                  type="button"
+                  onClick={() => setRows((current) => [
+                    ...current.slice(0, index + 1),
+                    { ...row, taskId: "" },
+                    ...current.slice(index + 1),
+                  ])}
+                >复制</button>
+                <button
+                  type="button"
+                  disabled={rows.length === 1}
+                  onClick={() => setRows((current) => current.filter((_, rowIndex) => rowIndex !== index))}
+                >删除</button>
+              </div>
+            </article>
+          ))}
+        </div>
+
+        <button
+          type="button"
+          className="task-dialog-add-row"
+          onClick={() => setRows((current) => [...current, createTaskDraft()])}
+        >＋ 添加任务</button>
+
+        {error && <p className="task-dialog-error" role="alert">{error}</p>}
+
+        <footer className="task-dialog-actions">
+          <button type="button" className="button" onClick={onClose}>取消</button>
+          <button type="button" className="button button--primary" onClick={submit}>
+            保存 {rows.length} 项任务
+          </button>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
 const navigation: Array<{ id: PageId; label: string; index: string }> = [
   { id: "dashboard", label: "采集首页", index: "01" },
-  { id: "tasks", label: "任务管理", index: "02" },
-  { id: "playback", label: "数据回放", index: "03" },
-  { id: "report", label: "报告导出", index: "04" },
+  { id: "playback", label: "数据回放", index: "02" },
+  { id: "report", label: "报告导出", index: "03" },
 ];
 
 function StatusPill({
@@ -275,6 +464,10 @@ function Header({ page }: { page: PageId }) {
 
 function Dashboard() {
   const [expandedVisual, setExpandedVisual] = useState<"cloud" | "map" | null>(null);
+  const [taskDialogOpen, setTaskDialogOpen] = useState(false);
+  const [tasks, setTasks] = useState<CollectionTask[]>([]);
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [heightThreshold, setHeightThreshold] = useState("4.50");
   const rtk = useRtkSocket();
   const rtkSnapshot = rtk.snapshot;
   const clearance = useClearanceSocket();
@@ -322,22 +515,10 @@ function Dashboard() {
   const rmcCharacter = rtkSnapshot?.rmc_validity
     ? String.fromCharCode(rtkSnapshot.rmc_validity)
     : null;
-  const rmcText = rmcCharacter === "A"
-    ? "RMC有效（A）"
-    : rmcCharacter === "V"
-      ? "RMC无效（V）"
-      : rmcCharacter
-        ? `RMC（${rmcCharacter}）`
-        : "RMC --";
   const formatMetric = (value: number | null | undefined, digits = 2) =>
     value === null || value === undefined ? "--" : value.toFixed(digits);
   const hasFix = rtkSnapshot?.fix_status !== null &&
     rtkSnapshot?.fix_status !== undefined && rtkSnapshot.fix_status !== -1;
-  const coordinateText = hasFix &&
-    rtkSnapshot?.latitude !== null && rtkSnapshot?.latitude !== undefined &&
-    rtkSnapshot?.longitude !== null && rtkSnapshot?.longitude !== undefined
-    ? `${rtkSnapshot.latitude.toFixed(8)}°, ${rtkSnapshot.longitude.toFixed(8)}°`
-    : "--";
   const altitudeText = hasFix ? `${formatMetric(rtkSnapshot?.altitude)} m` : "--";
   const monitorUnavailable = !systemStreamAvailable;
   const lidarConnected = !monitorUnavailable && isDeviceConnected("lidar", systemSnapshot?.lidar);
@@ -374,6 +555,59 @@ function Dashboard() {
     return Number.isFinite(value) && value >= 0 ? `${value.toFixed(1)}%` : "--";
   };
   const controllerCpuText = formatPercentValue(systemSnapshot?.controller, "cpu_percent");
+  const activeTask = tasks.find((task) => task.status === "采集中" || task.status === "已暂停");
+  const selectedTask = tasks.find((task) => task.taskId === selectedTaskId);
+  const currentTask = activeTask ?? selectedTask ?? tasks.find((task) => task.status === "待执行") ?? null;
+  const pendingTasks = tasks.filter((task) => task.status === "待执行" && task.taskId !== currentTask?.taskId);
+  const parsedHeightThreshold = Number(heightThreshold);
+  const heightThresholdValid = Number.isFinite(parsedHeightThreshold) && parsedHeightThreshold > 0;
+  const captureReady = lidarConnected && rtkConnected && storageConnected;
+  const taskLocked = currentTask?.status === "采集中" || currentTask?.status === "已暂停";
+  const currentTaskStatus = currentTask?.status ?? "待执行";
+
+  const createTasks = (drafts: CollectionTaskDraft[]) => {
+    const created: CollectionTask[] = drafts.map((draft) => ({
+      taskId: draft.taskId,
+      tunnelName: draft.tunnelName,
+      mountHeight: Number(draft.mountHeight),
+      lane: draft.lane,
+      status: "待执行",
+    }));
+    setTasks((current) => [...current, ...created]);
+    if (!currentTask) setSelectedTaskId(created[0]?.taskId ?? null);
+    setTaskDialogOpen(false);
+  };
+
+  const selectTask = (taskId: string) => {
+    if (taskLocked) return;
+    setSelectedTaskId(taskId);
+  };
+
+  const startTask = () => {
+    if (!currentTask || currentTask.status !== "待执行" || !captureReady || !heightThresholdValid) return;
+    setTasks((current) => current.map((task) =>
+      task.taskId === currentTask.taskId ? { ...task, status: "采集中" } : task,
+    ));
+  };
+
+  const togglePauseTask = () => {
+    if (!currentTask || (currentTask.status !== "采集中" && currentTask.status !== "已暂停")) return;
+    const nextStatus: CollectionTaskStatus = currentTask.status === "采集中" ? "已暂停" : "采集中";
+    setTasks((current) => current.map((task) =>
+      task.taskId === currentTask.taskId ? { ...task, status: nextStatus } : task,
+    ));
+  };
+
+  const stopTask = () => {
+    if (!currentTask || (currentTask.status !== "采集中" && currentTask.status !== "已暂停")) return;
+    if (!window.confirm(`确认停止任务 ${currentTask.taskId}？已有数据将保留。`)) return;
+    const nextTask = tasks.find((task) => task.status === "待执行" && task.taskId !== currentTask.taskId);
+    setTasks((current) => current.map((task) =>
+      task.taskId === currentTask.taskId ? { ...task, status: "已停止" } : task,
+    ));
+    setSelectedTaskId(nextTask?.taskId ?? currentTask.taskId);
+  };
+
   return (
     <div className="page-stack dashboard-page">
       <section className="dashboard-health-bar" aria-label="系统状态栏">
@@ -394,7 +628,7 @@ function Dashboard() {
 
           <div className="health-kpi-grid" aria-label="实时测量摘要">
             <article className="health-kpi-card health-kpi-card--primary">
-              <span>当前净空高度</span>
+              <span>净空高度</span>
               <strong>{currentHeightText}<small>m</small></strong>
             </article>
             <article className="health-kpi-card health-kpi-card--placeholder">
@@ -520,185 +754,156 @@ function Dashboard() {
               trailing={<StatusPill tone={rtkTone}>{rtkDeviceText}</StatusPill>}
             />
 
-            <section className="rtk-solution-hero" aria-label="RTK当前解状态">
-              <div>
-                <span>定位状态</span>
-                <strong>{rtkCardValue}</strong>
-                <small>{rmcText}</small>
-              </div>
-              <div className="rtk-satellite-count">
+            <section className="rtk-metric-grid" aria-label="RTK质量指标">
+              <article>
                 <span>卫星数</span>
                 <strong>{rtkSnapshot?.satellite_count ?? "--"}</strong>
-              </div>
+              </article>
+              <article>
+                <span>HDOP / PDOP</span>
+                <strong>{formatMetric(rtkSnapshot?.hdop)} / {formatMetric(rtkSnapshot?.pdop)}</strong>
+              </article>
+              <article>
+                <span>高度</span>
+                <strong>{altitudeText}</strong>
+              </article>
             </section>
 
-            <div className="rtk-quality-grid" aria-label="RTK质量指标">
-              <div><span>HDOP</span><strong>{formatMetric(rtkSnapshot?.hdop)}</strong></div>
-              <div><span>PDOP</span><strong>{formatMetric(rtkSnapshot?.pdop)}</strong></div>
-              <div><span>高度</span><strong>{altitudeText}</strong></div>
-              <div><span>坐标系</span><strong>WGS84</strong></div>
-            </div>
-
-            <div className="rtk-position-block">
-              <span>当前坐标</span>
-              <strong>{coordinateText}</strong>
-            </div>
-
-            <div className="rtk-marker-grid" aria-label="隧道进出洞坐标">
-              <div><span>入口坐标</span><strong>未标记</strong></div>
-              <div><span>出口坐标</span><strong>未标记</strong></div>
+            <div className="rtk-coordinate-stack" aria-label="隧道进出洞坐标">
+              <article>
+                <span>入口坐标</span>
+                <strong>未标记</strong>
+              </article>
+              <article>
+                <span>出口坐标</span>
+                <strong>未标记</strong>
+              </article>
             </div>
           </article>
 
           <article className="panel task-operation-panel">
             <PanelHead
               title="任务控制"
-              description="任务选择、采集条件与操作"
-              trailing={<StatusPill>待机</StatusPill>}
+              description="任务选择与采集控制"
+              trailing={
+                <div className="task-operation-head-actions">
+                  <button type="button" onClick={() => setTaskDialogOpen(true)}>创建任务</button>
+                </div>
+              }
             />
 
-            <section className="task-operation-current">
-              <span className="task-operation-current__icon" aria-hidden="true">任</span>
-              <div>
-                <span>当前任务</span>
-                <strong>尚未选择任务</strong>
-                <small>请在任务管理中创建或选择任务</small>
+            <section className={`task-threshold-card${heightThresholdValid ? "" : " task-threshold-card--invalid"}`} aria-label="高度阈值设置">
+              <div className="task-threshold-card__identity">
+                <span aria-hidden="true">H</span>
+                <div>
+                  <strong>高度阈值</strong>
+                  <small>所有任务共用</small>
+                </div>
+              </div>
+              <label className="task-threshold-card__input">
+                <input
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  value={heightThreshold}
+                  disabled={taskLocked}
+                  aria-invalid={!heightThresholdValid}
+                  onChange={(event) => setHeightThreshold(event.target.value)}
+                />
+                <span>m</span>
+              </label>
+            </section>
+
+            <section className="task-selection-card" aria-label="选择任务">
+              <div className="task-selection-card__identity">
+                <span className="task-selection-card__icon" aria-hidden="true">任</span>
+                <div>
+                  <strong>选择任务</strong>
+                  <small>{currentTask ? `${currentTask.tunnelName} · ${currentTask.lane} · 安装高度 ${currentTask.mountHeight.toFixed(2)} m` : "尚未创建任务"}</small>
+                </div>
+              </div>
+              <div className="task-selection-card__control">
+                <select
+                  value={currentTask?.taskId ?? ""}
+                  disabled={taskLocked || tasks.length === 0}
+                  onChange={(event) => selectTask(event.target.value)}
+                  aria-label="选择检测任务"
+                >
+                  {tasks.length === 0 && <option value="">暂无任务</option>}
+                  {tasks.map((task) => (
+                    <option key={task.taskId} value={task.taskId}>
+                      {task.taskId} · {task.tunnelName} · {task.status}
+                    </option>
+                  ))}
+                </select>
+                <StatusPill tone={currentTask ? taskTone(currentTaskStatus) : "idle"}>
+                  {currentTask ? currentTaskStatus : "无任务"}
+                </StatusPill>
               </div>
             </section>
 
-            <div className="task-operation-info" aria-label="当前任务信息">
-              <div><span>任务编号</span><strong>--</strong></div>
-              <div><span>隧道名称</span><strong>--</strong></div>
-              <div><span>检测车道</span><strong>--</strong></div>
-              <div><span>采集时长</span><strong>--:--</strong></div>
-            </div>
-
-            <section className="task-readiness" aria-label="采集条件">
-              <div className="task-readiness__head">
-                <h3>采集条件</h3>
-                <span>全部满足后允许开始</span>
+            <section className="task-queue-preview" aria-label="待测任务">
+              <div className="task-queue-preview__head">
+                <h3>待测任务</h3>
+                <span>{pendingTasks.length} 项</span>
               </div>
-              <div className="task-readiness__signals">
-                <span className={lidarConnected ? "is-ready" : ""}><i />雷达</span>
-                <span className={rtkConnected ? "is-ready" : ""}><i />RTK</span>
-                <span className={storageConnected ? "is-ready" : ""}><i />存储</span>
+              <div className="task-queue-preview__list">
+                {pendingTasks.length === 0 ? (
+                  <div className="task-queue-preview__empty">暂无其他待测任务</div>
+                ) : pendingTasks.slice(0, 2).map((task, index) => (
+                  <button
+                    type="button"
+                    key={task.taskId}
+                    disabled={taskLocked}
+                    onClick={() => selectTask(task.taskId)}
+                  >
+                    <span>{String(index + 1).padStart(2, "0")}</span>
+                    <div><strong>{task.taskId}</strong><small>{task.tunnelName} · {task.lane}</small></div>
+                    <StatusPill>待执行</StatusPill>
+                  </button>
+                ))}
               </div>
+              {pendingTasks.length > 2 && <small className="task-queue-preview__more">另有 {pendingTasks.length - 2} 项任务</small>}
             </section>
 
             <div className="task-operation-actions">
-              <button type="button" className="button button--green" disabled title="请选择任务并完成采集前检查">开始采集</button>
-              <button type="button" className="button button--warning" disabled>暂停</button>
-              <button type="button" className="button button--danger" disabled>停止</button>
+              <button
+                type="button"
+                className="button button--green"
+                disabled={!currentTask || currentTask.status !== "待执行" || !captureReady || !heightThresholdValid}
+                title={!currentTask
+                  ? "请先创建任务"
+                  : !heightThresholdValid
+                    ? "请输入有效的高度阈值"
+                    : !captureReady
+                      ? "请确认雷达、RTK 和存储均已连接"
+                      : "开始采集"}
+                onClick={startTask}
+              >开始采集</button>
+              <button
+                type="button"
+                className="button button--warning"
+                disabled={!currentTask || (currentTask.status !== "采集中" && currentTask.status !== "已暂停")}
+                onClick={togglePauseTask}
+              >{currentTask?.status === "已暂停" ? "继续" : "暂停"}</button>
+              <button
+                type="button"
+                className="button button--danger"
+                disabled={!currentTask || (currentTask.status !== "采集中" && currentTask.status !== "已暂停")}
+                onClick={stopTask}
+              >停止</button>
             </div>
-
-            <p className="task-operation-footnote">浏览器断开不会终止 RK3588 上的采集与计算任务。</p>
           </article>
         </aside>
       </section>
-    </div>
-  );
-}
 
-function Tasks() {
-  const [taskTab, setTaskTab] = useState<TaskTab>("pending");
-  const tabs: Array<{ id: TaskTab; label: string }> = [
-    { id: "pending", label: "待检测任务" },
-    { id: "completed", label: "已完成任务" },
-    { id: "abnormal", label: "异常任务" },
-  ];
-
-  return (
-    <div className="page-stack">
-      <section className="task-overview">
-        <article><i>待</i><div><span>待检测任务</span><strong>--</strong></div></article>
-        <article><i>完</i><div><span>已完成任务</span><strong>--</strong></div></article>
-        <article><i>异</i><div><span>异常任务</span><strong>--</strong></div></article>
-      </section>
-
-      <section className="task-page-grid">
-        <article className="panel task-create-panel">
-          <PanelHead
-            title="批量创建检测任务"
-            description="按隧道与车道建立待检测任务"
-            trailing={<span className="panel-tag">新建任务</span>}
-          />
-          <div className="task-form">
-            <label>
-              <span>隧道名称</span>
-              <input placeholder="请输入隧道名称" />
-            </label>
-            <label>
-              <span>隧道编号</span>
-              <input placeholder="请输入隧道编号" />
-            </label>
-            <fieldset>
-              <legend>车道选择</legend>
-              <label className="check-card"><input type="checkbox" /><span><i>01</i><strong>左侧车道</strong></span></label>
-              <label className="check-card"><input type="checkbox" /><span><i>02</i><strong>右侧车道</strong></span></label>
-            </fieldset>
-            <label>
-              <span>任务编号规则</span>
-              <input placeholder="例如：隧道编号-车道-序号" />
-            </label>
-            <label>
-              <span>计划检测日期</span>
-              <input type="date" />
-            </label>
-          </div>
-          <div className="task-form-actions">
-            <button type="button" className="button button--soft">清空内容</button>
-            <button type="button" className="button button--primary">批量创建任务</button>
-          </div>
-          <div className="info-box">当前为静态界面，任务内容不会保存或提交。</div>
-        </article>
-
-        <article className="panel task-queue-panel">
-          <PanelHead title="任务编排预览" description="确认任务顺序与自动切换关系" />
-          <div className="queue-empty">
-            <EmptyState icon="≡" title="尚未添加任务" description="填写左侧信息后在此预览任务顺序" />
-          </div>
-          <div className="queue-rule">
-            <div><span>自动切换规则</span><StatusPill>未设置</StatusPill></div>
-            <p>当前任务完成 → 加载下一任务 → 更新任务状态</p>
-          </div>
-        </article>
-      </section>
-
-      <article className="panel table-panel">
-        <div className="table-toolbar">
-          <div className="segmented">
-            {tabs.map((tab) => (
-              <button
-                type="button"
-                key={tab.id}
-                className={taskTab === tab.id ? "active" : ""}
-                onClick={() => setTaskTab(tab.id)}
-              >
-                {tab.label}<span>0</span>
-              </button>
-            ))}
-          </div>
-          <div className="toolbar-actions">
-            <label className="search-box"><span>⌕</span><input placeholder="搜索任务编号或隧道名称" /></label>
-            <select defaultValue=""><option value="">全部车道</option></select>
-          </div>
-        </div>
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>任务编号</th><th>隧道名称</th><th>隧道编号</th>
-                <th>检测车道</th><th>计划日期</th><th>任务状态</th><th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr className="empty-row">
-                <td colSpan={7}>暂无{tabs.find((tab) => tab.id === taskTab)?.label}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </article>
+      {taskDialogOpen && (
+        <TaskCreateDialog
+          existingTaskIds={new Set(tasks.map((task) => task.taskId))}
+          onClose={() => setTaskDialogOpen(false)}
+          onCreate={createTasks}
+        />
+      )}
     </div>
   );
 }
@@ -758,11 +963,10 @@ function Playback() {
 
       {tab === "history" && (
         <article className="panel data-management">
-          <PanelHead title="历史测量数据" description="测量数据保存与历史任务管理" />
+          <PanelHead title="历史测量数据" description="测量数据保存与历史记录查询" />
           <div className="data-actions">
             <button type="button"><i>数</i><span><strong>测量数据保存</strong><small>查看结构化测量结果</small></span><b>›</b></button>
             <button type="button"><i>史</i><span><strong>历史测量数据</strong><small>按任务查询历史记录</small></span><b>›</b></button>
-            <button type="button"><i>任</i><span><strong>历史任务管理</strong><small>查看已完成与异常任务</small></span><b>›</b></button>
           </div>
           <div className="data-empty"><EmptyState icon="▤" title="尚未选择历史任务" description="载入任务后显示数据文件与记录" /></div>
         </article>
@@ -998,7 +1202,6 @@ export default function Home() {
         {activePage !== "dashboard" && <Header page={activePage} />}
         <div className="page-content">
           {activePage === "dashboard" && <Dashboard />}
-          {activePage === "tasks" && <Tasks />}
           {activePage === "playback" && <Playback />}
           {activePage === "report" && <Report />}
         </div>
