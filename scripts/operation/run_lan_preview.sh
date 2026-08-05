@@ -85,6 +85,9 @@ if ! command -v setsid >/dev/null 2>&1; then
   exit 1
 fi
 
+# 确保 system_monitor 存储检测所需的数据目录存在
+mkdir -p "${project_root}/data"
+
 if [[ -f "${network_config}" ]]; then
   set -a
   source "${network_config}"

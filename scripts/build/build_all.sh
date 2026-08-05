@@ -356,6 +356,11 @@ info "npm  $(npm --version)"
 info "SDK 编译并行度  ${BUILD_JOBS}"
 ok "前置检查通过"
 
+# ---- 确保运行时目录 ----
+info "确保 data 目录存在"
+mkdir -p "${PROJECT_ROOT}/data"
+ok "运行时目录就绪"
+
 # ---- Step 1  CRLF 检查 ----
 step "1/6 CRLF 检查"
 
