@@ -54,10 +54,21 @@ public:
   EnuCloudTransformNode()
   : Node("enu_cloud_transform_node")
   {
+    // const auto lidar_to_odometry_rotation = vectorToRotationMatrix(
+    //   declare_parameter<std::vector<double>>(
+    //     "lidar_to_odometry_rotation",
+    //     std::vector<double>{-1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0}));
+
+    
     const auto lidar_to_odometry_rotation = vectorToRotationMatrix(
       declare_parameter<std::vector<double>>(
         "lidar_to_odometry_rotation",
-        std::vector<double>{-1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0}));
+        std::vector<double>{
+          1.0, 0.0, 0.0,
+          0.0, 1.0, 0.0,
+          0.0, 0.0, 1.0
+        }));
+
     transformer_ = std::make_unique<EnuCloudTransformer>(
       secondsToNanoseconds(declare_parameter<double>("pose_cache_duration_s", 2.0)),
       secondsToNanoseconds(declare_parameter<double>("max_interpolation_gap_s", 0.02)),

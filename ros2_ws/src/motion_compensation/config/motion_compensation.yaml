@@ -13,8 +13,13 @@ enu_cloud_transform_node:
 
     # C0 = R_b<-l。按行排列，将雷达坐标系矢量转换到里程计机体坐标系。
     # 当前安装关系为x_b=-x_l、y_b=-y_l、z_b=z_l。
-    lidar_to_odometry_rotation: [-1.0, 0.0, 0.0,
-                                  0.0, -1.0, 0.0,
-                                  0.0, 0.0, 1.0]
+    # lidar_to_odometry_rotation: [-1.0, 0.0, 0.0,
+    #                               0.0, -1.0, 0.0,
+    #                               0.0, 0.0, 1.0]
+
+    # 雷达坐标系与里程计机体系方向一致，因此C0取单位矩阵。
+    lidar_to_odometry_rotation: [1.0, 0.0, 0.0,
+                              0.0, 1.0, 0.0,
+                              0.0, 0.0, 1.0]
 
     pending_cloud_limit: 2

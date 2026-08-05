@@ -47,6 +47,7 @@ bool rosQuaternionToMatrix(
   // q2mat使用[w, x, y, z]顺序，ROS消息使用[x, y, z, w]。
   // 本项目已确认q2mat输出R_n<-b，即机体系到导航系的旋转矩阵。
   double qnb[4]{w / norm, x / norm, y / norm, z / norm};
+  //double qnb[4]{x / norm, y / norm, z / norm, w / norm};
   q2mat(qnb, R_navigation_from_body);
   return true;
 }
