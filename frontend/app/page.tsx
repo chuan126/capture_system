@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { useClearanceSocket } from "@/components/clearance/useClearanceSocket";
 import type { ClearanceSnapshot } from "@/components/clearance/clearanceProtocol";
+import RealtimeAmap from "@/components/map/RealtimeAmap";
 import PointCloudViewer from "@/components/point-cloud/PointCloudViewer";
 import type { PointCloudViewMode } from "@/components/point-cloud/PointCloudViewer";
 import { useRtkSocket } from "@/components/rtk/useRtkSocket";
@@ -348,31 +349,39 @@ function Dashboard() {
 
       <section className="dashboard-layout">
         <div className="dashboard-main">
-          <article className="panel cloud-panel dashboard-cloud-panel">
-            <div className="cloud-toolbar">
-              <div>
-                <h2>点云实时预览</h2>
+          <section className="dashboard-visual-grid" aria-label="点云与实时地图">
+            <article className="panel cloud-panel dashboard-cloud-panel">
+              <div className="cloud-toolbar">
+                <div>
+                  <h2>点云实时预览</h2>
+                </div>
+                <div className="segmented segmented--small" aria-label="点云视角">
+                  {modes.map((mode) => (
+                    <button
+                      type="button"
+                      key={mode.id}
+                      className={viewMode === mode.id ? "active" : ""}
+                      disabled={mode.disabled}
+                      title={mode.disabled ? "等待真实断面接口接入" : undefined}
+                      onClick={() => setViewMode(mode.id)}
+                    >
+                      {mode.label}
+                    </button>
+                  ))}
+                </div>
+                <span className="panel-tag panel-tag--muted">预览链路</span>
               </div>
-              <div className="segmented segmented--small" aria-label="点云视角">
-                {modes.map((mode) => (
-                  <button
-                    type="button"
-                    key={mode.id}
-                    className={viewMode === mode.id ? "active" : ""}
-                    disabled={mode.disabled}
-                    title={mode.disabled ? "等待真实断面接口接入" : undefined}
-                    onClick={() => setViewMode(mode.id)}
-                  >
-                    {mode.label}
-                  </button>
-                ))}
-              </div>
-              <span className="panel-tag panel-tag--muted">预览链路</span>
-            </div>
-            <PointCloudViewer viewMode={viewMode as PointCloudViewMode} />
-          </article>
+              <PointCloudViewer viewMode={viewMode as PointCloudViewMode} />
+            </article>
 
-          <article className="panel">
+            <RealtimeAmap
+              snapshot={rtkSnapshot}
+              hasFix={hasFix && rmcCharacter !== "V"}
+              connectionDetail={rtk.detail}
+            />
+          </section>
+
+          <article className="panel dashboard-clearance-panel">
             <PanelHead
               title="实时净空高度曲线"
               description="最近120帧有效高度与无效帧断点"
