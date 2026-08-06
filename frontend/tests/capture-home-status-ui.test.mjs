@@ -7,6 +7,7 @@ const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8
 const socket = await readFile(new URL("../components/system-status/useSystemStatusSocket.ts", import.meta.url), "utf8");
 
 const taskCard = page.match(/<article className="panel task-operation-panel">([\s\S]*?)<\/article>\n        <\/aside>/)?.[1] ?? "";
+const rtkCard = page.match(/<article className="panel rtk-control-panel">([\s\S]*?)<\/article>\n\n          <article className="panel task-operation-panel">/)?.[1] ?? "";
 const taskDialog = page.match(/function TaskCreateDialog\([\s\S]*?\nconst navigation:/)?.[0] ?? "";
 
 test("system overview uses the revised labels and removes diagnostic helper copy", () => {
@@ -16,52 +17,49 @@ test("system overview uses the revised labels and removes diagnostic helper copy
   assert.doesNotMatch(page, /<p>\{systemStatus\.detail\}<\/p>/);
 });
 
-test("system overview contains current clearance and two reserved metric cards", () => {
+test("system overview contains clearance, current RTK coordinate and one reserved metric", () => {
   assert.match(page, /health-kpi-grid/);
   assert.match(page, />净空高度</);
   assert.match(page, /\{currentHeightText\}<small>m<\/small>/);
-  assert.match(page, />预留指标一</);
+  assert.match(page, />当前坐标</);
+  assert.match(page, /\{longitudeText\}/);
+  assert.match(page, /\{latitudeText\}/);
   assert.match(page, />预留指标二</);
+  assert.doesNotMatch(page, />预留指标一</);
   assert.match(css, /health-kpi-grid[\s\S]*grid-template-columns:\s*repeat\(3/);
+  assert.match(css, /health-kpi-card--coordinate/);
 });
 
-test("capture sidebar is split into RTK and task control cards", () => {
+test("current coordinate requires a valid streaming RTK fix", () => {
+  assert.match(page, /rtk\.connection === "connected"/);
+  assert.match(page, /rtk\.streamState === "streaming"/);
+  assert.match(page, /rmcCharacter !== "V"/);
+  assert.match(page, /latitudeValue\.toFixed\(7\)/);
+  assert.match(page, /longitudeValue\.toFixed\(7\)/);
+});
+
+test("capture sidebar is split into compact RTK and expanded task control cards", () => {
   assert.match(page, /dashboard-side-stack/);
   assert.match(page, /className="panel rtk-control-panel"/);
-  assert.match(page, /title="RTK 定位"/);
   assert.match(page, /className="panel task-operation-panel"/);
-  assert.match(page, /title="任务控制"/);
-  assert.doesNotMatch(page, /title="测量与任务控制"/);
-  assert.match(css, /dashboard-side-stack[\s\S]*grid-template-rows:/);
+  assert.match(css, /dashboard-side-stack[\s\S]*grid-template-rows:\s*auto minmax\(0, 1fr\)/);
+  assert.match(css, /rtk-control-panel \{ flex:\s*0 0 auto/);
+});
+
+test("RTK card keeps only three equal quality metrics", () => {
+  assert.match(rtkCard, /className="rtk-metric-grid"/);
+  assert.match(rtkCard, />卫星数</);
+  assert.match(rtkCard, />HDOP \/ PDOP</);
+  assert.match(rtkCard, />高度</);
+  assert.doesNotMatch(rtkCard, /入口坐标|出口坐标|rtk-coordinate-stack/);
+  assert.match(css, /rtk-metric-grid[\s\S]*grid-template-columns:\s*repeat\(3/);
+  assert.doesNotMatch(css, /\.rtk-coordinate-stack/);
 });
 
 test("device cards remain in a two-by-two grid with explicit connection lamps", () => {
   assert.match(css, /health-device-grid[\s\S]*grid-template-columns:\s*repeat\(2/);
   assert.match(css, /health-device-grid[\s\S]*grid-template-rows:\s*repeat\(2/);
   assert.match(page, /health-device-card__lamp/);
-});
-
-test("top metric cards use enlarged top-left labels and centered values", () => {
-  assert.match(css, /health-kpi-card > span[^{]*\{[^}]*font-size:\s*clamp\(12px/);
-  assert.match(css, /health-kpi-card > strong[^{]*\{[^}]*justify-self:\s*center/);
-  assert.match(css, /health-kpi-card > strong[^{]*\{[^}]*clamp\(29px/);
-});
-
-test("top device cards use enlarged identity icons and labels", () => {
-  assert.match(css, /health-device-card__icon[\s\S]*width:\s*34px/);
-  assert.match(css, /health-device-card__identity b[^{]*\{[^}]*font-size:\s*11px/);
-  assert.match(css, /health-device-card__identity small[^{]*\{[^}]*font-size:\s*9px/);
-});
-
-test("RTK card uses three equal metrics followed by entrance and exit rows", () => {
-  assert.match(page, /className="rtk-metric-grid"/);
-  assert.match(page, />卫星数</);
-  assert.match(page, />HDOP \/ PDOP</);
-  assert.match(page, />高度</);
-  assert.match(page, /className="rtk-coordinate-stack"/);
-  assert.match(page, />入口坐标</);
-  assert.match(page, />出口坐标</);
-  assert.match(css, /rtk-metric-grid[\s\S]*grid-template-columns:\s*repeat\(3/);
 });
 
 test("system status socket clears stale snapshots", () => {
@@ -73,64 +71,80 @@ test("system status socket clears stale snapshots", () => {
 test("task card exposes only one create-task entry", () => {
   assert.match(taskCard, />创建任务<\/button>/);
   assert.doesNotMatch(taskCard, />新建任务<\/button>|>批量创建<\/button>/);
-  assert.match(page, /setTaskDialogOpen\(true\)/);
 });
 
-test("height threshold is a shared task-card setting and not a per-task field", () => {
-  assert.match(taskCard, /task-threshold-card/);
+test("height threshold, mount height and lane are shared task-card settings", () => {
+  assert.match(taskCard, /task-parameter-strip/);
   assert.match(taskCard, />高度阈值</);
-  assert.match(taskCard, />所有任务共用</);
   assert.match(taskCard, /value=\{heightThreshold\}/);
-  assert.doesNotMatch(taskDialog, />高度阈值 \/ m</);
-  assert.doesNotMatch(page, /heightThreshold:\s*Number\(draft\.heightThreshold\)/);
+  assert.match(taskCard, />雷达安装高度</);
+  assert.match(taskCard, /value=\{mountHeight\}/);
+  assert.match(taskCard, />作业车道</);
+  assert.match(taskCard, /value=\{operationLane\}/);
+  assert.match(taskCard, /option value="左车道"/);
+  assert.match(taskCard, /option value="右车道"/);
+  assert.doesNotMatch(taskDialog, />高度阈值/);
+  assert.doesNotMatch(taskDialog, />雷达安装高度/);
+  assert.doesNotMatch(taskDialog, />作业车道/);
 });
 
-test("task creation supports one or many rows with the required task fields", () => {
+test("task creation supports one or many rows with identity fields only", () => {
   assert.match(taskDialog, />创建检测任务</);
   assert.match(taskDialog, />任务编号</);
   assert.match(taskDialog, />隧道名称</);
-  assert.match(taskDialog, />雷达安装高度 \/ m</);
-  assert.match(taskDialog, />作业车道</);
-  assert.match(taskDialog, /option value="左车道"/);
-  assert.match(taskDialog, /option value="右车道"/);
   assert.match(taskDialog, />＋ 添加任务</);
   assert.match(taskDialog, />复制<\/button>/);
   assert.match(taskDialog, />删除<\/button>/);
+  assert.doesNotMatch(taskDialog, /row\.mountHeight|row\.lane/);
 });
 
-test("task card follows threshold, selection, pending tasks and controls order", () => {
-  const thresholdIndex = taskCard.indexOf("task-threshold-card");
-  const selectionIndex = taskCard.indexOf("task-selection-card");
-  const queueIndex = taskCard.indexOf("task-queue-preview");
+test("task card follows parameters, current task, pending tasks and controls order", () => {
+  const settingsIndex = taskCard.indexOf("task-parameter-strip");
+  const currentIndex = taskCard.indexOf("task-current-card");
+  const queueIndex = taskCard.indexOf("task-queue-section");
   const controlsIndex = taskCard.indexOf("task-operation-actions");
 
-  assert.ok(thresholdIndex >= 0);
-  assert.ok(selectionIndex > thresholdIndex);
-  assert.ok(queueIndex > selectionIndex);
+  assert.ok(settingsIndex >= 0);
+  assert.ok(currentIndex > settingsIndex);
+  assert.ok(queueIndex > currentIndex);
   assert.ok(controlsIndex > queueIndex);
-  assert.match(taskCard, />选择任务</);
-  assert.match(taskCard, />待测任务</);
-  assert.match(taskCard, />开始采集</);
-  assert.match(taskCard, /暂停/);
-  assert.match(taskCard, />停止</);
+  assert.doesNotMatch(taskCard, /task-selection-card|选择检测任务/);
 });
 
-test("task card omits progress, measurement and readiness sections", () => {
+test("only the pending task list scrolls inside the task card", () => {
+  assert.match(taskCard, /task-operation-body/);
+  assert.match(taskCard, /task-queue-list/);
+  assert.match(css, /task-queue-list[\s\S]*overflow-y:\s*auto/);
+  assert.doesNotMatch(css, /task-operation-body[\s\S]{0,180}overflow-y:\s*auto/);
+});
+
+test("current task provides a dedicated switch dialog", () => {
+  assert.match(taskCard, /切换任务/);
+  assert.match(page, /function TaskSwitchDialog/);
+  assert.match(page, /task-switch-list/);
+  assert.match(page, /setTaskSwitchOpen\(true\)/);
+});
+
+test("task actions use a dominant start control and outlined secondary controls", () => {
+  assert.match(taskCard, /task-start-button/);
+  assert.match(taskCard, /task-pause-button/);
+  assert.match(taskCard, /task-stop-button/);
+  assert.match(taskCard, /task-running-state/);
+  assert.match(css, /task-operation-actions[\s\S]*grid-template-columns:\s*1\.55fr 1fr 1fr/);
+});
+
+test("task start validates the shared numeric settings", () => {
+  assert.match(page, /const mountHeightValid/);
+  assert.match(page, /!heightThresholdValid \|\|[\s\S]*!mountHeightValid/);
+  assert.match(page, /请输入有效的雷达安装高度/);
+});
+
+test("task card omits progress and measurement sections", () => {
   assert.doesNotMatch(taskCard, /阶段进度|任务进度|采集时长|有效帧数|当前净空|最低净空|采集条件/);
-  assert.doesNotMatch(taskCard, /task-progress-line|task-readiness/);
 });
 
-test("dedicated task-management interface is removed", () => {
+test("dedicated task-management interface remains removed", () => {
   assert.doesNotMatch(page, /id: "tasks"|function Tasks\(|任务管理|历史任务管理/);
   assert.match(page, /\{ id: "playback", label: "数据回放", index: "02" \}/);
   assert.match(page, /\{ id: "report", label: "报告导出", index: "03" \}/);
-  assert.doesNotMatch(css, /\.task-overview|\.task-page-grid|\.task-form|\.queue-rule/);
-});
-
-test("task dialog and compact queue retain responsive styling", () => {
-  assert.match(css, /task-dialog-mask/);
-  assert.match(css, /task-dialog-panel--wide/);
-  assert.match(css, /task-queue-preview__list/);
-  assert.match(css, /task-threshold-card/);
-  assert.match(css, /task-selection-card/);
 });
