@@ -17,7 +17,9 @@ type TaskBrowserProps = {
 const statusTone = (status: CollectionTask["status"]) => {
   if (status === "采集中") return "ok";
   if (status === "已暂停") return "warn";
-  if (status === "已停止") return "danger";
+  if (status === "已停止") return "ok";
+  if (status === "异常中断") return "warn";
+  if (status === "失败") return "danger";
   return "idle";
 };
 
@@ -90,14 +92,14 @@ export default function TaskBrowser({
             </div>
             <div className="task-browser__state">
               <span className={`workflow-status workflow-status--${statusTone(task.status)}`}>{task.status}</span>
-              <small>{task.status === "已停止" ? "记录待接入" : "数据不可回放"}</small>
+              <small>{task.hasMeasurements ? "已有测量记录" : "尚无测量记录"}</small>
             </div>
           </button>
         ))}
       </div>
 
       <footer className="task-browser__footer">
-        当前列表来自本次浏览器会话。历史任务、记录文件和任务查询接口尚未接入。
+        当前列表来自设备端任务数据库。存在测量文件的任务可在回放页读取完整高度曲线。
       </footer>
     </aside>
   );

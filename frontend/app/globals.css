@@ -1639,6 +1639,7 @@ th { color: #7f8b9e; background: #fafbfd; font-weight: 600; white-space: nowrap;
   flex: 1 1 auto;
   min-height: 560px;
   overflow: hidden;
+  overscroll-behavior: contain;
   background: #fbfcfe;
   outline: none;
   touch-action: none;
@@ -2059,6 +2060,9 @@ table {
 
 
 @media (max-width: 1500px) and (min-width: 761px) {
+  .workflow-context-bar { grid-template-columns: minmax(260px, 1fr) auto; gap: 15px; }
+  .workflow-context-bar__states { grid-row: 2; grid-column: 1 / -1; border-top: 1px solid var(--line-soft); }
+  .workflow-context-bar__states > div:first-child { border-left: 0; }
   .playback-layout { grid-template-columns: 300px minmax(0, 1fr); }
   .playback-layout > .task-browser { min-height: 620px; }
   .playback-inspector { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
@@ -2145,6 +2149,8 @@ table {
   font-size: 11px;
 }
 .report-export-blocker strong { color: #9b6812; font-size: 12px; }
+.report-export-blocker.is-ready { color: #35664f; border-color: #b9dfcb; background: #f2fbf6; }
+.report-export-blocker.is-ready strong { color: var(--green); }
 .report-export-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2260,6 +2266,9 @@ table {
 .report-export-card__footer > div { display: grid; gap: 4px; min-width: 0; }
 .report-export-card__footer span { color: var(--muted); font-size: 10px; }
 .report-export-card__footer strong { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.report-export-card__footer small { overflow-wrap: anywhere; font-size: 10px; line-height: 1.4; }
+.report-export-card__footer small.is-success { color: var(--green); }
+.report-export-card__footer small.is-error { color: var(--red); }
 .report-export-card__footer .button { min-width: 124px; min-height: 42px; font-size: 13px; }
 
 @media (max-width: 1700px) {
@@ -2323,4 +2332,87 @@ table {
   .interactive-clearance-chart-toolbar__actions button { width: 100%; }
   .interactive-clearance-chart { min-height: 430px; }
   .interactive-clearance-chart__x-axis { font-size: 9px; }
+}
+
+/* 设备端任务数据库连接状态，不占用采集首页固定布局空间。 */
+.task-data-notice {
+  position: fixed;
+  z-index: 180;
+  top: 16px;
+  right: 24px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  max-width: min(520px, calc(100vw - 32px));
+  padding: 11px 13px;
+  border: 1px solid #d9e2ed;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, .97);
+  box-shadow: 0 10px 28px rgba(30, 53, 88, .14);
+}
+.task-data-notice > div { display: grid; gap: 3px; }
+.task-data-notice strong { font-size: 12px; }
+.task-data-notice span { color: var(--muted); font-size: 11px; }
+.task-data-notice--error { border-color: #efc5cb; background: #fff8f9; }
+.task-data-notice--error strong { color: var(--red); }
+.task-data-notice button {
+  min-height: 32px;
+  padding: 6px 10px;
+  color: #9f2435;
+  border: 1px solid #e6b5bd;
+  border-radius: 8px;
+  background: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.task-operation-head-actions button:disabled,
+.task-dialog-add-row:disabled,
+.task-dialog-head > button:disabled,
+.task-dialog-actions .button:disabled {
+  cursor: not-allowed;
+  opacity: .5;
+}
+.task-dialog-panel--wide .task-dialog-row { grid-template-columns: 52px minmax(160px, .8fr) minmax(260px, 1.3fr) auto; }
+.task-dialog-panel--wide .task-dialog-row__index { width: 52px; }
+
+/* Task history and deletion */
+.button--danger-outline {
+  color: var(--red);
+  border-color: #e6b9bf;
+  background: #fff8f8;
+}
+.button--danger-outline:hover:not(:disabled) {
+  color: #b8293b;
+  border-color: #d98994;
+  background: #fff1f2;
+}
+.button--danger-outline:disabled {
+  color: #aaa;
+  border-color: var(--line);
+  background: #f5f6f8;
+}
+.delete-task-dialog { max-width: 560px; }
+.delete-task-dialog__summary {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  background: #fafbfd;
+}
+.delete-task-dialog__summary > div {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: 16px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.delete-task-dialog__summary > div:last-child { border-bottom: 0; }
+.delete-task-dialog__summary dt { color: var(--muted); font-size: 12px; }
+.delete-task-dialog__summary dd { margin: 0; color: #3e4d62; font-size: 12px; font-weight: 700; }
+
+@media (max-width: 760px) {
+  .workflow-context-bar__actions { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }

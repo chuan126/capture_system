@@ -17,6 +17,21 @@ if [[ -f "${network_config}" ]]; then
   set +a
 fi
 
+data_root="${CAPTURE_DATA_ROOT:-${HOME}/.local/share/capture_system}"
+if ! mkdir -p "${data_root}/tasks" "${data_root}/reports"; then
+  echo "Cannot create persistent task data directory: ${data_root}" >&2
+  exit 1
+fi
+if [[ ! -w "${data_root}" ]]; then
+  echo "Persistent task data directory is not writable: ${data_root}" >&2
+  exit 1
+fi
+export CAPTURE_DATA_ROOT="${data_root}"
+
+if [[ -n "${CAPTURE_PDF_FONT_PATH:-}" && ! -r "${CAPTURE_PDF_FONT_PATH}" ]]; then
+  echo "Warning: PDF font is not readable: ${CAPTURE_PDF_FONT_PATH}. TXT export remains available; PDF export will return an explicit error." >&2
+fi
+
 # ROS生成的环境脚本会读取未定义的可选变量，加载期间临时关闭nounset。
 set +u
 source /opt/ros/humble/setup.bash

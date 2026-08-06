@@ -13,9 +13,10 @@ const { normalizeChartView, panChartView, zoomChartView } = await import(
   "../components/playback/clearanceChartViewport.ts"
 );
 
-test("capture, playback and report share one in-memory task selection", () => {
+test("capture, playback and report share persisted tasks and one browser selection", () => {
   assert.match(page, /const \[tasks, setTasks\] = useState<CollectionTask\[]>\(\[\]\)/);
   assert.match(page, /const \[selectedTaskId, setSelectedTaskId\] = useState<string \| null>\(null\)/);
+  assert.match(page, /const persistedTasks = await listTasks\(\)/);
   assert.match(page, /<Dashboard[\s\S]*tasks=\{tasks\}[\s\S]*setTasks=\{setTasks\}/);
   assert.match(page, /<PlaybackWorkspace[\s\S]*selectedTaskId=\{selectedTaskId\}/);
   assert.match(page, /<ReportWorkspace[\s\S]*selectedTaskId=\{selectedTaskId\}/);
@@ -42,15 +43,18 @@ test("playback keeps one complete task curve and removes playback controls", () 
   assert.match(playback, /50 Hz 测量序列/);
   assert.match(playback, /统计与数据质量/);
   assert.match(playback, /隧道端点/);
-  assert.match(playback, /页面不会使用实时流或模拟曲线替代历史记录/);
+  assert.match(playback, /页面不会使用实时流或自动生成曲线替代/);
   assert.match(playback, /<InteractiveClearanceChart/);
   assert.doesNotMatch(playback, /playback-control-panel|playback-scrubber|曲线回放控制|回放速度|跳转最低值|下一个异常/);
-  assert.doesNotMatch(playback, /点云回放|地图轨迹|回放主视图|PlaybackView|useState/);
+  assert.doesNotMatch(playback, /点云回放|地图轨迹|回放主视图|PlaybackView/);
   assert.doesNotMatch(playback, /minimum_clearance|clearance_points/);
 });
 
 test("interactive clearance chart supports pan, zoom, reset and hover without mock data", () => {
-  assert.match(interactiveChart, /onWheel=\{handleWheel\}/);
+  assert.match(interactiveChart, /addEventListener\("wheel", handleWheel, \{ passive: false \}\)/);
+  assert.match(interactiveChart, /event\.preventDefault\(\)/);
+  assert.match(interactiveChart, /event\.stopPropagation\(\)/);
+  assert.doesNotMatch(interactiveChart, /onWheel=/);
   assert.match(interactiveChart, /onPointerDown=\{handlePointerDown\}/);
   assert.match(interactiveChart, /setPointerCapture/);
   assert.match(interactiveChart, /onDoubleClick=\{resetView\}/);
@@ -61,9 +65,29 @@ test("interactive clearance chart supports pan, zoom, reset and hover without mo
   assert.match(interactiveChart, /heightM:\s*number \| null/);
   assert.match(interactiveChart, /!sample\.valid \|\| sample\.heightM === null/);
   assert.doesNotMatch(interactiveChart, /mock|demo|Math\.random|模拟曲线/);
-  assert.match(playback, /const EMPTY_CLEARANCE_SAMPLES: ClearanceSample\[] = \[]/);
+  assert.match(playback, /loadMeasurementHistory\(selectedTask\.taskId\)/);
+  assert.match(playback, /samples=\{history\?\.samples \?\? \[]\}/);
 });
 
+
+
+
+test("playback owns the selected-task delete action and confirms logical deletion", () => {
+  assert.match(playback, />删除任务<\/button>/);
+  assert.match(playback, /DeleteTaskDialog/);
+  assert.match(playback, /测量文件暂时保留，不执行物理清理/);
+  assert.match(playback, /onDeleteTask\(selectedTask\.taskId\)/);
+  assert.match(page, /await deleteTask\(taskId\)/);
+  assert.match(css, /\.button--danger-outline/);
+});
+
+test("playback distinguishes loading, ready, empty and failed history states", () => {
+  assert.match(playback, /type HistoryState = "idle" \| "loading" \| "empty" \| "ready" \| "error"/);
+  assert.match(playback, /界面测试数据/);
+  assert.match(playback, /实际平均频率/);
+  assert.match(playback, /有效采样比例/);
+  assert.match(playback, /异常中断或未完整结束/);
+});
 
 test("clearance chart viewport math keeps zoom and pan inside the full task range", () => {
   const assertView = (actual, expected) => {
@@ -94,22 +118,26 @@ test("report removes task-name fields and keeps only TXT and PDF exports", () =>
   assert.match(report, /最低高度/);
   assert.match(report, /隧道入口 RTK/);
   assert.match(report, /隧道出口 RTK/);
-  assert.match(report, /每个有效采样时刻输出一行/);
-  assert.match(report, /tasks\.map/);
+  assert.match(report, /每个采样周期输出一行/);
+  assert.match(report, /exportableTasks\.map/);
   assert.doesNotMatch(report, /任务名称|taskName|按任务名称归并/);
   assert.doesNotMatch(report, /任务与数据检查|报告内容配置|报告预览与导出|导出记录/);
   assert.doesNotMatch(report, /report-export-test|browser-download-test|模拟净空/);
 });
 
-test("report keeps exports disabled until real recorded data is available", () => {
-  assert.match(report, /50 Hz 测量记录、最低高度和隧道端点 RTK 接口尚未接入/);
-  assert.match(report, /<button type="button" className="button button--primary" disabled>导出 TXT<\/button>/);
-  assert.match(report, /<button type="button" className="button button--primary" disabled>导出 PDF<\/button>/);
-  assert.match(report, /无有效 RTK 坐标时保持空值并注明原因/);
+test("report enables formal exports only for eligible recorded data", () => {
+  assert.match(report, /loadReportPreview\(\)/);
+  assert.match(report, /generateTaskTxt\(selectedTaskId\)/);
+  assert.match(report, /generateSummaryPdf/);
+  assert.match(report, /downloadGeneratedFile/);
+  assert.match(report, /disabled=\{!selectedTaskReady \|\| txtState === "generating"\}/);
+  assert.match(report, /disabled=\{!pdfReady \|\| pdfState === "generating"\}/);
+  assert.match(report, /界面测试数据、异常中断记录和无有效高度的任务不会进入正式 PDF/);
+  assert.match(report, /无有效 RTK 端点时字段标记为未记录/);
 });
 
 test("task browser searches by automatic number and tunnel metadata", () => {
-  assert.match(taskBrowser, /当前列表来自本次浏览器会话/);
+  assert.match(taskBrowser, /当前列表来自设备端任务数据库/);
   assert.match(taskBrowser, /任务编号、隧道编号或名称/);
   assert.match(taskBrowser, /formatTaskSequence\(task\.sequence\)/);
   assert.match(taskBrowser, /task\.tunnelCode\.toLowerCase/);

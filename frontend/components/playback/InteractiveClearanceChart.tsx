@@ -1,12 +1,12 @@
 "use client";
 
 import {
+  useEffect,
   useMemo,
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
-  type WheelEvent as ReactWheelEvent,
 } from "react";
 
 import {
@@ -101,12 +101,21 @@ export default function InteractiveClearanceChart({
     );
   }, [hasData, orderedSamples, windowEnd, windowStart]);
 
-  const visibleHeights = visibleSamples
-    .filter((sample) => sample.valid && sample.heightM !== null && Number.isFinite(sample.heightM))
-    .map((sample) => sample.heightM as number);
+  let rawYMin = Number.POSITIVE_INFINITY;
+  let rawYMax = Number.NEGATIVE_INFINITY;
+  let visibleValidCount = 0;
 
-  const rawYMin = visibleHeights.length > 0 ? Math.min(...visibleHeights) : 0;
-  const rawYMax = visibleHeights.length > 0 ? Math.max(...visibleHeights) : 1;
+  visibleSamples.forEach((sample) => {
+    if (!sample.valid || sample.heightM === null || !Number.isFinite(sample.heightM)) return;
+    rawYMin = Math.min(rawYMin, sample.heightM);
+    rawYMax = Math.max(rawYMax, sample.heightM);
+    visibleValidCount += 1;
+  });
+
+  if (visibleValidCount === 0) {
+    rawYMin = 0;
+    rawYMax = 1;
+  }
   const ySpan = Math.max(0.1, rawYMax - rawYMin);
   const yMin = rawYMin - ySpan * 0.12;
   const yMax = rawYMax + ySpan * 0.12;
@@ -140,12 +149,12 @@ export default function InteractiveClearanceChart({
 
   const zoomAt = (factor: number, anchor = 0.5) => {
     if (!hasData) return;
-    setView(zoomChartView(view, factor, anchor));
+    setView((currentView) => zoomChartView(currentView, factor, anchor));
   };
 
   const panBy = (fraction: number) => {
     if (!hasData) return;
-    setView(panChartView(view, fraction));
+    setView((currentView) => panChartView(currentView, fraction));
   };
 
   const resetView = () => {
@@ -197,11 +206,29 @@ export default function InteractiveClearanceChart({
     });
   };
 
-  const handleWheel = (event: ReactWheelEvent<HTMLDivElement>) => {
-    if (!hasData) return;
-    event.preventDefault();
-    zoomAt(event.deltaY > 0 ? 1.18 : 0.84, pointerToPlotRatio(event.clientX));
-  };
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return undefined;
+
+    const handleWheel = (event: WheelEvent) => {
+      if (!hasData) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const rect = chart.getBoundingClientRect();
+      const plotWidth = Math.max(1, rect.width - PLOT.left - PLOT.right);
+      const anchor = clampChartValue(
+        (event.clientX - rect.left - PLOT.left) / plotWidth,
+        0,
+        1,
+      );
+      setView((currentView) =>
+        zoomChartView(currentView, event.deltaY > 0 ? 1.18 : 0.84, anchor),
+      );
+    };
+
+    chart.addEventListener("wheel", handleWheel, { passive: false });
+    return () => chart.removeEventListener("wheel", handleWheel);
+  }, [hasData]);
 
   const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (!hasData || event.button !== 0) return;
@@ -252,7 +279,7 @@ export default function InteractiveClearanceChart({
       <div className="interactive-clearance-chart-toolbar" aria-label="曲线视图工具">
         <div>
           <strong>完整任务曲线</strong>
-          <span>{hasData ? `当前显示 ${viewPercent}% 时间范围` : "历史高度序列未接入"}</span>
+          <span>{hasData ? `当前显示 ${viewPercent}% 时间范围` : "当前没有可显示记录"}</span>
         </div>
         <div className="interactive-clearance-chart-toolbar__guide">
           <span>拖拽平移</span>
@@ -272,7 +299,6 @@ export default function InteractiveClearanceChart({
         role="application"
         tabIndex={0}
         aria-label="可拖拽和缩放的任务净空高度曲线"
-        onWheel={handleWheel}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={finishPointer}

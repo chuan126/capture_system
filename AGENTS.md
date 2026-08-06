@@ -18,10 +18,10 @@
 
 ## 1.1 当前实现边界
 
-截至 2026-08-06，`task_manager` 和 `data_recorder` 仍未实现。采集首页中的任务
-创建、切换、开始、暂停和停止只存在于浏览器内存，不得解释为设备端任务控制。
-网页点云预览使用 `/capture/lidar/points_compensated_enu`，不使用厂商 SLAM 点云。
-数据回放和报告导出仍以界面占位和测试下载为主。
+截至 2026-08-06，`task_manager` 和 `data_recorder` 仍未实现。任务创建和任务列表已经
+通过 FastAPI 写入设备端 SQLite，稳定任务 ID 和显示序号由后端分配。任务切换、开始、
+暂停和停止仍只修改浏览器内存，不得解释为设备端任务控制。网页点云预览使用
+`/capture/lidar/points_compensated_enu`，不使用厂商 SLAM 点云。数据回放可以通过 FastAPI 只读加载每任务测量 SQLite 文件，并提供任务逻辑删除。设备端测量写入和正式文件生成接口尚未实现。
 
 ## 2. 目录与模块边界
 

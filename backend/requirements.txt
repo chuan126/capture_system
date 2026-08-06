@@ -1,3 +1,4 @@
 fastapi==0.141.0
 numpy==1.26.4
+reportlab==4.4.9
 uvicorn[standard]==0.52.0

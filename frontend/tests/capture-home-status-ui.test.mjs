@@ -99,9 +99,10 @@ test("task creation uses automatic sequence numbers and only asks for tunnel fie
   assert.match(taskDialog, /row\.tunnelCode/);
   assert.match(taskDialog, /row\.tunnelName/);
   assert.doesNotMatch(taskDialog, />任务名称|row\.taskName/);
-  assert.match(page, /createTaskId\(sequence, draft\.tunnelCode\)/);
-  assert.match(page, /sequence,\s*\n\s*tunnelCode:/);
+  assert.match(page, /createTaskBatch\(drafts, idempotencyKey\)/);
   assert.match(page, /formatTaskSequence\(task\.sequence\)/);
+  assert.doesNotMatch(page, /createTaskId|nextTaskSequence/);
+  assert.doesNotMatch(taskDialog, /startingSequence/);
   assert.doesNotMatch(taskDialog, /row\.mountHeight|row\.lane/);
 });
 

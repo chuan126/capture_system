@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import os
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncIterator, Callable
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from backend.ros_bridge.clearance_bridge import ClearanceBridge
@@ -19,11 +19,15 @@ from backend.websocket.cloud_preview_hub import CloudPreviewHub
 from backend.websocket.rtk_hub import RtkHub
 from backend.websocket.system_status_hub import SystemStatusHub
 from backend.websocket.routes import router as websocket_router
+from backend.measurements.repository import MeasurementRepository
+from backend.exports.routes import router as export_router
+from backend.exports.service import ReportExportService
+from backend.tasks.repository import TaskRepository, TaskStorageError
+from backend.tasks.routes import router as task_router
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_STATIC_DIR = PROJECT_ROOT / "frontend" / "out"
-DEFAULT_TASK_DATA_ROOT = PROJECT_ROOT / "data" / "tasks"
-REPORT_EXPORT_TEST_TASK_ID = "browser-download-test"
+LOGGER = logging.getLogger(__name__)
 
 
 def resolve_static_dir() -> Path:
@@ -33,10 +37,20 @@ def resolve_static_dir() -> Path:
     return DEFAULT_STATIC_DIR
 
 
+def resolve_data_root() -> Path:
+    configured_path = os.getenv("CAPTURE_DATA_ROOT")
+    if configured_path:
+        return Path(configured_path).expanduser().resolve()
+    return (Path.home() / ".local" / "share" / "capture_system").resolve()
+
+
 def create_app(
     static_dir: Path | None = None,
     *,
     task_data_root: Path | None = None,
+    data_root: Path | None = None,
+    task_database_path: Path | None = None,
+    pdf_font_path: Path | None = None,
     start_ros_bridge: bool = True,
     bridge_factory: Callable[..., CloudPreviewBridge] = CloudPreviewBridge,
     rtk_bridge_factory: Callable[..., RtkBridge] = RtkBridge,
@@ -44,9 +58,28 @@ def create_app(
     clearance_bridge_factory: Callable[..., ClearanceBridge] = ClearanceBridge,
 ) -> FastAPI:
     site_directory = (static_dir or resolve_static_dir()).resolve()
-    tasks_directory = (task_data_root or DEFAULT_TASK_DATA_ROOT).resolve()
-    report_test_file = (
-        tasks_directory / REPORT_EXPORT_TEST_TASK_ID / "exports" / "test.txt"
+    if data_root is not None:
+        runtime_data_root = data_root.resolve()
+    elif task_data_root is not None:
+        # 保留测试和旧调用方式，同时使数据库位于任务目录的上一级。
+        runtime_data_root = task_data_root.resolve().parent
+    else:
+        runtime_data_root = resolve_data_root()
+    tasks_directory = (task_data_root or runtime_data_root / "tasks").resolve()
+    database_path = (task_database_path or runtime_data_root / "capture.db").resolve()
+    task_repository = TaskRepository(database_path, tasks_directory)
+    measurement_repository = MeasurementRepository(tasks_directory)
+    configured_pdf_font = os.getenv("CAPTURE_PDF_FONT_PATH")
+    resolved_pdf_font_path = (
+        pdf_font_path.resolve()
+        if pdf_font_path is not None
+        else Path(configured_pdf_font).expanduser().resolve() if configured_pdf_font else None
+    )
+    report_export_service = ReportExportService(
+        runtime_data_root,
+        task_repository,
+        measurement_repository,
+        pdf_font_path=resolved_pdf_font_path,
     )
     hub = CloudPreviewHub()
     rtk_hub = RtkHub()
@@ -61,6 +94,12 @@ def create_app(
                 "Frontend static export is missing. "
                 f"Expected {index_file}; run scripts/build/build_web.sh first."
             )
+
+        try:
+            task_repository.initialize()
+        except TaskStorageError as error:
+            # 实时监视仍可启动，但任务接口会明确返回503，不能退化为浏览器临时任务。
+            LOGGER.error("%s", error)
 
         bridge: CloudPreviewBridge | None = None
         rtk_bridge: RtkBridge | None = None
@@ -115,55 +154,17 @@ def create_app(
     application.state.rtk_hub = rtk_hub
     application.state.system_status_hub = system_status_hub
     application.state.clearance_hub = clearance_hub
+    application.state.task_repository = task_repository
+    application.state.measurement_repository = measurement_repository
+    application.state.report_export_service = report_export_service
 
     @application.get("/api/health", tags=["system"])
     async def health() -> dict[str, str]:
         return {"status": "ok"}
 
-    @application.get("/api/v1/report-export-test", tags=["report-test"])
-    async def report_export_test() -> dict[str, object]:
-        """返回浏览器下载链路的固定测试数据，不表达真实测量结果。"""
-        if not report_test_file.is_file():
-            raise HTTPException(status_code=404, detail="测试TXT文件不存在")
-
-        return {
-            "task_id": REPORT_EXPORT_TEST_TASK_ID,
-            "task_name": "浏览器下载测试任务",
-            "tunnel_name": "测试隧道",
-            "lane": "测试车道",
-            "inspection_time": "2026-08-03 16:00:00",
-            "distance_m": 100.0,
-            "minimum_clearance_m": 4.82,
-            "valid_points": 8,
-            "quality_status": "模拟数据",
-            "file_name": report_test_file.name,
-            "file_size_bytes": report_test_file.stat().st_size,
-            "download_url": "/api/v1/report-export-test/download",
-            "clearance_points": [
-                {"distance_m": 0.0, "clearance_m": 5.36},
-                {"distance_m": 15.0, "clearance_m": 5.28},
-                {"distance_m": 30.0, "clearance_m": 5.12},
-                {"distance_m": 45.0, "clearance_m": 4.96},
-                {"distance_m": 60.0, "clearance_m": 4.82},
-                {"distance_m": 75.0, "clearance_m": 5.01},
-                {"distance_m": 90.0, "clearance_m": 5.18},
-                {"distance_m": 100.0, "clearance_m": 5.25},
-            ],
-        }
-
-    @application.get("/api/v1/report-export-test/download", tags=["report-test"])
-    async def download_report_export_test() -> FileResponse:
-        """下载固定测试TXT，仅用于验证局域网浏览器下载链路。"""
-        if not report_test_file.is_file():
-            raise HTTPException(status_code=404, detail="测试TXT文件不存在")
-
-        return FileResponse(
-            report_test_file,
-            media_type="text/plain; charset=utf-8",
-            filename=report_test_file.name,
-        )
-
-    # WebSocket路由必须在根路径静态文件挂载之前注册。
+    # API与WebSocket路由必须在根路径静态文件挂载之前注册。
+    application.include_router(task_router)
+    application.include_router(export_router)
     application.include_router(websocket_router)
 
     application.mount(
