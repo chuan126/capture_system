@@ -1,26 +1,33 @@
 # 工程脚本
 
+核对日期：2026-08-06
+
 ```text
-scripts/                                      # 工程构建、部署、运行和数据脚本根目录
-├── README.md                                 # 脚本职责、目录和使用约定
-├── build/                                    # 可重复构建和测试入口目录
-│   ├── build_web.sh                          # 前后端依赖安装与设备静态页面构建入口
-│   └── test_web.sh                           # 前端、设备构建和后端自动化测试入口
-└── operation/                                # 开发运行和健康检查入口目录
-    ├── run_lan_preview.sh                    # 雷达、RTK、净空、预览和局域网页面一键启动脚本
-    └── run_web.sh                            # 仅启动FastAPI网页服务的底层脚本
+scripts/                         # 构建和运行脚本
+├── build/                       # 构建与测试
+│   ├── build_all.sh             # SDK、驱动、ROS 2、后端和前端全量构建
+│   ├── build_web.sh             # 设备静态网页构建
+│   └── test_web.sh              # 前端和后端 Web 自动化测试
+└── operation/                   # 开发运行
+    ├── run_lan_preview.sh       # 一键启动当前完整展示链路
+    └── run_web.sh               # 只启动 FastAPI 和 ROS Web 桥
 ```
 
-脚本使用非交互、失败即退出的方式，并从脚本位置解析项目根目录。正式脚本不得
-删除任务数据、标定或 rosbag；确需清理时必须提供显式目标和人工确认。
-
-开发阶段运行局域网点云页面：
+## 一键运行
 
 ```bash
 cd /home/cat/Project/capture_system
 scripts/operation/run_lan_preview.sh
 ```
 
-脚本以前台方式运行，不安装或启用systemd服务。终端会打印当前设备可访问的
-局域网地址；按 `Ctrl+C` 会统一停止本次启动的雷达、RTK、净空计算、点云预览和
-网页组件。
+脚本启动：
+
+- ODIN 雷达驱动，关闭 SLAM 点云和图像通道；
+- 补偿后局部东北天点云预览；
+- 高频里程计时间适配、逐点运动补偿和单帧净空算法；
+- RTK 驱动；
+- 系统状态监控；
+- FastAPI 网页服务。
+
+按 `Ctrl+C` 统一停止本次启动的进程。脚本不安装 systemd 服务，不启动尚未实现的
+`task_manager` 和 `data_recorder`。

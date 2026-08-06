@@ -1,5 +1,10 @@
 # ROS 2 Humble MCAP 插件
 
+核对日期：2026-08-06
+
+> 当前边界：`data_recorder` 尚未实现。本文只说明插件安装和独立烟雾测试，不表示项目已经自动记录任务数据。
+
+
 本机 ROS 软件源已经提供 ARM64 Humble 插件：
 
 ```text
@@ -46,7 +51,7 @@ ros2 bag record --storage mcap \
 ros2 bag info /tmp/capture_mcap_smoke
 ```
 
-## 当前项目策略
+## 目标记录策略
 
 安装 MCAP 插件不代表自动记录点云。当前无独立 SSD/NVMe，生产配置必须使用：
 
@@ -56,5 +61,4 @@ record_raw_cloud: false
 record_compensated_cloud: false
 ```
 
-MCAP 当前只用于 RTK、IMU、里程计、TF、任务事件、诊断和结果。未来独立数据盘
-就绪并通过持续写入测试后，才启用 `full_raw`。
+正式 `data_recorder` 实现后，`telemetry_only` 计划记录 RTK、IMU、里程计、TF、任务事件、诊断和结果。当前源码没有自动记录节点。未来独立数据盘就绪并通过持续写入测试后，才评估 `full_raw`。

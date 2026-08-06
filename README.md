@@ -1,105 +1,150 @@
 # Capture System
 
-运行于 RK3588 的隧道三维扫描与实时净空高度计算系统。
+软件版本：`0.2.0`
 
-系统接入 ODIN1 Lite 激光雷达和 RTK，在车辆进出隧道时记录 RTK 坐标，
-在隧道内完成点云运动补偿、定位、断面提取和净空计算，并通过设备端
-Web 服务向电脑浏览器提供监视与控制功能。
+文档核对日期：2026-08-06
 
-当前厂商 SDK 2.0.2 将实物 ODIN1 Lite 的模型标识报告为 `ODIN2`，所以厂商
-Topic 中仍会出现 `/manifold/ODIN2/...`。业务模块通过 `sensor_adapter`
-Launch 使用 ROS 2 原生 remapping 转换到稳定的 `/capture/...` Topic，不使用
-厂商模型字符串判断实物型号，也不创建点云中继节点。
+运行于 RK3588 的车载隧道点云采集与单帧顶部净空测量系统。系统接入 ODIN1 Lite
+激光雷达和 RTK，在设备端完成点云逐点运动补偿、近水平顶面检测、状态监控和
+局域网网页展示。
 
-## 工程模块
+当前算法输出 `lidar_to_top_m`，表示雷达原点到当前帧最低合格近水平顶面的竖直
+距离。该值尚未自动叠加雷达安装高度，也没有建立路面模型和车辆通行包络，不能
+直接解释为路面到障碍物底面的最终净空高度。
 
-- `docs/`：系统架构、算法、接口、部署和测试文档。
-- `third_party/`：保持独立的第三方传感器驱动。
-- `ros2_ws/`：系统 ROS 2 业务工作空间。
-- `config/`：传感器、标定、定位、净空和部署配置。
-- `backend/`：RK3588 端 Web 后端及 ROS 2 通信桥。
-- `frontend/`：浏览器监视与控制界面。
-- `system/`：systemd、udev、网络和权限配置。
-- `scripts/`：构建、部署、运行和数据处理脚本。
-- `tools/`：标定、分析、仿真和导出工具。
-- `tests/`：集成、回放、性能和现场测试。
-- `data/`：检测任务和标定数据。
-- `runtime/`：日志、缓存及运行状态。
+## 当前运行链路
 
-当前已实现浏览器静态界面的 RK3588 本地构建，以及由 FastAPI 统一提供的
-局域网 Web 入口。ROS 2 业务模块仍按接口设计逐步实现。
+```text
+ODIN1 Lite 原始点云
+→ /capture/lidar/points_raw
+→ 高频里程计时间戳展开
+→ 逐点姿态插值和扫描内相对平移补偿
+→ /capture/lidar/points_compensated_enu
+├→ clearance_engine
+│  → /capture/clearance/result
+└→ cloud_visualization
+   → /capture/visualization/cloud_preview
 
-## 局域网 Web 界面
+RTK 串口
+→ /capture/rtk/fix
+→ /capture/rtk/status
 
-开发阶段使用一条命令启动雷达驱动、RTK驱动、首版净空计算、SLAM点云预览和
-网页服务：
+系统诊断
+→ /capture/system/diagnostics
+
+FastAPI
+→ /ws/v1/cloud-preview
+→ /ws/v1/clearance
+→ /ws/v1/rtk
+→ /ws/v1/system-status
+→ 浏览器采集首页
+```
+
+网页点云预览与净空算法共用补偿后的局部东北天点云。当前生产配置不使用厂商
+SLAM 点云作为网页预览输入。
+
+## 已实现能力
+
+- ODIN1 Lite 厂商驱动接入及稳定 `/capture/...` Topic remapping。
+- 高频里程计重复时间戳展开。
+- 原始点云逐点姿态补偿和扫描内相对平移补偿。
+- 单帧顶部 ROI、多候选近水平面 RANSAC、连通区域复核和最低平面高度输出。
+- RTK 串口接入、NMEA 解析结果发布和网页字段映射。
+- 雷达、RTK、RK3588 资源和数据目录容量的统一系统诊断。
+- 局部东北天点云的 5 Hz、最多 10,000 点网页预览。
+- FastAPI 静态页面托管、健康检查和四路同源 WebSocket。
+- 采集首页的点云、地图、净空曲线、RTK 指标、设备状态和任务控制前端原型。
+
+## 当前边界
+
+- `task_manager` 和 `data_recorder` 仍是规划目录，没有可运行 ROS 2 节点。
+- 采集首页中的任务创建、任务切换、开始、暂停和停止仅保存在浏览器内存中，尚未
+  调用后端 API、ROS 2 Service 或 Action，也不会控制设备端采集节点。
+- 独立任务管理页面已经删除。任务创建入口只保留在采集首页任务控制卡片中。
+- 数据回放和报告导出页面仍以界面占位和下载链路测试为主，没有正式任务数据库。
+- `localization` 目前只包含姿态变换相关实现，尚未实现进出洞稳定窗口、洞内里程和
+  出口约束修正。
+- 当前没有正式路面模型、车辆通行包络、任务累计最小净空和任务级报告。
+
+完整状态见 [当前实现状态](docs/当前实现状态.md)。
+
+## 构建
+
+在 RK3588 上执行全量构建：
+
+```bash
+cd /home/cat/Project/capture_system
+scripts/build/build_all.sh release
+```
+
+仅构建设备静态网页：
+
+```bash
+scripts/build/build_web.sh
+```
+
+业务工作空间单独构建：
+
+```bash
+source /opt/ros/humble/setup.bash
+source /home/cat/Project/capture_system/third_party/odin_ros_driver/install/setup.bash
+cd /home/cat/Project/capture_system/ros2_ws
+colcon build --symlink-install
+```
+
+## 运行
+
+开发阶段一键启动雷达、RTK、运动补偿、净空算法、系统监控、点云预览和网页服务：
 
 ```bash
 cd /home/cat/Project/capture_system
 scripts/operation/run_lan_preview.sh
 ```
 
-终端会打印当前设备可访问的局域网地址；按 `Ctrl+C` 会统一停止本次启动的
-进程。当前阶段不需要安装或启用systemd开机自启。
-
-首次构建、分组件调试和后续部署方式见
-[`docs/deployment/局域网网页部署.md`](docs/deployment/局域网网页部署.md)。
-
-完成构建并启动服务后，同一局域网内的电脑可以通过以下形式访问：
+同一局域网内通过以下地址访问：
 
 ```text
 http://<RK3588局域网IP>:8000/
 ```
 
-健康检查接口为：
+健康检查：
 
 ```text
 http://<RK3588局域网IP>:8000/api/health
 ```
 
-## 架构文档
+详细步骤见 [局域网网页部署](docs/deployment/局域网网页部署.md)。
+
+## 工程目录
+
+```text
+capture_system/                 # 工程根目录
+├── README.md                   # 项目入口和当前实现边界
+├── VERSION                     # 软件版本
+├── AGENTS.md                   # 开发约束和模块边界
+├── docs/                       # 架构、算法、接口、部署、测试和用户文档
+├── third_party/                # 第三方 ODIN 驱动，上游内容默认只读
+├── ros2_ws/                    # ROS 2 业务工作空间
+├── backend/                    # FastAPI、WebSocket 和 ROS 2 Web 桥
+├── frontend/                   # 浏览器显控界面
+├── config/                     # 设备部署覆盖配置
+├── scripts/                    # 构建和运行入口
+├── system/                     # sysctl、systemd、udev 等系统配置
+├── tools/                      # 离线分析和导出工具规划目录
+├── tests/                      # 跨模块测试规划目录
+├── data/                       # 运行数据，不提交 Git
+└── runtime/                    # 日志和运行状态，不提交 Git
+```
+
+## 文档入口
 
 - [文档导航](docs/文档导航.md)
+- [当前实现状态](docs/当前实现状态.md)
 - [系统总体架构](docs/architecture/系统总体架构.md)
 - [ROS 2 架构](docs/architecture/ROS2架构.md)
 - [数据流设计](docs/architecture/数据流设计.md)
-- [ROS 2 工作空间规划](ros2_ws/README.md)
+- [采集首页操作说明](docs/user_manual/用户手册说明.md)
+- [文档核对记录](docs/文档核对记录_2026-08-06.md)
 
-## 目标工程结构
-
-下面是项目的目标文件级组织。标记为“规划”的部分用于约束后续实现，不表示
-对应功能已经完成。
-
-```text
-capture_system/                 # 项目工程根目录
-├── README.md                  # 项目入口、构建状态和文档导航
-├── VERSION                    # 软件版本
-├── AGENTS.md                  # 开发边界和工程约束
-├── docs/                      # 架构、算法、接口、部署和测试文档
-├── third_party/               # 只读第三方驱动及许可证
-├── ros2_ws/                   # ROS 2 业务工作空间（规划）
-│   └── src/                   # ROS 2 业务包源码目录
-│       ├── interfaces/        # 系统自定义消息、服务和 Action
-│       ├── rtk_driver/        # RTK 串口接入和质量状态发布
-│       ├── sensor_adapter/    # 厂商 Topic 映射和 RViz2 入口
-│       ├── motion_compensation/ # 点云逐点时间检查和运动补偿
-│       ├── localization/      # 进出洞判断和洞内相对定位
-│       ├── clearance_engine/  # 断面提取和净空计算
-│       ├── task_manager/      # 任务生命周期和状态机
-│       ├── data_recorder/     # 遥测、元数据和结果记录
-│       ├── cloud_visualization/ # 浏览器轻量点云预览生成
-│       ├── system_monitor/    # 传感器、算法和资源监控
-│       └── bringup/           # Launch、QoS 和生产部署编排
-├── backend/                   # FastAPI、WebSocket、ROS 2 Web 桥
-├── frontend/                  # 浏览器监控和控制界面
-├── config/                    # 可部署配置和现场覆盖参数
-├── system/                    # systemd、udev、网络和权限
-├── scripts/                   # 构建、部署、运行和数据脚本
-├── tools/                     # 标定、分析、仿真和导出工具
-├── tests/                     # 集成、回放、性能和现场测试
-├── data/                      # 运行数据，不提交 Git
-└── runtime/                   # 日志、PID、缓存和状态，不提交 Git
-```
-
-当前实现状态以各目录的 README 和实际可执行测试为准。目录存在不代表功能已经
-实现；未经过 RK3588 实机验证的能力不会标记为实机可用。
+第三方目录中的 README、CHANGELOG、许可证和厂商 PDF 保持上游内容，不使用项目
+当前实现口径改写。

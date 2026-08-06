@@ -1,146 +1,89 @@
-# Web后端
+# Web 后端
 
-FastAPI是浏览器访问RK3588的唯一HTTP和WebSocket入口。当前已实现静态前端托管、
-`/api/health`、ROS 2点云桥、RTK详情桥、净空结果桥、统一系统状态桥及相应实时
-WebSocket。
+核对日期：2026-08-06
 
-## TXT下载链路测试
+FastAPI 是浏览器访问 RK3588 的唯一 HTTP 和 WebSocket 入口。当前后端只承担页面
+托管、实时展示桥和测试下载，不承担净空算法、RTK质量判断或任务状态机。
 
-当前提供两个仅用于验证电脑浏览器下载链路的临时同源接口：
+## 1. 已实现接口
 
-```text
-GET /api/v1/report-export-test             # 返回固定测试任务摘要与模拟曲线
-GET /api/v1/report-export-test/download    # 下载固定测试TXT文件
-```
+| 地址 | 类型 | 数据来源 |
+| --- | --- | --- |
+| `/api/health` | HTTP JSON | FastAPI 自身 |
+| `/ws/v1/cloud-preview` | WebSocket 文本和二进制 | `/capture/visualization/cloud_preview` |
+| `/ws/v1/clearance` | WebSocket JSON | `/capture/clearance/result` |
+| `/ws/v1/rtk` | WebSocket JSON | `/capture/rtk/status`、`/capture/rtk/fix` |
+| `/ws/v1/system-status` | WebSocket JSON | `/capture/system/diagnostics` |
+| `/api/v1/report-export-test` | HTTP JSON | 固定模拟数据 |
+| `/api/v1/report-export-test/download` | HTTP TXT | 固定测试文件 |
 
-测试文件位于：
+报告测试接口只用于验证浏览器下载链路。返回的任务、净空曲线和最小值均为模拟数据，
+不得写入正式检测报告。
 
-```text
-data/tasks/browser-download-test/exports/test.txt    # 浏览器下载链路测试文件
-```
+## 2. 实时桥行为
 
-该文件及接口中的净空数值均为模拟测试数据，不是正式测量结果。正式实现应由
-`data_recorder`将结构化净空结果写入任务目录的`results.sqlite3`，TXT只在需要
-下载时生成到该任务的`exports/`目录，不能作为算法结果的唯一数据源。
+- 每类 ROS 2 桥使用独立 `rclpy.Context` 和后台单线程执行器；
+- FastAPI asyncio 事件循环不执行 ROS 回调；
+- 每个浏览器客户端队列容量为 1，新值覆盖尚未发送的旧值；
+- 浏览器断开不停止 ROS 2 节点；
+- ROS桥启动失败时，静态页面和健康接口仍可用；
+- Uvicorn 固定单 worker，点云 WebSocket 关闭压缩。
 
-## 文件结构
+### 点云
 
-```text
-backend/                                      # FastAPI后端源码与测试根目录
-├── main.py                                   # 应用生命周期、ROS桥和静态页面装配
-├── protocols/                               # 浏览器二进制与文本协议目录
-│   ├── __init__.py                           # 协议Python包初始化文件
-│   ├── clearance_v1.py                       # 净空有效性与质量字段JSON协议
-│   ├── cloud_preview_v1.py                   # PCV1固定头、流描述和状态消息实现
-│   ├── rtk_v1.py                             # RTK定位详情快照与ROS字段机械映射
-│   └── system_status_v1.py                   # 四类设备诊断的网页快照协议
-├── ros_bridge/                              # ROS 2后台线程桥目录
-│   ├── __init__.py                           # ROS桥Python包初始化文件
-│   ├── clearance_bridge.py                   # 净空结果Topic订阅和网页快照映射桥
-│   ├── cloud_preview_bridge.py               # 轻量点云订阅和PCV1一次编码实现
-│   ├── rtk_bridge.py                         # RTK状态和fix定位详情订阅桥
-│   └── system_status_bridge.py               # system_monitor统一诊断订阅桥
-├── websocket/                               # WebSocket会话和背压管理目录
-│   ├── __init__.py                           # WebSocket Python包初始化文件
-│   ├── clearance_hub.py                      # 每客户端容量1的净空结果广播中心
-│   ├── cloud_preview_hub.py                  # 每客户端容量1的最新帧广播中心
-│   ├── rtk_hub.py                            # 每客户端容量1的RTK最新值广播中心
-│   ├── system_status_hub.py                  # 系统诊断超时与最新值广播中心
-│   └── routes.py                             # 四类同源WebSocket发送路由
-├── tests/                                   # 后端单元与集成测试目录
-│   ├── test_main.py                          # 健康接口与静态页面测试
-│   ├── test_clearance_protocol.py             # 净空字段和无效数值映射测试
-│   ├── test_clearance_hub.py                  # 净空最新结果覆盖和状态测试
-│   ├── test_clearance_websocket.py            # 净空同源JSON快照发送测试
-│   ├── test_cloud_preview_protocol.py        # PCV1帧头和世界坐标语义测试
-│   ├── test_cloud_preview_hub.py             # 最新帧覆盖和状态测试
-│   ├── test_cloud_preview_websocket.py       # 点云同源与二进制发送测试
-│   ├── test_rtk_hub.py                       # RTK最新值覆盖和连接上限测试
-│   ├── test_rtk_protocol.py                  # RTK字段直接映射测试
-│   ├── test_rtk_websocket.py                 # RTK同源与JSON快照发送测试
-│   ├── test_system_status_bridge.py           # 统一诊断字段与字节级别映射测试
-│   ├── test_system_status_hub.py              # 统一诊断流超时测试
-│   └── test_system_status_websocket.py        # 系统状态同源JSON快照发送测试
-├── requirements.txt                         # 设备运行依赖
-└── requirements-dev.txt                     # 开发和自动化测试依赖
-```
+FastAPI 不逐点解析 PointCloud2，不做过滤、限点或坐标转换。上游
+`cloud_visualization` 必须输出连续 `xyz float32`、最多 10,000 点、
+`frame_id=lidar_local_enu` 的受控消息。后端只添加 PCV1 帧头。
 
-## 点云WebSocket
+### RTK
 
-地址：
+后端机械映射 RTK 原始状态和 `NavSatFix` 字段，不计算卫星数阈值、DOP 阈值、
+稳定窗口或进出洞状态。串口连接事实以统一系统状态通道为准。
 
-```text
-/ws/v1/cloud-preview
-```
+### 系统状态
 
-行为：
+统一诊断超过 3 秒没有更新时，WebSocket 状态变为 `degraded`。前端另有 5 秒快照
+清理保护，防止继续显示旧的绿色连接灯。
 
-- ROS桥在专用 `rclpy.Context` 和后台单线程执行器中运行；
-- FastAPI asyncio事件循环不执行ROS回调；
-- ROS预览消息只编码一次，多客户端共享同一个不可变PCV1帧；
-- 每客户端队列容量为1，新帧覆盖尚未发送的旧帧；
-- 最多四个同源浏览器客户端；
-- 连续发送超时会关闭慢客户端；
-- 浏览器断开不改变ROS节点、雷达或任务状态；
-- ROS桥启动失败时静态页面和健康接口仍然可用。
+### 净空
 
-FastAPI依赖 `/capture/visualization/cloud_preview` 遵守固定首版契约，不检查
-PointCloud2布局、不逐点解析、不坐标转换、不做过滤或降采样。
-该Topic当前必须使用`frame_id=lidar_local_enu`，PCV1流描述以
-`coordinate_mode=local_enu`声明XYZ分别为东、北、天。
+无效算法帧中的 NaN 转换为 JSON `null`，同时保留 `valid` 和 `invalid_reason`。
+后端不补值、不累计任务最低值，也不叠加雷达安装高度。
 
-协议见
-[PCV1点云预览协议](../docs/interfaces/PCV1点云预览协议.md)。
+## 3. 未实现接口
 
-## RTK WebSocket
+当前没有以下正式接口：
 
-同源地址为`/ws/v1/rtk`。ROS桥订阅`/capture/rtk/status`和
-`/capture/rtk/fix`，只做定位详情字段机械映射。RTK连接诊断由统一系统状态通道提供。每个浏览器队列容量为1，
-发送最高5 Hz，新快照覆盖未发送的旧快照。后端不计算HDOP阈值、卫星数阈值、
-定位稳定性或进出洞结论。
+- 创建、查询、修改和删除任务的 HTTP API；
+- 开始、暂停、继续和停止采集的 ROS 2 Service 或 Action 桥；
+- 任务持久化、历史任务查询和回放；
+- 正式结果表和综合报告导出；
+- 入口、出口和任务累计最小净空接口。
 
-协议见[RTK网页状态协议](../docs/interfaces/RTK网页状态协议.md)。
+采集首页中的任务控制是纯前端原型，不能据此判断设备端任务已经开始。
 
-## 系统状态WebSocket
-
-同源地址为`/ws/v1/system-status`。后端订阅`/capture/system/diagnostics`，映射
-雷达、RTK、RK3588控制器和实际数据存储状态。统一诊断超过3秒没有更新时，连接
-状态变为`degraded`，不会继续把旧快照表达为正常。
-
-协议见[系统状态网页协议](../docs/interfaces/系统状态网页协议.md)。
-
-## 净空结果WebSocket
-
-同源地址为`/ws/v1/clearance`。ROS桥订阅`/capture/clearance/result`，最多以
-10 Hz向浏览器发送最新结果。每个客户端只保留最新一帧，超过1秒未收到结果时
-状态变为`degraded`。无效帧的NaN字段转换为JSON `null`，同时保留算法给出的
-`invalid_reason`；后端不补值、不累计任务最小值，也不参与净空计算。
-
-## 运行
-
-正式运行使用项目脚本，它会加载ROS 2和两个工作空间：
+## 4. 运行
 
 ```bash
 cd /home/cat/Project/capture_system
 scripts/operation/run_web.sh
 ```
 
-Uvicorn固定为单worker并关闭点云负载的WebSocket压缩。
+该脚本加载 ROS 2、厂商驱动和业务工作空间后，以单 worker 启动 Uvicorn。
 
-## 测试
+## 5. 测试
 
 ```bash
 cd /home/cat/Project/capture_system
 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python -m pytest backend/tests -q
 ```
 
-当前后端自动化结果为27项通过。端到端雷达实测见
-[浏览器点云预览端到端实机测试](../docs/testing/浏览器点云预览端到端实机测试_2026-07-31.md)。
+2026-08-06 在当前核对环境重新执行，结果为 27 项通过。
 
-## 边界
+## 6. 边界
 
-- 不直接连接传感器、串口或ODIN SDK；
-- 不复制 `task_manager` 状态机；
-- 不向浏览器发送带RGB的原始SLAM消息；
-- 网络客户端断开不得停止设备端任务；
-- WebSocket只承担点云、RTK、系统状态和净空结果展示，不参与净空或定位质量计算。
+- 不直接连接雷达、串口或 ODIN SDK；
+- 不复制任务状态机；
+- 不向浏览器发送原始全分辨率点云；
+- 不改变 ROS 2 消息的测量语义；
+- 网络客户端不得反向控制核心实时线程。

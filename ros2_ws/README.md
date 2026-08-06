@@ -1,66 +1,39 @@
 # ROS 2 业务工作空间
 
-目标平台为 Ubuntu 22.04、ROS 2 Humble、ARM64 RK3588。ODIN1 Lite 厂商驱动在
-`../third_party/odin_ros_driver` 独立构建，本工作空间只包含系统业务包。
+核对日期：2026-08-06
 
-当前 SDK 会把该设备报告为 `ODIN2`，厂商 Topic 中出现的 `ODIN2` 只在
-`sensor_adapter` Launch 参数中配置。
+目标平台为 Ubuntu 22.04、ROS 2 Humble、ARM64 RK3588。厂商驱动位于
+`../third_party/odin_ros_driver` 并独立构建。
 
-当前 `src/` 下仍有部分业务包目录是架构占位，尚未全部初始化为可构建 ROS 2 包。
-创建包时必须同步补齐构建配置、必要测试和包级说明。
+## 包状态
 
-## `src/` 目录架构
+| 包 | 状态 | 当前职责 |
+| --- | --- | --- |
+| `interfaces` | 已实现 | `RtkStatus`、`ClearanceResult` 消息 |
+| `rtk_driver` | 已实现 | 串口、NMEA 解析和原始状态发布 |
+| `sensor_adapter` | 已实现 | ODIN Topic remapping 和启动入口 |
+| `motion_compensation` | 已实现 | 时间戳展开和逐点补偿 |
+| `localization` | 部分实现 | 姿态变换工具，未实现进出洞和里程 |
+| `clearance_engine` | 已实现首版 | 单帧最低近水平顶面距离 |
+| `cloud_visualization` | 已实现 | 补偿后局部东北天点云预览生成 |
+| `system_monitor` | 已实现 | 四类统一诊断 |
+| `bringup` | 已实现当前入口 | 净空、预览和系统监控 Launch |
+| `task_manager` | 未实现 | 只有 README |
+| `data_recorder` | 未实现 | 只有 README |
+
+## 当前关键链路
 
 ```text
-src/                        # ROS 2 业务包源码根目录
-├── interfaces/              # 系统自定义 ROS 2 接口
-├── rtk_driver/              # RTK 设备接入
-├── sensor_adapter/          # 雷达 Topic remapping 与 RViz2 启动
-├── motion_compensation/     # 点云逐点运动补偿
-├── localization/            # 隧道边界判断和洞内相对定位
-├── clearance_engine/        # 断面与净空计算
-├── task_manager/            # 任务生命周期和状态机
-├── data_recorder/           # 任务元数据、遥测和结果记录
-├── cloud_visualization/     # 浏览器点云预览数据生成
-├── system_monitor/          # 设备、节点和系统资源监控
-└── bringup/                 # 系统启动和部署编排
+/capture/lidar/points_raw
+→ /capture/lidar/points_compensated_enu
+├→ /capture/clearance/result
+└→ /capture/visualization/cloud_preview
 ```
 
-### 各目录功能
+`cloud_visualization` 不再使用 SLAM 点云作为当前网页输入。`/capture/lidar/points_slam`
+只保留给 RViz2、辅助诊断和历史验证。
 
-| 目录 | 主要功能 | 边界说明 |
-|---|---|---|
-| `interfaces/` | 定义标准消息无法表达的任务状态、RTK 质量、定位质量、净空结果、服务和 Action | 只定义接口，不包含业务算法 |
-| `rtk_driver/` | 管理 RTK 串口通信、调用既有 NMEA 解析器并直接发布标准化位置和原始质量字段 | 不负责定位质量、稳定性、进出隧道判断和洞内轨迹估计 |
-| `sensor_adapter/` | 通过 ROS 2 原生 remapping 将当前 ODIN1 Lite 厂商 Topic 映射为稳定的 `/capture/...` 接口，并提供 RViz2 预览 Launch | 不创建中继节点，不修改消息字段、时间戳、`frame_id` 或 QoS |
-| `motion_compensation/` | 缓存 IMU 和高频里程计位姿，对原始点云按逐点采集时间进行插值和去畸变 | 位姿覆盖不足或时间异常时输出无效状态，不静默沿用旧位姿 |
-| `localization/` | 判断入口和出口 RTK 稳定窗口，估计洞内相对里程与轨迹，并管理实时轨迹和出口约束修正轨迹 | 不把未经标定的 ODIN1 Lite 里程计当作精确桩号 |
-| `clearance_engine/` | 首版完成顶部角度ROI、法向约束多平面RANSAC、连通区域质量检查和雷达到最低近水平顶面的高度计算 | 当前静态回放可接原始点云；动态生产链路必须改接完成逐点运动补偿的点云 |
-| `task_manager/` | 管理任务创建、启动、进出洞、停止、故障和收尾状态，是设备端任务状态的唯一权威 | 后端和其他节点不得复制任务状态机 |
-| `data_recorder/` | 异步记录任务元数据、配置与标定快照、RTK/IMU/里程计遥测、净空结果和诊断摘要 | 当前默认不记录原始点云，并为以后使用独立 SSD/NVMe 和 MCAP 预留能力 |
-| `cloud_visualization/` | 对SLAM点云保留最新帧、限频、裁减RGB并限制最大点数，向后端发布轻量xyz预览Topic | 首版不做布局检查、过滤、ROI、体素、里程计配对或坐标转换，也不建立外部WebSocket |
-| `system_monitor/` | 监控传感器、Topic、算法状态、CPU、内存、温度、磁盘和队列积压，汇总系统健康状态 | 只报告状态和降级原因，不直接改变任务状态 |
-| `bringup/` | 统一组织 Launch、节点组合、参数覆盖、QoS 和开发/生产运行配置 | 不存放业务算法 |
-
-各目录先保持上述包级职责边界，暂不在本文件规定具体源码文件名。进入实现阶段后，
-再由对应包的 README 说明内部文件组织。自定义接口名称和字段必须经过发布者、
-订阅者、Web 序列化和记录端联合评审后确定。
-
-## 文件组织规则
-
-- 节点类负责 ROS 参数、通信、生命周期和诊断。
-- 与 ROS 无关的解析、插值、变换和算法放进可单测的核心类。
-- 包内公共头文件使用 `include/<package_name>/`。
-- 参数默认值放在包内 `config/`；设备部署覆盖值放在根目录 `config/`。
-- 单元测试放在包内 `test/`；跨包测试放在根目录 `tests/`。
-- 高频链路必须显式设置有界队列和 QoS，不允许默认值悄悄成为接口约定。
-- 不在业务包中引用 ODIN SDK 或写死厂商 Topic。
-
-详细通信设计见
-[ROS 2 架构](../docs/architecture/ROS2架构.md) 和
-[数据流设计](../docs/architecture/数据流设计.md)。
-
-## 构建顺序
+## 构建
 
 ```bash
 source /opt/ros/humble/setup.bash
@@ -69,4 +42,24 @@ cd /home/cat/Project/capture_system/ros2_ws
 colcon build --symlink-install
 ```
 
-在业务包尚未生成前，工作空间没有可构建目标；目录存在不能作为构建验证。
+切换 Debug 和 Release 建议使用根目录 `scripts/build/build_all.sh`，避免混用旧构建
+缓存。
+
+## 目录
+
+```text
+ros2_ws/src/                  # ROS 2 业务包源码
+├── interfaces/              # 自定义消息
+├── rtk_driver/              # RTK 接入
+├── sensor_adapter/          # 雷达 Topic 映射
+├── motion_compensation/     # 逐点运动补偿
+├── localization/            # 姿态工具和规划定位能力
+├── clearance_engine/        # 单帧顶面距离计算
+├── cloud_visualization/     # 网页预览点云生成
+├── system_monitor/          # 系统诊断
+├── bringup/                 # Launch 编排
+├── task_manager/            # 任务管理规划目录
+└── data_recorder/           # 数据记录规划目录
+```
+
+详细接口见 [ROS 2 架构](../docs/architecture/ROS2架构.md)。

@@ -1,5 +1,10 @@
 # sensor_adapter
 
+核对日期：2026-08-06
+
+> 当前网页预览使用补偿后的局部东北天点云；SLAM 点云仅保留给 RViz2、辅助诊断和历史验证。
+
+
 本包通过 ROS 2 原生 remapping，将 ODIN1 Lite 厂商 Topic 映射为系统稳定的
 `/capture/...` Topic。它不创建消息中继节点，不复制点云，也不修改消息字段、
 时间戳或 `frame_id`。
@@ -63,8 +68,7 @@ ros2 launch sensor_adapter odin_driver.launch.py \
 `enable_slam_odom_sync` 是独立的厂商 SDK 行为参数，默认为 `false`。当前
 ODIN1 Lite 固件的两类帧号不能持续一一匹配，预览和业务启动
 入口不得开启该同步器，否则 SLAM 点云会等待里程计并产生队列满警告。
-当前网页预览与净空计算均使用原始点云，开发预览入口因此同时关闭SLAM点云通道；
-IMU和里程计通道继续开启，供后续运动补偿使用。
+当前网页预览和净空计算均以原始点云为源，并先经过逐点运动补偿后使用 `/capture/lidar/points_compensated_enu`。开发入口关闭SLAM点云通道，IMU和里程计继续开启。
 
 同时启动雷达驱动和 RViz2 预览：
 

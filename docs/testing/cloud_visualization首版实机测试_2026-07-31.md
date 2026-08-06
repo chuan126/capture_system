@@ -1,9 +1,14 @@
 # cloud_visualization 首版实机测试（2026-07-31）
 
+> 文档性质：历史设计或历史测试记录。当前运行版网页预览已经改为补偿后的
+> `/capture/lidar/points_compensated_enu` 局部东北天点云，并只保留三维视图。
+> 本文中的 SLAM 输入、RGB 裁减、世界坐标和俯视图结论不作为当前版本验收依据。
+
+
 文档状态：ROS 2预览链路静止场景短时实机通过
 
 关联方案：
-[SLAM点云网页实时预览首版方案](../architecture/SLAM点云网页实时预览方案.md)
+[SLAM点云网页实时预览首版方案](../architecture/SLAM点云网页预览历史方案.md)
 
 ## 1. 测试范围
 
