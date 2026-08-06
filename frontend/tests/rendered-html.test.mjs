@@ -49,16 +49,17 @@ test("renders the tunnel clearance terminal shell", async () => {
   assert.doesNotMatch(html, /任务进度|阶段进度|采集条件/);
 });
 
-test("keeps report export focused on one TXT file and task data", async () => {
+test("keeps playback and report pages on real task context without simulated report data", async () => {
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const playback = await readFile(new URL("../components/playback/PlaybackWorkspace.tsx", import.meta.url), "utf8");
+  const report = await readFile(new URL("../components/report/ReportWorkspace.tsx", import.meta.url), "utf8");
 
-  assert.match(page, /下载测试 TXT/);
-  assert.match(page, /browser-download-test/);
-  assert.match(page, /\/api\/v1\/report-export-test/);
-  assert.match(page, /任务数据概览/);
-  assert.match(page, /净空高度曲线/);
-  assert.doesNotMatch(page, /综合检测报告/);
-  assert.doesNotMatch(page, /报告内容/);
+  assert.match(page, /PlaybackWorkspace/);
+  assert.match(page, /ReportWorkspace/);
+  assert.match(playback, /净空高度曲线/);
+  assert.match(report, /50 Hz 测量明细/);
+  assert.match(report, /任务汇总报告/);
+  assert.doesNotMatch(`${page}${playback}${report}`, /browser-download-test|report-export-test|模拟数据/);
 });
 
 test("keeps the capture dashboard inside the viewport", async () => {
@@ -66,7 +67,7 @@ test("keeps the capture dashboard inside the viewport", async () => {
 
   assert.match(css, /\.main--dashboard\s*\{[^}]*overflow:\s*hidden/i);
   assert.match(css, /\.main--dashboard \.page-content\s*\{[^}]*height:\s*100dvh/i);
-  assert.match(css, /\.dashboard-page\s*\{[^}]*grid-template-rows:\s*clamp\(190px, 15vh, 216px\) minmax\(0, 1fr\)/i);
+  assert.match(css, /\.dashboard-page\s*\{[^}]*grid-template-rows:\s*clamp\(208px, 18vh, 236px\) minmax\(0, 1fr\)/i);
   assert.match(css, /@media \(max-width:\s*1180px\)[\s\S]*?\.main--dashboard\s*\{[^}]*overflow-y:\s*auto/i);
 });
 

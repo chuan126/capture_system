@@ -172,7 +172,7 @@ test("globals.css responsive breakpoints preserve amap layout", async () => {
   // 平板断点：visual-grid 保持两列
   assert.match(tabletRules, /\.dashboard-visual-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/i);
   // 平板断点：amap-stage 有最小高度
-  assert.match(tabletRules, /\.dashboard-main\s*\{[^}]*grid-template-rows:\s*minmax\(380px,\s*1fr\)\s*168px/i);
+  assert.match(tabletRules, /\.dashboard-main\s*\{[^}]*grid-template-rows:\s*minmax\(430px,\s*1fr\)\s*210px/i);
   // 手机断点：visual-grid 变为单列
   assert.match(mobileRules, /\.dashboard-visual-grid\s*\{[^}]*grid-template-columns:\s*1fr/i);
   // 手机断点：amap-stage 有固定高度

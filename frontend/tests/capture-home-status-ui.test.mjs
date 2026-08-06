@@ -88,13 +88,20 @@ test("height threshold, mount height and lane are shared task-card settings", ()
   assert.doesNotMatch(taskDialog, />作业车道/);
 });
 
-test("task creation supports one or many rows with identity fields only", () => {
+test("task creation uses automatic sequence numbers and only asks for tunnel fields", () => {
   assert.match(taskDialog, />创建检测任务</);
-  assert.match(taskDialog, />任务编号</);
+  assert.match(taskDialog, /任务编号由系统按创建顺序自动生成/);
+  assert.match(taskDialog, />隧道编号</);
   assert.match(taskDialog, />隧道名称</);
   assert.match(taskDialog, />＋ 添加任务</);
   assert.match(taskDialog, />复制<\/button>/);
   assert.match(taskDialog, />删除<\/button>/);
+  assert.match(taskDialog, /row\.tunnelCode/);
+  assert.match(taskDialog, /row\.tunnelName/);
+  assert.doesNotMatch(taskDialog, />任务名称|row\.taskName/);
+  assert.match(page, /createTaskId\(sequence, draft\.tunnelCode\)/);
+  assert.match(page, /sequence,\s*\n\s*tunnelCode:/);
+  assert.match(page, /formatTaskSequence\(task\.sequence\)/);
   assert.doesNotMatch(taskDialog, /row\.mountHeight|row\.lane/);
 });
 
@@ -111,11 +118,18 @@ test("task card follows parameters, current task, pending tasks and controls ord
   assert.doesNotMatch(taskCard, /task-selection-card|选择检测任务/);
 });
 
-test("only the pending task list scrolls inside the task card", () => {
+test("task card uses task-operation-body as its only internal vertical scroll area", () => {
   assert.match(taskCard, /task-operation-body/);
   assert.match(taskCard, /task-queue-list/);
-  assert.match(css, /task-queue-list[\s\S]*overflow-y:\s*auto/);
-  assert.doesNotMatch(css, /task-operation-body[\s\S]{0,180}overflow-y:\s*auto/);
+
+  const bodyRule = css.match(/\.task-operation-body\s*\{([^}]+)\}/)?.[1] ?? "";
+  const queueRule = css.match(/\.task-queue-list\s*\{([^}]+)\}/)?.[1] ?? "";
+
+  assert.match(bodyRule, /min-height:\s*0/);
+  assert.match(bodyRule, /overflow-y:\s*auto/);
+  assert.match(queueRule, /max-height:\s*none/);
+  assert.match(queueRule, /overflow:\s*visible/);
+  assert.doesNotMatch(queueRule, /overflow-y:\s*(auto|scroll)/);
 });
 
 test("current task provides a dedicated switch dialog", () => {
@@ -137,6 +151,7 @@ test("task start validates the shared numeric settings", () => {
   assert.match(page, /const mountHeightValid/);
   assert.match(page, /!heightThresholdValid \|\|[\s\S]*!mountHeightValid/);
   assert.match(page, /请输入有效的雷达安装高度/);
+  assert.match(page, /status: "采集中", lane: operationLane/);
 });
 
 test("task card omits progress and measurement sections", () => {
@@ -147,4 +162,39 @@ test("dedicated task-management interface remains removed", () => {
   assert.doesNotMatch(page, /id: "tasks"|function Tasks\(|任务管理|历史任务管理/);
   assert.match(page, /\{ id: "playback", label: "数据回放", index: "02" \}/);
   assert.match(page, /\{ id: "report", label: "报告导出", index: "03" \}/);
+});
+
+
+
+test("notebook task card keeps the middle scrollable without reducing readable controls", () => {
+  assert.match(css, /@media \(max-width:\s*1600px\) and \(min-width:\s*761px\)[\s\S]*?\.task-operation-panel \{[^}]*min-height:\s*0[^}]*overflow:\s*hidden/i);
+  assert.match(css, /@media \(max-width:\s*1600px\) and \(min-width:\s*761px\)[\s\S]*?\.task-operation-body \{[^}]*flex:\s*1 1 auto[^}]*overflow-y:\s*auto/i);
+  assert.match(css, /@media \(max-width:\s*1600px\) and \(min-width:\s*761px\)[\s\S]*?\.task-queue-list \{[^}]*max-height:\s*none[^}]*overflow:\s*visible/i);
+  assert.doesNotMatch(css, /@media \(max-width:\s*1600px\) and \(min-width:\s*761px\)[\s\S]*?\.task-operation-panel \{[^}]*height:\s*auto[^}]*overflow:\s*visible !important/i);
+  assert.doesNotMatch(css, /@media \(max-width:\s*1600px\) and \(min-width:\s*761px\)[\s\S]*?\.task-queue-list \{[^}]*max-height:\s*260px/i);
+  assert.match(css, /\.task-operation-actions \.button \{[^}]*min-height:\s*42px[^}]*font-size:\s*11px/i);
+  assert.match(css, /\.task-queue-list > button \{[^}]*min-height:\s*52px/i);
+});
+
+test("task title and bottom controls stay outside the scrollable task body", () => {
+  const bodyIndex = taskCard.indexOf('className="task-operation-body"');
+  const actionsIndex = taskCard.indexOf('className="task-operation-actions"');
+  assert.ok(bodyIndex >= 0);
+  assert.ok(actionsIndex > bodyIndex);
+  assert.match(css, /\.task-operation-panel\s*\{[^}]*display:\s*flex[^}]*flex-direction:\s*column[^}]*overflow:\s*hidden/i);
+  assert.match(css, /\.task-operation-actions\s*\{[^}]*flex:\s*0 0 auto/i);
+});
+
+test("capture dashboard keeps notebook text, icons and controls readable", () => {
+  assert.match(css, /\.dashboard-page\s*\{[^}]*grid-template-rows:\s*clamp\(208px,\s*18vh,\s*236px\) minmax\(0,\s*1fr\)/i);
+  assert.match(css, /\.health-overview__copy > span \{[^}]*font-size:\s*12px/i);
+  assert.match(css, /\.health-device-card__identity b \{[^}]*font-size:\s*12px/i);
+  assert.match(css, /\.dashboard-page \.panel-expand-button \{[^}]*width:\s*38px[^}]*height:\s*38px/i);
+  assert.match(css, /\.dashboard-clearance-panel \.chart__axis \{[^}]*font-size:\s*10px/i);
+  assert.match(css, /\.rtk-metric-grid span \{[^}]*font-size:\s*11px/i);
+  assert.match(css, /\.task-section-heading h3 \{[^}]*font-size:\s*12px/i);
+  assert.match(css, /\.task-parameter-grid input,[\s\S]*?\.task-parameter-grid select \{[^}]*height:\s*40px[^}]*font-size:\s*12px/i);
+  assert.match(css, /\.task-operation-actions \.button \{[^}]*min-height:\s*42px[^}]*font-size:\s*11px/i);
+  assert.match(css, /@media \(max-width:\s*1440px\) and \(min-width:\s*1181px\)[\s\S]*?\.dashboard-layout \{ grid-template-columns:\s*1fr/i);
+  assert.match(css, /@media \(max-width:\s*1440px\) and \(min-width:\s*1181px\)[\s\S]*?\.main--dashboard \{ overflow-y:\s*auto/i);
 });
