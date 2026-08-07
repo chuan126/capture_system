@@ -9,7 +9,7 @@
 
 | 包 | 状态 | 当前职责 |
 | --- | --- | --- |
-| `interfaces` | 已实现 | `RtkStatus`、`ClearanceResult` 消息 |
+| `interfaces` | 已实现 | 净空、RTK、任务状态和任务控制消息与 Service |
 | `rtk_driver` | 已实现 | 串口、NMEA 解析和原始状态发布 |
 | `sensor_adapter` | 已实现 | ODIN Topic remapping 和启动入口 |
 | `motion_compensation` | 已实现 | 时间戳展开和逐点补偿 |
@@ -17,9 +17,9 @@
 | `clearance_engine` | 已实现首版 | 单帧最低近水平顶面距离 |
 | `cloud_visualization` | 已实现 | 补偿后局部东北天点云预览生成 |
 | `system_monitor` | 已实现 | 四类统一诊断 |
-| `bringup` | 已实现当前入口 | 净空、预览和系统监控 Launch |
-| `task_manager` | 未实现 | 只有 README |
-| `data_recorder` | 未实现 | 只有 README |
+| `bringup` | 已实现当前入口 | 净空、预览、系统监控和任务控制 Launch |
+| `task_manager` | 已实现首版 | 设备端任务状态机、RTK端点状态和记录器编排 |
+| `data_recorder` | 已实现首版 | 源帧、50 Hz最近源帧保持序列、RTK和任务事件记录 |
 
 ## 当前关键链路
 
@@ -35,15 +35,22 @@
 
 ## 构建
 
+推荐从项目根目录使用统一脚本，避免当前终端中的旧 overlay、旧 Debug/Release 缓存或
+并行编译参数影响结果：
+
 ```bash
-source /opt/ros/humble/setup.bash
-source /home/cat/Project/capture_system/third_party/odin_ros_driver/install/setup.bash
-cd /home/cat/Project/capture_system/ros2_ws
-colcon build --symlink-install
+cd /home/cat/Project/capture_system
+scripts/build/build.sh workspace --release
 ```
 
-切换 Debug 和 Release 建议使用根目录 `scripts/build/build_all.sh`，避免混用旧构建
-缓存。
+需要清理业务工作空间缓存时：
+
+```bash
+scripts/build/build.sh workspace --release --clean
+```
+
+该命令只构建业务工作空间，要求厂商驱动已经存在。首次部署使用
+`scripts/build/build.sh all --release`。
 
 ## 目录
 
@@ -58,8 +65,8 @@ ros2_ws/src/                  # ROS 2 业务包源码
 ├── cloud_visualization/     # 网页预览点云生成
 ├── system_monitor/          # 系统诊断
 ├── bringup/                 # Launch 编排
-├── task_manager/            # 任务管理规划目录
-└── data_recorder/           # 数据记录规划目录
+├── task_manager/            # 设备端任务状态机
+└── data_recorder/           # 正式测量记录器
 ```
 
 详细接口见 [ROS 2 架构](../docs/architecture/ROS2架构.md)。

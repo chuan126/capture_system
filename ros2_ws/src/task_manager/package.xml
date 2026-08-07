@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>task_manager</name>
+  <version>0.2.0</version>
+  <description>设备端任务状态机，编排开始、暂停、继续、停止、RTK端点快照和记录器收尾。</description>
+  <maintainer email="todo@example.com">capture_system maintainers</maintainer>
+  <license>Proprietary</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>interfaces</depend>
+  <depend>rclcpp</depend>
+  <depend>sqlite3</depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <export><build_type>ament_cmake</build_type></export>
+</package>

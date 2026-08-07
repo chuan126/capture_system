@@ -35,7 +35,7 @@ test("rejects truncated and oversized PCV1 frames", () => {
   assert.throws(() => parseCloudPreviewBinary(wrongLength));
 });
 
-test("accepts only local ENU stream descriptions", () => {
+test("accepts production ENU and development sensor stream descriptions", () => {
   const stream = parseCloudPreviewText(JSON.stringify({
     type: "stream_info",
     protocol: "PCV1",
@@ -51,6 +51,14 @@ test("accepts only local ENU stream descriptions", () => {
   }));
   assert.equal(stream.type, "stream_info");
   assert.equal(stream.frame_id, "lidar_local_enu");
+
+  const sensorStream = parseCloudPreviewText(JSON.stringify({
+    ...stream,
+    frame_id: "odin_sensor",
+    coordinate_mode: "sensor",
+  }));
+  assert.equal(sensorStream.type, "stream_info");
+  assert.equal(sensorStream.coordinate_mode, "sensor");
 
   assert.throws(() => parseCloudPreviewText(JSON.stringify({
     ...stream,

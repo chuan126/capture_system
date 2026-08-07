@@ -1,0 +1,9 @@
+task_manager_node:
+  ros__parameters:
+    data_root: "/home/cat/.local/share/capture_system"
+    recorder_prepare_service: "/capture/recording/prepare"
+    recorder_control_service: "/capture/recording/control"
+    recorder_service_timeout_ms: 5000
+    start_transition_timeout_ms: 8000
+    pause_resume_timeout_ms: 5000
+    stop_transition_timeout_ms: 20000

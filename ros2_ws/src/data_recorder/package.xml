@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>data_recorder</name>
+  <version>0.2.0</version>
+  <description>任务净空、RTK和事件记录器，生成可回放与导出的SQLite任务文件。</description>
+  <maintainer email="todo@example.com">capture_system maintainers</maintainer>
+  <license>Proprietary</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>interfaces</depend>
+  <depend>rclcpp</depend>
+  <depend>sensor_msgs</depend>
+  <depend>sqlite3</depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <export><build_type>ament_cmake</build_type></export>
+</package>

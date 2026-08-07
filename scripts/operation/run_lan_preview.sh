@@ -5,6 +5,7 @@ set -Eeuo pipefail
 project_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 venv_dir="${project_root}/.venv"
 network_config="${project_root}/config/network/web.env"
+runtime_config="${project_root}/.build-state/runtime.env"
 frontend_index="${project_root}/frontend/out/index.html"
 declare -a child_pids=()
 cleanup_started=0
@@ -24,7 +25,7 @@ cleanup() {
   fi
 
   echo
-  echo "正在停止雷达驱动、RTK驱动、净空计算、系统监控、点云预览和网页服务……"
+  echo "正在停止任务状态机、记录器、雷达驱动、RTK驱动、净空计算、系统监控、点云预览和网页服务……"
 
   # 每个组件运行在独立进程组中，向进程组发送信号可同时停止ROS子进程。
   for pid in "${child_pids[@]}"; do
@@ -77,7 +78,7 @@ if [[ ! -x "${venv_dir}/bin/uvicorn" ]]; then
   exit 1
 fi
 if [[ ! -f "${frontend_index}" ]]; then
-  print_error "前端静态页面缺失，请先运行scripts/build/build_web.sh。"
+  print_error "前端静态页面缺失，请先运行scripts/build/build.sh web。"
   exit 1
 fi
 if ! command -v setsid >/dev/null 2>&1; then
@@ -85,15 +86,27 @@ if ! command -v setsid >/dev/null 2>&1; then
   exit 1
 fi
 
-# 确保 system_monitor 存储检测所需的数据目录存在
-mkdir -p "${project_root}/data"
-
 if [[ -f "${network_config}" ]]; then
   set -a
   source "${network_config}"
   set +a
 fi
+
+if [[ -f "${runtime_config}" ]]; then
+  set -a
+  source "${runtime_config}"
+  set +a
+fi
 web_port="${UVICORN_PORT:-8000}"
+data_root="${CAPTURE_DATA_ROOT:-/home/cat/.local/share/capture_system}"
+if [[ "${data_root}" != /* ]]; then
+  data_root="$(realpath -m -- "${project_root}/${data_root}")"
+fi
+mkdir -p "${data_root}/tasks"
+if [[ ! -w "${data_root}" || ! -w "${data_root}/tasks" ]]; then
+  print_error "任务数据目录不可写：${data_root}"
+  exit 1
+fi
 
 if ! [[ "${web_port}" =~ ^[0-9]+$ ]] || (( web_port < 1 || web_port > 65535 )); then
   print_error "UVICORN_PORT必须是1至65535之间的整数，当前值：${web_port}"
@@ -138,6 +151,19 @@ if ! ros2 pkg prefix motion_compensation >/dev/null 2>&1; then
   print_error "未找到motion_compensation包，请重新构建业务ROS 2工作空间。"
   exit 1
 fi
+if ! ros2 pkg prefix task_manager >/dev/null 2>&1; then
+  print_error "未找到task_manager包，请重新构建业务ROS 2工作空间。"
+  exit 1
+fi
+if ! ros2 pkg prefix data_recorder >/dev/null 2>&1; then
+  print_error "未找到data_recorder包，请重新构建业务ROS 2工作空间。"
+  exit 1
+fi
+
+if [[ "${CAPTURE_DEVTOOLS_ENABLED:-0}" == "1" ]] && ! ros2 pkg prefix rosbag2_storage_mcap >/dev/null 2>&1; then
+  echo "[警告] development构建已启用，但未找到rosbag2_storage_mcap。测试页原始点云和诊断MCAP录制将不可用。" >&2
+  echo "       可安装：sudo apt install ros-humble-rosbag2-storage-mcap" >&2
+fi
 
 echo "正在启动ODIN雷达驱动……"
 setsid --wait ros2 launch sensor_adapter odin_driver.launch.py \
@@ -157,7 +183,7 @@ setsid --wait ros2 launch rtk_driver rtk_driver.launch.py &
 child_pids+=("$!")
 
 echo "正在启动系统状态监控……"
-setsid --wait ros2 launch bringup system_status.launch.py &
+setsid --wait ros2 launch bringup system_status.launch.py storage_data_path:="${data_root}" &
 child_pids+=("$!")
 
 echo "正在启动局域网网页服务……"
@@ -187,6 +213,65 @@ if (( ! web_ready )); then
   exit 1
 fi
 
+# FastAPI先完成capture.db迁移，再启动直接访问同一数据库的设备端状态机。
+echo "正在启动设备端任务状态机和50 Hz记录器……"
+setsid --wait ros2 launch bringup task_control.launch.py data_root:="${data_root}" &
+task_control_pid="$!"
+child_pids+=("${task_control_pid}")
+
+required_task_services=(
+  /capture/task/start
+  /capture/task/pause
+  /capture/task/resume
+  /capture/task/stop
+)
+optional_task_services=(/capture/task/recover)
+task_control_ready=0
+for _ in {1..100}; do
+  if ! kill -0 "${task_control_pid}" 2>/dev/null; then
+    print_error "任务状态机或记录器启动失败，请检查上方日志。"
+    exit 1
+  fi
+  task_manager_info="$(ros2 node info /task_manager_node 2>/dev/null || true)"
+  task_manager_servers="$(
+    awk '
+      /Service Servers:/ { in_servers=1; next }
+      /Service Clients:/ { in_servers=0 }
+      in_servers { sub(/:$/, "", $1); print $1 }
+    ' <<<"${task_manager_info}"
+  )"
+  all_required_ready=1
+  for service_name in "${required_task_services[@]}"; do
+    if ! grep -qx -- "${service_name}" <<<"${task_manager_servers}"; then
+      all_required_ready=0
+      break
+    fi
+  done
+  if (( all_required_ready )); then
+    task_control_ready=1
+    break
+  fi
+  sleep 0.1
+done
+if (( ! task_control_ready )); then
+  print_error "核心任务控制Service在10秒内未全部就绪。"
+  exit 1
+fi
+
+task_manager_info="$(ros2 node info /task_manager_node 2>/dev/null || true)"
+task_manager_servers="$(
+  awk '
+    /Service Servers:/ { in_servers=1; next }
+    /Service Clients:/ { in_servers=0 }
+    in_servers { sub(/:$/, "", $1); print $1 }
+  ' <<<"${task_manager_info}"
+)"
+for service_name in "${optional_task_services[@]}"; do
+  if ! grep -qx -- "${service_name}" <<<"${task_manager_servers}"; then
+    echo "[警告] 可选任务控制Service未就绪：${service_name}。开始、暂停、继续和停止仍可使用。" >&2
+  fi
+done
+
 echo
 echo "局域网页面已启动，请在同一局域网内打开："
 while read -r interface_name address; do
@@ -196,7 +281,7 @@ done < <(
     awk '{split($4, parts, "/"); print $2, parts[1]}'
 )
 echo
-echo "按 Ctrl+C 可统一停止雷达驱动、RTK驱动、净空计算、点云预览和网页服务。"
+echo "按 Ctrl+C 可统一停止任务状态机、记录器、雷达驱动、RTK驱动、净空计算、点云预览和网页服务。"
 
 set +e
 wait -n "${child_pids[@]}"

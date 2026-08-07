@@ -2,29 +2,41 @@
 
 核对日期：2026-08-06
 
-> 当前接口文件只有 `RtkStatus.msg` 和 `ClearanceResult.msg`。任务和记录接口仍未实现。
-
-
-系统自定义ROS 2消息、服务和Action包。优先使用标准消息，只为标准消息无法表达的
-任务状态、RTK原始质量字段、定位质量和净空结果等业务语义创建接口。
+系统自定义ROS 2消息和Service包。优先使用标准消息，只为标准消息无法表达的任务状态、
+RTK原始字段、净空结果和记录控制创建接口。
 
 ## 当前文件结构
 
 ```text
-interfaces/                    # 系统自定义ROS 2接口包根目录
-├── CMakeLists.txt             # rosidl接口生成配置
-├── package.xml                # 包元数据与接口依赖
-├── README.md                  # 接口包职责和当前实现说明
-└── msg/                       # 自定义消息目录
-    ├── ClearanceResult.msg    # 单帧最低近水平顶面测量结果
-    └── RtkStatus.msg          # RTK解析器原始状态集合
+interfaces/
+├── CMakeLists.txt
+├── package.xml
+├── README.md
+├── msg/
+│   ├── ClearanceResult.msg
+│   ├── RtkStatus.msg
+│   ├── TaskStatus.msg
+│   └── RecordingStatus.msg
+└── srv/
+    ├── StartTask.srv
+    ├── TaskCommand.srv
+    ├── PrepareRecording.srv
+    └── RecordingCommand.srv
 ```
 
-`RtkStatus.msg`只承载既有NMEA解析器的直接输出和触发事件，不包含RTK稳定性、质量
-等级或进出洞结论。相关业务判断由消费该消息的定位模块负责。
+`TaskStatus`发布持久任务状态、执行阶段、状态版本、RTK端点状态、记录路径和错误。
+QoS由`task_manager`设置为reliable、transient local，使FastAPI重连后可获得最近状态。
 
-`ClearanceResult.msg`区分本帧有效性、沿Up方向的雷达到顶部高度、候选面数量、
-选中区域质量、最低点`East/North/Up`位置和无效原因。无效结果中的高度字段不得
-被消费端当作上一帧结果继续使用。
+`StartTask`冻结车道、雷达安装高度和高度阈值。`TaskCommand`执行暂停、继续和停止。
+`PrepareRecording`及`RecordingCommand`仅用于`task_manager`与`data_recorder`之间的内部
+记录控制。
 
-后续接口及评审要求见[ROS 2架构](../../../docs/architecture/ROS2架构.md)。
+开始和停止不等待雷达或RTK真实数据。入口或出口RTK缺失时，Service返回
+`unconfirmed`，任务继续执行。
+
+`RtkStatus`只承载NMEA解析器直接输出，不包含稳定性或进出洞结论。
+
+`ClearanceResult`区分本帧有效性、沿Up方向的雷达到顶部距离、候选区域质量和无效
+原因。无效结果不得由消费端用上一有效高度补齐。
+
+详细Topic和Service见[ROS 2架构](../../../docs/architecture/ROS2架构.md)。

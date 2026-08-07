@@ -40,6 +40,10 @@ class MeasurementExportSampleRecord:
     valid: bool
     invalid_reason: str | None
     quality_score: float | None
+    source_sequence: int | None
+    source_age_ms: float | None
+    is_repeated: bool | None
+    repeat_index: int | None
 
 
 @dataclass(frozen=True)
@@ -108,7 +112,7 @@ class MeasurementHistoryRecord:
     samples: list[ClearanceHistorySampleRecord]
 
 
-_SUPPORTED_SCHEMA_VERSION = 1
+_SUPPORTED_SCHEMA_VERSIONS = {1, 2}
 _MAX_HISTORY_SAMPLES = 500_000
 
 
@@ -228,8 +232,16 @@ class MeasurementRepository:
         connection = self._open_readonly(database_path)
         try:
             self._load_metadata(connection, task)
+            sample_columns = {
+                str(row[1])
+                for row in connection.execute("PRAGMA table_info(clearance_samples)").fetchall()
+            }
+            source_sequence_expr = "source_sequence" if "source_sequence" in sample_columns else "NULL"
+            source_age_expr = "source_age_ms" if "source_age_ms" in sample_columns else "NULL"
+            repeated_expr = "is_repeated" if "is_repeated" in sample_columns else "NULL"
+            repeat_index_expr = "repeat_index" if "repeat_index" in sample_columns else "NULL"
             cursor = connection.execute(
-                """
+                f"""
                 SELECT
                     sample_index,
                     source_timestamp_ns,
@@ -239,7 +251,11 @@ class MeasurementRepository:
                     lidar_to_top_m,
                     valid,
                     invalid_reason,
-                    quality_score
+                    quality_score,
+                    {source_sequence_expr} AS source_sequence,
+                    {source_age_expr} AS source_age_ms,
+                    {repeated_expr} AS is_repeated,
+                    {repeat_index_expr} AS repeat_index
                 FROM clearance_samples
                 ORDER BY sample_index ASC
                 """
@@ -255,6 +271,19 @@ class MeasurementRepository:
                     valid=bool(row["valid"]),
                     invalid_reason=row["invalid_reason"],
                     quality_score=_optional_float(row["quality_score"]),
+                    source_sequence=(
+                        int(row["source_sequence"])
+                        if row["source_sequence"] is not None else None
+                    ),
+                    source_age_ms=_optional_float(row["source_age_ms"]),
+                    is_repeated=(
+                        bool(row["is_repeated"])
+                        if row["is_repeated"] is not None else None
+                    ),
+                    repeat_index=(
+                        int(row["repeat_index"])
+                        if row["repeat_index"] is not None else None
+                    ),
                 )
         except MeasurementStorageError:
             raise
@@ -285,9 +314,10 @@ class MeasurementRepository:
         if metadata is None:
             raise MeasurementStorageError("任务测量数据库缺少 recording_metadata")
         schema_version = int(metadata["schema_version"])
-        if schema_version != _SUPPORTED_SCHEMA_VERSION:
+        if schema_version not in _SUPPORTED_SCHEMA_VERSIONS:
+            supported = ", ".join(str(value) for value in sorted(_SUPPORTED_SCHEMA_VERSIONS))
             raise MeasurementStorageError(
-                f"不支持的测量数据库版本：{schema_version}，程序支持版本：{_SUPPORTED_SCHEMA_VERSION}"
+                f"不支持的测量数据库版本：{schema_version}，程序支持版本：{supported}"
             )
         if metadata["task_id"] != task.task_id:
             raise MeasurementStorageError("任务测量数据库中的 task_id 与任务索引不一致")
@@ -306,8 +336,8 @@ class MeasurementRepository:
                 MIN(CASE WHEN valid = 1 THEN clearance_height_m END) AS minimum_height_m,
                 AVG(CASE WHEN valid = 1 THEN clearance_height_m END) AS average_height_m,
                 MAX(CASE WHEN valid = 1 THEN clearance_height_m END) AS maximum_height_m,
-                MIN(source_timestamp_ns) AS first_timestamp_ns,
-                MAX(source_timestamp_ns) AS last_timestamp_ns
+                MIN(recorded_timestamp_ns) AS first_timestamp_ns,
+                MAX(recorded_timestamp_ns) AS last_timestamp_ns
             FROM clearance_samples
             """
         ).fetchone()

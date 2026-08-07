@@ -50,7 +50,15 @@ function makeAxisLabel(text: string, color: string): THREE.Sprite {
   return sprite;
 }
 
-export default function PointCloudViewer() {
+export default function PointCloudViewer({
+  socketPath = "/ws/v1/cloud-preview",
+  liveLabel = "实时点云",
+  axisMode = "enu",
+}: {
+  socketPath?: string;
+  liveLabel?: string;
+  axisMode?: "enu" | "sensor";
+} = {}) {
   const hostRef = useRef<HTMLDivElement>(null);
   const resourcesRef = useRef<ViewerResources | null>(null);
   const firstFrameRef = useRef(true);
@@ -130,11 +138,11 @@ export default function PointCloudViewer() {
 
       const axes = new THREE.AxesHelper(2.0);
       enuSceneRoot.add(axes);
-      const eastLabel = makeAxisLabel("东 E", "#d43e50");
+      const eastLabel = makeAxisLabel(axisMode === "enu" ? "东 E" : "X", "#d43e50");
       eastLabel.position.set(2.45, 0, 0);
-      const northLabel = makeAxisLabel("北 N", "#14946b");
+      const northLabel = makeAxisLabel(axisMode === "enu" ? "北 N" : "Y", "#14946b");
       northLabel.position.set(0, 2.45, 0);
-      const upLabel = makeAxisLabel("天 U", "#1769ee");
+      const upLabel = makeAxisLabel(axisMode === "enu" ? "天 U" : "Z", "#1769ee");
       upLabel.position.set(0, 0, 2.45);
       enuSceneRoot.add(eastLabel, northLabel, upLabel);
 
@@ -227,9 +235,9 @@ export default function PointCloudViewer() {
         if (!disposed) setWebglError(detail);
       });
     }
-  }, []);
+  }, [axisMode]);
 
-  const connection = useCloudPreviewSocket(handleFrame);
+  const connection = useCloudPreviewSocket(handleFrame, socketPath);
   const isStreaming = connection.streamState === "streaming" && !webglError;
   const statusText = webglError ?? connection.detail;
   const showStatusOverlay = webglError !== null
@@ -243,7 +251,7 @@ export default function PointCloudViewer() {
       <div ref={hostRef} className="cloud-canvas-host" />
       <div className={`cloud-live-badge cloud-live-badge--${connection.streamState}`}>
         <i />
-        {isStreaming ? "实时点云" : "预览状态"}
+        {isStreaming ? liveLabel : "预览状态"}
       </div>
       {showStatusOverlay && (
         <div className="cloud-overlay-status" role="status">

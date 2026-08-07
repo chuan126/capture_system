@@ -35,6 +35,7 @@ const INITIAL_STATE: CloudConnectionState = {
 
 export function useCloudPreviewSocket(
   onFrame: (frame: CloudPreviewFrame) => void,
+  socketPath = "/ws/v1/cloud-preview",
 ): CloudConnectionState {
   const [state, setState] = useState<CloudConnectionState>(INITIAL_STATE);
   const onFrameRef = useRef(onFrame);
@@ -80,7 +81,7 @@ export function useCloudPreviewSocket(
 
       const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
       socket = new WebSocket(
-        `${protocol}//${window.location.host}/ws/v1/cloud-preview`,
+        `${protocol}//${window.location.host}${socketPath}`,
       );
       socket.binaryType = "arraybuffer";
 
@@ -193,7 +194,7 @@ export function useCloudPreviewSocket(
         socket.close(1000, "点云组件已卸载");
       }
     };
-  }, []);
+  }, [socketPath]);
 
   return state;
 }

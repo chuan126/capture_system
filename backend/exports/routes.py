@@ -8,6 +8,7 @@ from fastapi.responses import FileResponse
 from backend.exports.models import (
     ExportFileResponse,
     ReportPreviewResponse,
+    ReportSelectionRequest,
     TaskExportPreviewResponse,
 )
 from backend.exports.service import (
@@ -50,7 +51,7 @@ def _preview_response(assessment: TaskExportAssessment) -> TaskExportPreviewResp
     summary = assessment.summary
     return TaskExportPreviewResponse(
         task_id=assessment.task.task_id,
-        sequence=assessment.task.sequence,
+        display_id=assessment.task.display_id,
         tunnel_code=assessment.task.tunnel_code,
         tunnel_name=assessment.task.tunnel_name,
         status=assessment.task.status,
@@ -81,22 +82,24 @@ def _file_response(record: GeneratedExport, download_url: str) -> ExportFileResp
         report_id=record.report_id,
         task_id=record.task_id,
         included_task_count=record.included_task_count,
+        batch_id=None,
+        batch_code=None,
     )
 
 
 def _export_http_error(error: Exception) -> HTTPException:
+    if isinstance(error, (ExportNotFoundError, TaskNotFoundError)):
+        return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error))
     if isinstance(error, ExportBlockedError):
         return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error))
-    if isinstance(error, ExportNotFoundError):
-        return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error))
     return HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error))
 
 
-@router.get("/reports/clearance-summary/preview", response_model=ReportPreviewResponse)
-def report_preview(request: Request) -> ReportPreviewResponse:
+@router.post("/reports/clearance-summary/preview", response_model=ReportPreviewResponse)
+def report_preview(payload: ReportSelectionRequest, request: Request) -> ReportPreviewResponse:
     try:
-        assessments = _service(request).preview()
-    except (TaskStorageError, ExportStorageError) as error:
+        assessments = _service(request).preview_tasks(payload.task_ids)
+    except (TaskNotFoundError, TaskStorageError, ExportBlockedError, ExportStorageError) as error:
         raise _export_http_error(error) from error
     return ReportPreviewResponse(
         task_count=len(assessments),
@@ -111,10 +114,7 @@ def generate_task_txt(task_id: str, request: Request) -> ExportFileResponse:
     try:
         task = _task_repository(request).get_task(task_id)
         generated = _service(request).generate_txt(task)
-        return _file_response(
-            generated,
-            f"/api/v1/tasks/{task_id}/exports/txt/download",
-        )
+        return _file_response(generated, f"/api/v1/tasks/{task_id}/exports/txt/download")
     except TaskNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务不存在") from error
     except (TaskStorageError, ExportBlockedError, ExportStorageError) as error:
@@ -126,11 +126,7 @@ def download_task_txt(task_id: str, request: Request) -> FileResponse:
     try:
         task = _task_repository(request).get_task(task_id)
         path = _service(request).resolve_txt_download(task)
-        return FileResponse(
-            path,
-            media_type="text/plain; charset=utf-8",
-            filename=path.name,
-        )
+        return FileResponse(path, media_type="text/plain; charset=utf-8", filename=path.name)
     except TaskNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务不存在") from error
     except (TaskStorageError, ExportNotFoundError, ExportStorageError) as error:
@@ -138,14 +134,11 @@ def download_task_txt(task_id: str, request: Request) -> FileResponse:
 
 
 @router.post("/reports/clearance-summary", response_model=ExportFileResponse)
-def generate_clearance_summary_pdf(request: Request) -> ExportFileResponse:
+def generate_clearance_summary_pdf(payload: ReportSelectionRequest, request: Request) -> ExportFileResponse:
     try:
-        generated = _service(request).generate_pdf()
-        return _file_response(
-            generated,
-            f"/api/v1/reports/{generated.report_id}/download",
-        )
-    except (TaskStorageError, ExportBlockedError, ExportStorageError) as error:
+        generated = _service(request).generate_pdf(payload.task_ids)
+        return _file_response(generated, f"/api/v1/reports/{generated.report_id}/download")
+    except (TaskNotFoundError, TaskStorageError, ExportBlockedError, ExportStorageError) as error:
         raise _export_http_error(error) from error
 
 

@@ -1,28 +1,38 @@
 # Web 后端
 
-核对日期：2026-08-06
+核对日期：2026-08-07
 
 FastAPI 是浏览器访问 RK3588 的唯一 HTTP 和 WebSocket 入口。当前后端承担页面托管、
-实时展示桥、任务元数据持久化、历史测量文件读取和正式文件生成，不承担净空算法、RTK质量判断或设备端任务状态机。浏览器不直接访问 ROS 2。
+实时展示桥、任务元数据持久化、任务控制桥、历史测量文件读取和正式文件生成。
+设备端任务状态机仍由 ROS 2 `task_manager` 执行，FastAPI 不复制其状态转换规则。
+浏览器不直接访问 ROS 2。
 
 ## 1. 已实现接口
 
 | 地址 | 类型 | 数据来源 |
 | --- | --- | --- |
 | `/api/health` | HTTP JSON | FastAPI 自身 |
-| `/api/v1/tasks` | HTTP JSON | SQLite 任务元数据，支持创建和查询 |
+| `/api/v1/tasks` | HTTP JSON | SQLite 任务元数据创建和查询 |
 | `/api/v1/tasks/batch` | HTTP JSON | SQLite 批量创建事务 |
 | `/api/v1/tasks/{task_id}` | HTTP JSON | SQLite 单任务查询 |
 | `/api/v1/tasks/{task_id}` | HTTP DELETE | 任务逻辑删除，运行中和暂停任务拒绝删除 |
+| `/api/v1/tasks/purge-data` | HTTP POST JSON | 物理清理所选任务本地数据并保留任务索引 |
+| `/api/v1/task-control/readiness` | HTTP JSON | 任务控制桥及各控制 Service 的逐项可用性，不检查传感器真实数据 |
+| `/api/v1/tasks/{task_id}/start` | HTTP POST | 冻结作业参数并调用 ROS 2 开始 Service |
+| `/api/v1/tasks/{task_id}/pause` | HTTP POST | 调用 ROS 2 暂停 Service |
+| `/api/v1/tasks/{task_id}/resume` | HTTP POST | 调用 ROS 2 继续 Service |
+| `/api/v1/tasks/{task_id}/stop` | HTTP POST | 调用 ROS 2 停止和文件收尾 Service |
+| `/api/v1/tasks/{task_id}/recover` | HTTP POST | 调用 ROS 2 维护级恢复 Service；不可用时不影响其他控制命令 |
 | `/api/v1/tasks/{task_id}/measurements` | HTTP JSON | 每任务独立 SQLite 测量文件，只读返回完整高度序列、统计和 RTK 端点 |
 | `/ws/v1/cloud-preview` | WebSocket 文本和二进制 | `/capture/visualization/cloud_preview` |
 | `/ws/v1/clearance` | WebSocket JSON | `/capture/clearance/result` |
 | `/ws/v1/rtk` | WebSocket JSON | `/capture/rtk/status`、`/capture/rtk/fix` |
 | `/ws/v1/system-status` | WebSocket JSON | `/capture/system/diagnostics` |
-| `/api/v1/reports/clearance-summary/preview` | HTTP JSON | 任务索引和每任务测量摘要，返回正式导出资格 |
+| `/ws/v1/task-status` | WebSocket JSON | `/capture/task/status` |
+| `/api/v1/reports/clearance-summary/preview` | HTTP POST JSON | 所选任务摘要和正式导出资格 |
 | `/api/v1/tasks/{task_id}/exports/txt` | HTTP POST | 从正式测量数据库生成 50 Hz TXT |
 | `/api/v1/tasks/{task_id}/exports/txt/download` | HTTP TXT | 下载已生成的任务明细 |
-| `/api/v1/reports/clearance-summary` | HTTP POST | 汇总全部满足条件的正式任务并生成 PDF |
+| `/api/v1/reports/clearance-summary` | HTTP POST JSON | 汇总所选任务中满足条件的正式记录并生成 PDF |
 | `/api/v1/reports/{report_id}/download` | HTTP PDF | 下载已生成的汇总报告 |
 
 旧的模拟报告测试接口已经移除。正式导出只接受 `data_origin=recorded`、任务正常完成、记录完整且至少含一个有效高度样本的任务。
@@ -57,30 +67,58 @@ FastAPI 不逐点解析 PointCloud2，不做过滤、限点或坐标转换。上
 无效算法帧中的 NaN 转换为 JSON `null`，同时保留 `valid` 和 `invalid_reason`。
 后端不补值、不累计任务最低值，也不叠加雷达安装高度。
 
-## 3. 任务持久化边界
+## 3. 任务控制和持久化
 
-任务数据库默认位于 `CAPTURE_DATA_ROOT/capture.db`，任务目录位于
-`CAPTURE_DATA_ROOT/tasks/`。设备配置将根目录设置为
-`/home/cat/.local/share/capture_system`，不写入项目源码目录。
+任务数据库默认位于 `CAPTURE_DATA_ROOT/capture.db`，任务目录位于 `CAPTURE_DATA_ROOT/tasks/`。设备配置将根目录设置为 `/home/cat/.local/share/capture_system`，不写入项目源码目录。
+
+新任务同时保存稳定 `task_id` 和面向界面的 `display_id`。`task_id` 为 UUID，用于状态、接口和文件目录。`display_id` 由后端根据创建时间生成，格式为 `YYYYMMDD_HHMMSS`；同一秒创建多条任务时依次追加 `_02`、`_03`。历史删除不会重排或复用显示编号。旧数据库中的批次字段只用于迁移和兼容，不再参与当前前端任务管理。
 
 当前已经实现：
 
-- 后端生成 UUID 作为稳定任务 ID；
-- 后端事务分配全局递增显示序号；
-- 同一隧道编号允许创建多次检测任务；
-- 浏览器刷新、FastAPI 重启和设备重新上电后可重新读取任务；
+- 任务创建、查询、逻辑删除和重启持久化；
 - 批量创建使用单个 SQLite 事务和幂等键；
-- 数据库不可用时任务接口返回 503，前端不退化为临时任务。
+- `/api/v1/tasks/purge-data` 按所选任务物理删除任务目录，保留任务元数据和清理时间；
+- FastAPI 使用独立 `rclpy.Context` 将开始、暂停、继续、停止和恢复请求转发给 `task_manager`；
+- 各任务控制 Service 独立判定可用性，辅助 Service 不会锁死其他控制按钮；
+- 每个控制请求携带任务状态版本和幂等键；
+- 准备、暂停、继续和停止过渡阶段由 `task_manager` 看门狗处理；
+- `/ws/v1/task-status` 转发设备端阶段、RTK 端点状态、记录路径和错误；
+- 开始不使用雷达、RTK 或系统诊断卡片作为前置条件；入口和出口 RTK 未确认时不阻塞开始或停止。
 
-当前没有以下正式接口：
+`data_recorder` 按 50 Hz 写入最近净空源帧保持序列。重复值保存源帧序号、源时间、源年龄和重复序号。没有源数据或源数据超过配置超时时间时记录无效样本，不继续复制最后一个有效值。
 
-- 开始、暂停、继续和停止采集的 ROS 2 Service 或 Action 桥；
-- 任务参数快照、设备端状态恢复和修改；
-- 50 Hz 测量记录写入节点。当前仅实现既有测量文件读取和回放；
-- 设备端正式测量记录写入节点；
-- 入口、出口 RTK 的自动判定和设备端任务累计最小净空写入。
+PDF 报告由客户端显式提交任务 ID 集合，后端只汇总其中满足正式记录条件的任务，不再依赖作业批次。TXT 面向单个任务生成，文件名使用任务时间编号。
 
-采集首页中的开始、暂停和停止仍是前端原型，不能据此判断设备端任务已经开始。
+旧 `/api/v1/batches...` 接口和数据库批次字段暂时保留用于历史数据兼容，不作为当前前端工作流。
+
+
+## 开发测试接口
+
+开发诊断能力仅在构建变体 `development` 中注册。`customer` 变体下以下路由不存在并
+返回 404，不采用仅隐藏前端入口的方式。
+
+| 地址 | 用途 |
+| --- | --- |
+| `/api/dev/overview` | Linux 系统资源和真实 ROS 数据频率、数据年龄、累计消息数 |
+| `/api/dev/task-control` | 五个任务控制 Service 的独立可用性与活动任务状态 |
+| `/api/dev/rtk/snapshot` | 读取当前 RTK 快照，不写入正式任务 |
+| `/api/dev/parameters` | 读取白名单 ROS 参数 |
+| `/api/dev/parameters/{key}` | 临时修改允许动态更新的白名单参数 |
+| `/api/dev/recordings/status` | 开发录制状态 |
+| `/api/dev/recordings` | 开发录制文件列表 |
+| `/api/dev/recordings/raw-cloud/start` | 保存原始 `/capture/lidar/points_raw` 到 MCAP |
+| `/api/dev/recordings/diagnostic/start` | 保存固定诊断 Topic 集合到 MCAP |
+| `/api/dev/recordings/stop` | 停止当前开发录制 |
+| `/api/dev/recordings/{id}` | 删除指定开发录制 |
+| `/ws/dev/raw-cloud-preview` | 原始传感器坐标点云的限点、限频预览 |
+
+原始点云保存不经过浏览器预览。FastAPI 只允许固定录制配置，并启动
+`ros2 bag record --storage mcap` 保存完整 `sensor_msgs/PointCloud2` 消息。页面无法提交
+任意 Topic、输出路径或 Shell 命令。数据目录固定为
+`CAPTURE_DATA_ROOT/dev-tests/raw-cloud/`。连续录制期间后台持续检查剩余空间，低于 2 GiB 安全下限时自动停止。客户版后端不导入这些路由。正式采集任务处于活动状态时，开发录制和临时调参返回 409，避免开发工具影响正式记录。
+
+开发参数页只允许白名单参数。净空节点已实现对应动态参数回调；运动补偿节点当前未实现
+运行时参数回调，因此其参数只读。临时参数不会改写 YAML，节点重启后恢复配置文件值。
 
 ## 4. 运行
 
@@ -99,12 +137,12 @@ cd /home/cat/Project/capture_system
 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python -m pytest backend/tests -q
 ```
 
-2026-08-06 在当前修改环境重新执行，结果为 43 项通过。
+2026-08-07 在当前修改环境重新执行，结果以当次实际测试日志为准。
 
 ## 6. 边界
 
 - 不直接连接雷达、串口或 ODIN SDK；
-- 保存任务元数据并只读加载任务测量文件，不复制设备端任务状态机；
+- 保存任务元数据、转发任务控制并只读加载任务测量文件，不复制设备端状态机；
 - 不向浏览器发送原始全分辨率点云；
 - 不改变 ROS 2 消息的测量语义；
 - 网络客户端不得反向控制核心实时线程。

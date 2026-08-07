@@ -8,6 +8,12 @@ find_package(std_msgs REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/ClearanceResult.msg"
   "msg/RtkStatus.msg"
+  "msg/TaskStatus.msg"
+  "msg/RecordingStatus.msg"
+  "srv/StartTask.srv"
+  "srv/TaskCommand.srv"
+  "srv/PrepareRecording.srv"
+  "srv/RecordingCommand.srv"
   DEPENDENCIES std_msgs
 )
 

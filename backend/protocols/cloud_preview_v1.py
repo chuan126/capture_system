@@ -23,12 +23,14 @@ class CloudPreviewFrame:
     point_count: int
     frame_id: str
     binary: bytes
+    coordinate_mode: str = "local_enu"
+    max_points: int = PCV1_MAX_POINTS
 
     @property
     def stream_key(self) -> tuple[str, int]:
         """标识需要重新发送流描述的协议语义。"""
 
-        return self.frame_id, PCV1_MAX_POINTS
+        return self.frame_id, self.max_points
 
     def stream_info(self) -> dict[str, object]:
         return {
@@ -38,9 +40,9 @@ class CloudPreviewFrame:
             "header_bytes": PCV1_HEADER_BYTES,
             "point_format": "xyz_float32_le",
             "point_stride": PCV1_POINT_STRIDE,
-            "max_points": PCV1_MAX_POINTS,
+            "max_points": self.max_points,
             "frame_id": self.frame_id,
-            "coordinate_mode": "local_enu",
+            "coordinate_mode": self.coordinate_mode,
             "sensor_clock": "device_boot",
             "color_mode": "single",
         }

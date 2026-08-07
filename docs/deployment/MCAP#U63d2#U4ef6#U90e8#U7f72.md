@@ -2,7 +2,8 @@
 
 核对日期：2026-08-06
 
-> 当前边界：`data_recorder` 尚未实现。本文只说明插件安装和独立烟雾测试，不表示项目已经自动记录任务数据。
+> 当前边界：`data_recorder` 已使用SQLite记录结构化净空、RTK和任务事件，但当前不
+> 调用rosbag2或MCAP。本文只说明可选插件安装和独立烟雾测试。
 
 
 本机 ROS 软件源已经提供 ARM64 Humble 插件：
@@ -61,4 +62,6 @@ record_raw_cloud: false
 record_compensated_cloud: false
 ```
 
-正式 `data_recorder` 实现后，`telemetry_only` 计划记录 RTK、IMU、里程计、TF、任务事件、诊断和结果。当前源码没有自动记录节点。未来独立数据盘就绪并通过持续写入测试后，才评估 `full_raw`。
+当前`data_recorder`不保存原始点云、IMU、里程计或TF，只生成每任务SQLite文件。
+未来独立数据盘就绪并通过持续写入测试后，再评估使用MCAP补充原始数据归档。MCAP
+不得替代当前任务状态、结构化结果和报告所依赖的SQLite记录。

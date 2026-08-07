@@ -1,0 +1,15 @@
+std_msgs/Header header
+string task_id
+uint64 task_sequence
+string status
+string operation_phase
+uint64 status_revision
+string command_id
+string message
+string error_code
+string entry_rtk_status
+string exit_rtk_status
+bool has_measurements
+string recording_path
+int64 started_at_ns
+int64 completed_at_ns

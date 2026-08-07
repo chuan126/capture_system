@@ -131,7 +131,10 @@ def test_preview_and_txt_export_use_only_recorded_completed_task(tmp_path: Path)
         ).json()
         attach_measurements(data_root, task)
 
-        preview_response = client.get("/api/v1/reports/clearance-summary/preview")
+        preview_response = client.post(
+            "/api/v1/reports/clearance-summary/preview",
+            json={"task_ids": [task["task_id"]]},
+        )
         generation_response = client.post(f"/api/v1/tasks/{task['task_id']}/exports/txt")
         download_response = client.get(
             generation_response.json()["download_url"]
@@ -144,6 +147,9 @@ def test_preview_and_txt_export_use_only_recorded_completed_task(tmp_path: Path)
     assert preview["tasks"][0]["minimum_height_m"] == 5.18
     assert generation_response.status_code == 200
     assert generation_response.json()["export_format"] == "txt"
+    assert generation_response.json()["batch_id"] is None
+    assert generation_response.json()["batch_code"] is None
+    assert generation_response.json()["file_name"].startswith(f"{task['display_id']}_")
     assert download_response.status_code == 200
     text = download_response.content.decode("utf-8-sig")
     assert "隧道净空检测 50 Hz 测量明细" in text
@@ -166,9 +172,15 @@ def test_test_fixture_is_visible_but_blocked_from_formal_export(tmp_path: Path) 
             json={"tunnel_code": "TEST-001", "tunnel_name": "界面测试隧道"},
         ).json()
         attach_measurements(data_root, task, data_origin="test_fixture")
-        preview_response = client.get("/api/v1/reports/clearance-summary/preview")
+        preview_response = client.post(
+            "/api/v1/reports/clearance-summary/preview",
+            json={"task_ids": [task["task_id"]]},
+        )
         generation_response = client.post(f"/api/v1/tasks/{task['task_id']}/exports/txt")
-        pdf_response = client.post("/api/v1/reports/clearance-summary")
+        pdf_response = client.post(
+            "/api/v1/reports/clearance-summary",
+            json={"task_ids": [task["task_id"]]},
+        )
 
     preview = preview_response.json()
     assert preview["tasks"][0]["data_origin"] == "test_fixture"
@@ -176,7 +188,6 @@ def test_test_fixture_is_visible_but_blocked_from_formal_export(tmp_path: Path) 
     assert preview["tasks"][0]["blocked_reason"] == "界面测试数据不能用于正式导出"
     assert generation_response.status_code == 409
     assert pdf_response.status_code == 409
-
 
 def test_pdf_summary_generation_and_download(tmp_path: Path) -> None:
     assert PDF_FONT.is_file(), "测试环境缺少 PDF 中文字体"
@@ -192,19 +203,34 @@ def test_pdf_summary_generation_and_download(tmp_path: Path) -> None:
             start_ros_bridge=False,
         )
     ) as client:
+        selected_tasks = []
         for index in range(2):
             task = client.post(
                 "/api/v1/tasks",
                 json={"tunnel_code": f"G45-{index + 1:03d}", "tunnel_name": f"汇总测试隧道{index + 1}"},
             ).json()
             attach_measurements(data_root, task)
-        generation_response = client.post("/api/v1/reports/clearance-summary")
+            selected_tasks.append(task)
+
+        unselected_task = client.post(
+            "/api/v1/tasks",
+            json={"tunnel_code": "G45-999", "tunnel_name": "未选择隧道"},
+        ).json()
+        attach_measurements(data_root, unselected_task)
+
+        generation_response = client.post(
+            "/api/v1/reports/clearance-summary",
+            json={"task_ids": [task["task_id"] for task in selected_tasks]},
+        )
         download_response = client.get(generation_response.json()["download_url"])
 
     assert generation_response.status_code == 200
     payload = generation_response.json()
     assert payload["export_format"] == "pdf"
     assert payload["included_task_count"] == 2
+    assert payload["batch_id"] is None
+    assert payload["batch_code"] is None
+    assert payload["file_name"].endswith("_隧道净空检测汇总报告.pdf")
     assert payload["report_id"]
     assert download_response.status_code == 200
     assert download_response.content.startswith(b"%PDF-")

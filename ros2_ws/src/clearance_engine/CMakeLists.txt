@@ -9,6 +9,7 @@ find_package(ament_cmake REQUIRED)
 find_package(interfaces REQUIRED)
 find_package(PCL 1.12 REQUIRED COMPONENTS common filters sample_consensus segmentation)
 find_package(rclcpp REQUIRED)
+find_package(rcl_interfaces REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 
@@ -35,6 +36,7 @@ target_link_libraries(clearance_engine_node
 ament_target_dependencies(clearance_engine_node
   interfaces
   rclcpp
+  rcl_interfaces
   sensor_msgs
   std_msgs
 )

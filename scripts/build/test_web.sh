@@ -7,7 +7,7 @@ frontend_dir="${project_root}/frontend"
 python_bin="${project_root}/.venv/bin/python"
 
 if [[ ! -x "${python_bin}" ]]; then
-  echo "Backend environment is missing. Install backend/requirements-dev.txt first." >&2
+  echo "Backend environment is missing. Run scripts/build/build.sh backend first." >&2
   exit 1
 fi
 

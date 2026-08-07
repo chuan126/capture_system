@@ -118,7 +118,7 @@ public:
     rtk_diagnostic_name_ = declare_parameter<std::string>(
       "rtk_diagnostic_name", "rtk_driver/serial");
     storage_path_ = declare_parameter<std::string>(
-      "storage_data_path", "/home/cat/Project/capture_system/data");
+      "storage_data_path", "/home/cat/.local/share/capture_system");
     publish_period_ms_ = positive("publish_period_ms", 1000);
     rtk_startup_grace_ms_ = positive("rtk_startup_grace_ms", 5000);
     rtk_timeout_ms_ = positive("rtk_timeout_ms", 3000);

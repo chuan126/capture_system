@@ -102,6 +102,7 @@ def test_measurement_history_returns_curve_gaps_statistics_and_endpoints(tmp_pat
     with TestClient(
         create_app(static_dir, data_root=data_root, start_ros_bridge=False)
     ) as client:
+        batch = client.post("/api/v1/batches").json()
         task = client.post(
             "/api/v1/tasks",
             json={"tunnel_code": "TEST-001", "tunnel_name": "曲线测试隧道"},
@@ -145,6 +146,7 @@ def test_measurement_history_returns_404_without_record(tmp_path: Path) -> None:
     with TestClient(
         create_app(static_dir, data_root=tmp_path / "runtime", start_ros_bridge=False)
     ) as client:
+        batch = client.post("/api/v1/batches").json()
         task = client.post(
             "/api/v1/tasks",
             json={"tunnel_code": "TEST-002", "tunnel_name": "空任务"},

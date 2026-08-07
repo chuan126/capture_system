@@ -14,16 +14,20 @@ from backend.ros_bridge.clearance_bridge import ClearanceBridge
 from backend.ros_bridge.cloud_preview_bridge import CloudPreviewBridge
 from backend.ros_bridge.rtk_bridge import RtkBridge
 from backend.ros_bridge.system_status_bridge import SystemStatusBridge
+from backend.ros_bridge.task_control_bridge import TaskControlBridge
 from backend.websocket.clearance_hub import ClearanceHub
 from backend.websocket.cloud_preview_hub import CloudPreviewHub
 from backend.websocket.rtk_hub import RtkHub
 from backend.websocket.system_status_hub import SystemStatusHub
+from backend.websocket.task_status_hub import TaskStatusHub
 from backend.websocket.routes import router as websocket_router
 from backend.measurements.repository import MeasurementRepository
 from backend.exports.routes import router as export_router
+from backend.batches.routes import router as batch_router
 from backend.exports.service import ReportExportService
 from backend.tasks.repository import TaskRepository, TaskStorageError
 from backend.tasks.routes import router as task_router
+from backend.tasks.control_routes import router as task_control_router
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_STATIC_DIR = PROJECT_ROOT / "frontend" / "out"
@@ -44,6 +48,18 @@ def resolve_data_root() -> Path:
     return (Path.home() / ".local" / "share" / "capture_system").resolve()
 
 
+def resolve_devtools_enabled() -> bool:
+    return os.getenv("CAPTURE_DEVTOOLS_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def resolve_version() -> str:
+    version_file = PROJECT_ROOT / "VERSION"
+    try:
+        return version_file.read_text(encoding="utf-8").strip() or "unknown"
+    except OSError:
+        return "unknown"
+
+
 def create_app(
     static_dir: Path | None = None,
     *,
@@ -56,6 +72,8 @@ def create_app(
     rtk_bridge_factory: Callable[..., RtkBridge] = RtkBridge,
     system_status_bridge_factory: Callable[..., SystemStatusBridge] = SystemStatusBridge,
     clearance_bridge_factory: Callable[..., ClearanceBridge] = ClearanceBridge,
+    task_control_bridge_factory: Callable[..., TaskControlBridge] = TaskControlBridge,
+    devtools_enabled: bool | None = None,
 ) -> FastAPI:
     site_directory = (static_dir or resolve_static_dir()).resolve()
     if data_root is not None:
@@ -81,10 +99,34 @@ def create_app(
         measurement_repository,
         pdf_font_path=resolved_pdf_font_path,
     )
+    development_tools_enabled = resolve_devtools_enabled() if devtools_enabled is None else devtools_enabled
+    dev_telemetry_bridge = None
+    dev_raw_cloud_bridge = None
+    dev_raw_cloud_hub = None
+    dev_recording_manager = None
+    dev_parameter_service = None
+    dev_system_metrics = None
+    devtools_http_router = None
+    devtools_ws_router = None
+    if development_tools_enabled:
+        from backend.devtools.parameters import DevParameterService
+        from backend.devtools.recording import RosbagRecordingManager
+        from backend.devtools.routes import create_devtools_router, create_devtools_websocket_router
+        from backend.devtools.telemetry_bridge import DevTelemetryBridge
+        from backend.devtools.system_metrics import SystemMetricsSampler
+
+        dev_telemetry_bridge = DevTelemetryBridge()
+        dev_raw_cloud_hub = CloudPreviewHub()
+        dev_recording_manager = RosbagRecordingManager(runtime_data_root)
+        dev_parameter_service = DevParameterService()
+        dev_system_metrics = SystemMetricsSampler()
+        devtools_http_router = create_devtools_router()
+        devtools_ws_router = create_devtools_websocket_router()
     hub = CloudPreviewHub()
     rtk_hub = RtkHub()
     system_status_hub = SystemStatusHub()
     clearance_hub = ClearanceHub()
+    task_status_hub = TaskStatusHub()
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
@@ -92,7 +134,7 @@ def create_app(
         if not index_file.is_file():
             raise RuntimeError(
                 "Frontend static export is missing. "
-                f"Expected {index_file}; run scripts/build/build_web.sh first."
+                f"Expected {index_file}; run scripts/build/build.sh web first."
             )
 
         try:
@@ -105,6 +147,8 @@ def create_app(
         rtk_bridge: RtkBridge | None = None
         system_status_bridge: SystemStatusBridge | None = None
         clearance_bridge: ClearanceBridge | None = None
+        task_control_bridge: TaskControlBridge | None = None
+        active_dev_raw_cloud_bridge = None
         if start_ros_bridge:
             loop = asyncio.get_running_loop()
             bridge = bridge_factory(
@@ -127,11 +171,27 @@ def create_app(
             )
             clearance_started = clearance_bridge.start()
             clearance_hub.set_ros_availability(clearance_started, clearance_bridge.error)
+            task_control_bridge = task_control_bridge_factory(
+                lambda snapshot: loop.call_soon_threadsafe(task_status_hub.publish, snapshot)
+            )
+            task_control_started = task_control_bridge.start()
+            task_status_hub.set_ros_availability(
+                task_control_started, task_control_bridge.error
+            )
+            application.state.task_control_bridge = task_control_bridge
+            if development_tools_enabled and dev_telemetry_bridge is not None and dev_raw_cloud_hub is not None:
+                from backend.devtools.raw_cloud_bridge import DevRawCloudPreviewBridge
+
+                dev_telemetry_bridge.start()
+                active_dev_raw_cloud_bridge = DevRawCloudPreviewBridge(
+                    lambda frame: loop.call_soon_threadsafe(dev_raw_cloud_hub.publish, frame)
+                )
+                raw_started = active_dev_raw_cloud_bridge.start()
+                dev_raw_cloud_hub.set_ros_availability(raw_started, active_dev_raw_cloud_bridge.error)
         else:
-            application.state.cloud_preview_hub = hub
-            application.state.rtk_hub = rtk_hub
-            application.state.system_status_hub = system_status_hub
-            application.state.clearance_hub = clearance_hub
+            task_status_hub.set_ros_availability(False, "任务控制ROS桥未启动")
+            if development_tools_enabled and dev_raw_cloud_hub is not None:
+                dev_raw_cloud_hub.set_ros_availability(False, "开发ROS桥未启动")
 
         try:
             yield
@@ -144,6 +204,14 @@ def create_app(
                 system_status_bridge.stop()
             if clearance_bridge is not None:
                 clearance_bridge.stop()
+            if task_control_bridge is not None:
+                task_control_bridge.stop()
+            if active_dev_raw_cloud_bridge is not None:
+                active_dev_raw_cloud_bridge.stop()
+            if dev_telemetry_bridge is not None:
+                dev_telemetry_bridge.stop()
+            if dev_recording_manager is not None:
+                dev_recording_manager.stop_on_shutdown()
 
     application = FastAPI(
         title="Capture System Web API",
@@ -154,18 +222,35 @@ def create_app(
     application.state.rtk_hub = rtk_hub
     application.state.system_status_hub = system_status_hub
     application.state.clearance_hub = clearance_hub
+    application.state.task_status_hub = task_status_hub
     application.state.task_repository = task_repository
     application.state.measurement_repository = measurement_repository
     application.state.report_export_service = report_export_service
+    application.state.task_control_bridge = None
+    application.state.runtime_data_root = runtime_data_root
+    application.state.capture_version = resolve_version()
+    application.state.devtools_enabled = development_tools_enabled
+    application.state.dev_telemetry_bridge = dev_telemetry_bridge
+    application.state.dev_raw_cloud_hub = dev_raw_cloud_hub
+    application.state.dev_recording_manager = dev_recording_manager
+    application.state.dev_parameter_service = dev_parameter_service
+    application.state.dev_system_metrics = dev_system_metrics
 
     @application.get("/api/health", tags=["system"])
     async def health() -> dict[str, str]:
         return {"status": "ok"}
 
     # API与WebSocket路由必须在根路径静态文件挂载之前注册。
+    application.include_router(batch_router)
     application.include_router(task_router)
+    application.include_router(task_control_router)
     application.include_router(export_router)
     application.include_router(websocket_router)
+
+    if development_tools_enabled:
+        assert devtools_http_router is not None and devtools_ws_router is not None
+        application.include_router(devtools_http_router)
+        application.include_router(devtools_ws_router)
 
     application.mount(
         "/",

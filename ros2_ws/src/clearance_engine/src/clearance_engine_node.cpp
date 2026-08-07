@@ -2,6 +2,7 @@
 
 #include <interfaces/msg/clearance_result.hpp>
 #include <rclcpp/rclcpp.hpp>
+#include <rcl_interfaces/msg/set_parameters_result.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <sensor_msgs/point_cloud2_iterator.hpp>
 #include <std_msgs/msg/header.hpp>
@@ -12,6 +13,7 @@
 #include <functional>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -48,6 +50,9 @@ public:
     if (expected_frame_id_.empty()) {
       throw std::invalid_argument("expected_frame_id不能为空");
     }
+
+    parameter_callback_ = add_on_set_parameters_callback(
+      std::bind(&ClearanceEngineNode::onParameters, this, std::placeholders::_1));
 
     result_publisher_ = create_publisher<interfaces::msg::ClearanceResult>(
       output_topic, rclcpp::QoS(rclcpp::KeepLast(10)).reliable());
@@ -112,6 +117,65 @@ private:
     return config;
   }
 
+  rcl_interfaces::msg::SetParametersResult onParameters(
+    const std::vector<rclcpp::Parameter> & parameters)
+  {
+    rcl_interfaces::msg::SetParametersResult result;
+    result.successful = false;
+    ClearanceConfig next;
+    {
+      std::lock_guard<std::mutex> lock(estimator_mutex_);
+      next = estimator_.config();
+    }
+
+    try {
+      for (const auto & parameter : parameters) {
+        const auto & name = parameter.get_name();
+        if (name == "ransac.distance_threshold_m") {
+          next.distance_threshold_m = parameter.as_double();
+        } else if (name == "ransac.voxel_size_m") {
+          next.voxel_size_m = parameter.as_double();
+        } else if (name == "ransac.max_candidate_planes") {
+          next.max_candidate_planes = static_cast<int>(parameter.as_int());
+        } else if (name == "ransac.min_inliers_absolute") {
+          const auto value = parameter.as_int();
+          if (value <= 0) {
+            throw std::invalid_argument(name + "必须为正整数");
+          }
+          next.min_inliers_absolute = static_cast<std::size_t>(value);
+        } else if (name == "region.grid_size_m") {
+          next.region_grid_size_m = parameter.as_double();
+        } else if (name == "region.min_occupied_cells") {
+          const auto value = parameter.as_int();
+          if (value <= 0) {
+            throw std::invalid_argument(name + "必须为正整数");
+          }
+          next.min_region_occupied_cells = static_cast<std::size_t>(value);
+        } else if (name == "region.max_residual_p95_m") {
+          next.max_residual_p95_m = parameter.as_double();
+        } else {
+          result.reason = "参数不支持运行时修改：" + name;
+          return result;
+        }
+      }
+      if (!(next.distance_threshold_m > 0.0) || !(next.voxel_size_m > 0.0) ||
+        next.max_candidate_planes <= 0 || !(next.region_grid_size_m > 0.0) ||
+        !(next.max_residual_p95_m > 0.0))
+      {
+        throw std::invalid_argument("运行时净空参数必须保持正值");
+      }
+      {
+        std::lock_guard<std::mutex> lock(estimator_mutex_);
+        estimator_ = ClearanceEstimator(next);
+      }
+      result.successful = true;
+      result.reason = "开发参数已临时应用，重启后恢复YAML值";
+    } catch (const std::exception & error) {
+      result.reason = error.what();
+    }
+    return result;
+  }
+
   void publishInvalid(
     const std_msgs::msg::Header & header, const std::string & reason,
     const double processing_time_ms)
@@ -167,7 +231,11 @@ private:
       return;
     }
 
-    const ClearanceEstimate estimate = estimator_.estimate(points);
+    ClearanceEstimate estimate;
+    {
+      std::lock_guard<std::mutex> lock(estimator_mutex_);
+      estimate = estimator_.estimate(points);
+    }
     const double elapsed_ms = std::chrono::duration<double, std::milli>(
       std::chrono::steady_clock::now() - start).count();
 
@@ -203,6 +271,8 @@ private:
   }
 
   ClearanceEstimator estimator_;
+  std::mutex estimator_mutex_;
+  rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr parameter_callback_;
   std::string expected_frame_id_;
   rclcpp::Publisher<interfaces::msg::ClearanceResult>::SharedPtr result_publisher_;
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr point_cloud_subscription_;

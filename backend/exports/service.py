@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import os
 import re
@@ -60,11 +61,12 @@ class GeneratedExport:
     report_id: str | None = None
     task_id: str | None = None
     included_task_count: int | None = None
+    batch_id: str | None = None
+    batch_code: str | None = None
 
 
 _CHINA_TIMEZONE = timezone(timedelta(hours=8))
 _SAFE_FILE_COMPONENT = re.compile(r"[^0-9A-Za-z._-]+")
-_REPORT_FILE_NAME = "隧道净空检测汇总报告.pdf"
 _PDF_FONT_NAME = "CaptureSystemCJK"
 _PDF_FONT_LOCK = Lock()
 _DEFAULT_PDF_FONT_CANDIDATES = (
@@ -90,15 +92,16 @@ class ReportExportService:
         self.measurement_repository = measurement_repository
         self.pdf_font_path = pdf_font_path.resolve() if pdf_font_path else None
 
-    def preview(self) -> list[TaskExportAssessment]:
+    def preview_tasks(self, task_ids: list[str]) -> list[TaskExportAssessment]:
+        if not task_ids:
+            raise ExportBlockedError("请至少选择一个任务")
         assessments: list[TaskExportAssessment] = []
-        offset = 0
-        while True:
-            batch = self.task_repository.list_tasks(limit=500, offset=offset, order="asc")
-            assessments.extend(self.assess_task(task) for task in batch)
-            if len(batch) < 500:
-                break
-            offset += len(batch)
+        seen: set[str] = set()
+        for task_id in task_ids:
+            if task_id in seen:
+                continue
+            seen.add(task_id)
+            assessments.append(self.assess_task(self.task_repository.get_task(task_id)))
         return assessments
 
     def assess_task(self, task: TaskRecord) -> TaskExportAssessment:
@@ -141,7 +144,7 @@ class ReportExportService:
         except OSError as error:
             raise ExportStorageError(f"无法创建 TXT 导出目录：{error}") from error
         safe_code = _safe_component(task.tunnel_code)
-        file_name = f"任务{task.display_sequence}_{safe_code}_50Hz测量明细.txt"
+        file_name = f"{task.display_id}_{safe_code}_50Hz测量明细.txt"
         destination = output_directory / file_name
         generated_at = _utc_now_text()
         temporary_path: Path | None = None
@@ -169,30 +172,37 @@ class ReportExportService:
             path=destination,
             generated_at=generated_at,
             task_id=task.task_id,
+
         )
 
-    def generate_pdf(self) -> GeneratedExport:
-        eligible = [assessment for assessment in self.preview() if assessment.exportable]
+    def generate_pdf(self, task_ids: list[str]) -> GeneratedExport:
+        assessments = self.preview_tasks(task_ids)
+        eligible = [assessment for assessment in assessments if assessment.exportable]
         if not eligible:
-            raise ExportBlockedError("没有满足正式 PDF 汇总条件的任务")
+            raise ExportBlockedError("所选任务中没有满足正式 PDF 汇总条件的记录")
         report_id = str(uuid.uuid4())
         report_directory = (self.reports_directory / report_id).resolve()
         try:
             report_directory.mkdir(parents=True, exist_ok=False)
         except OSError as error:
             raise ExportStorageError(f"无法创建 PDF 报告目录：{error}") from error
-        destination = report_directory / _REPORT_FILE_NAME
         generated_at = _utc_now_text()
+        local_generated = datetime.fromisoformat(generated_at.replace("Z", "+00:00")).astimezone(_CHINA_TIMEZONE)
+        file_name = f"{local_generated.strftime('%Y%m%d_%H%M%S')}_隧道净空检测汇总报告.pdf"
+        destination = report_directory / file_name
         temporary_path = report_directory / ".report.tmp.pdf"
         try:
             font_name = self._register_pdf_font()
             self._write_pdf(temporary_path, eligible, report_id, generated_at, font_name)
             os.replace(temporary_path, destination)
+            report_sha256 = _sha256_file(destination)
             manifest = {
                 "report_id": report_id,
                 "generated_at": generated_at,
                 "file_name": destination.name,
+                "sha256": report_sha256,
                 "task_ids": [assessment.task.task_id for assessment in eligible],
+                "task_display_ids": [assessment.task.display_id for assessment in eligible],
             }
             (report_directory / "manifest.json").write_text(
                 json.dumps(manifest, ensure_ascii=False, indent=2),
@@ -214,7 +224,7 @@ class ReportExportService:
     def resolve_txt_download(self, task: TaskRecord) -> Path:
         output_directory = self._task_export_directory(task)
         safe_code = _safe_component(task.tunnel_code)
-        candidate = output_directory / f"任务{task.display_sequence}_{safe_code}_50Hz测量明细.txt"
+        candidate = output_directory / f"{task.display_id}_{safe_code}_50Hz测量明细.txt"
         if not candidate.is_file():
             raise ExportNotFoundError("TXT 尚未生成")
         return candidate
@@ -224,9 +234,22 @@ class ReportExportService:
             normalized_id = str(uuid.UUID(report_id))
         except ValueError as error:
             raise ExportNotFoundError("PDF 报告不存在") from error
-        candidate = (self.reports_directory / normalized_id / _REPORT_FILE_NAME).resolve()
+        report_directory = (self.reports_directory / normalized_id).resolve()
         try:
-            candidate.relative_to(self.reports_directory)
+            report_directory.relative_to(self.reports_directory)
+        except ValueError as error:
+            raise ExportNotFoundError("PDF 报告不存在") from error
+        manifest_path = report_directory / "manifest.json"
+        if not manifest_path.is_file():
+            raise ExportNotFoundError("PDF 报告不存在")
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            file_name = str(manifest["file_name"])
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            raise ExportStorageError(f"PDF 报告索引不可读取：{error}") from error
+        candidate = (report_directory / file_name).resolve()
+        try:
+            candidate.relative_to(report_directory)
         except ValueError as error:
             raise ExportNotFoundError("PDF 报告不存在") from error
         if not candidate.is_file():
@@ -252,7 +275,7 @@ class ReportExportService:
         entry_rtk = _format_rtk(summary.entry_rtk)
         exit_rtk = _format_rtk(summary.exit_rtk)
         writer.writerow(["隧道净空检测 50 Hz 测量明细"])
-        writer.writerow(["任务序号", task.display_sequence])
+        writer.writerow(["任务编号", task.display_id])
         writer.writerow(["隧道编号", task.tunnel_code])
         writer.writerow(["隧道名称", task.tunnel_name])
         writer.writerow(["检测车道", _lane_text(summary.lane)])
@@ -284,6 +307,10 @@ class ReportExportService:
                 "数据有效",
                 "无效原因",
                 "质量分数",
+                "源帧序号",
+                "源帧年龄 ms",
+                "重复记录",
+                "重复序号",
                 "隧道入口 RTK",
                 "隧道出口 RTK",
             ]
@@ -303,6 +330,10 @@ class ReportExportService:
                     "是" if sample.valid and sample.height_m is not None else "否",
                     sample.invalid_reason or "",
                     _format_number(sample.quality_score, 4),
+                    "" if sample.source_sequence is None else sample.source_sequence,
+                    _format_number(sample.source_age_ms, 3),
+                    "" if sample.is_repeated is None else ("是" if sample.is_repeated else "否"),
+                    "" if sample.repeat_index is None else sample.repeat_index,
                     entry_rtk,
                     exit_rtk,
                 ]
@@ -409,7 +440,7 @@ class ReportExportService:
             time_text = f"{_format_iso_text(summary.started_at)}<br/>{_format_iso_text(summary.ended_at)}"
             rows.append(
                 [
-                    Paragraph(assessment.task.display_sequence, body_style),
+                    Paragraph(assessment.task.display_id, body_style),
                     Paragraph(_escape_pdf_text(assessment.task.tunnel_code), body_style),
                     Paragraph(_lane_text(summary.lane), body_style),
                     Paragraph(_format_number(summary.statistics.minimum_height_m, 3), body_style),
@@ -421,7 +452,7 @@ class ReportExportService:
         table = Table(
             rows,
             repeatRows=1,
-            colWidths=[20 * mm, 34 * mm, 24 * mm, 27 * mm, 49 * mm, 47 * mm, 47 * mm],
+            colWidths=[36 * mm, 31 * mm, 22 * mm, 25 * mm, 45 * mm, 44 * mm, 44 * mm],
         )
         table.setStyle(
             TableStyle(
@@ -459,6 +490,14 @@ class ReportExportService:
             canvas.restoreState()
 
         document.build(story, onFirstPage=draw_footer, onLaterPages=draw_footer)
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _safe_component(value: str) -> str:

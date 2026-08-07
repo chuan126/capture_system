@@ -1,0 +1,11 @@
+std_msgs/Header header
+string task_id
+string state
+string message
+string error_code
+uint64 total_samples
+uint64 valid_samples
+uint64 invalid_samples
+string recording_path
+string entry_rtk_status
+string exit_rtk_status

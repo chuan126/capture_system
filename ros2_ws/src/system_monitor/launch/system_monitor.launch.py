@@ -14,6 +14,7 @@ def generate_launch_description() -> LaunchDescription:
         / "system_monitor.yaml"
     )
     parameters_file = LaunchConfiguration("parameters_file")
+    storage_data_path = LaunchConfiguration("storage_data_path")
     return LaunchDescription(
         [
             DeclareLaunchArgument(
@@ -21,12 +22,17 @@ def generate_launch_description() -> LaunchDescription:
                 default_value=str(default_parameters),
                 description="系统监控参数文件绝对路径",
             ),
+            DeclareLaunchArgument(
+                "storage_data_path",
+                default_value="/home/cat/.local/share/capture_system",
+                description="任务数据根目录，供磁盘容量和可写性诊断使用",
+            ),
             Node(
                 package="system_monitor",
                 executable="system_monitor_node",
                 name="system_monitor_node",
                 output="screen",
-                parameters=[parameters_file],
+                parameters=[parameters_file, {"storage_data_path": storage_data_path}],
             ),
         ]
     )

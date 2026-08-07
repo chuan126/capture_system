@@ -12,11 +12,26 @@ import { isDeviceConnected } from "@/components/system-status/systemStatusProtoc
 import type { DeviceStatus, HealthState } from "@/components/system-status/systemStatusProtocol";
 import PlaybackWorkspace from "@/components/playback/PlaybackWorkspace";
 import ReportWorkspace from "@/components/report/ReportWorkspace";
+import { DEVTOOLS_ENABLED, DevToolsWorkspace } from "@/components/devtools/devtoolsEntry.generated";
+import { useTaskStatusSocket } from "@/components/task-status/useTaskStatusSocket";
 import { createTaskBatch, deleteTask, listTasks, TaskApiError } from "@/components/workflow/taskApi";
-import { formatTaskSequence } from "@/components/workflow/taskModel";
+import {
+  getTaskControlReadiness,
+  pauseTaskControl,
+  recoverTaskControl,
+  resumeTaskControl,
+  startTaskControl,
+  stopTaskControl,
+} from "@/components/workflow/taskControlApi";
+import {
+  isTaskActive,
+  isTaskControlBusy,
+  rtkCaptureLabels,
+  taskPhaseLabels,
+} from "@/components/workflow/taskModel";
 import type { CollectionTask, CollectionTaskLane, CollectionTaskStatus, WorkflowPageId } from "@/components/workflow/taskModel";
 
-type PageId = WorkflowPageId;
+type PageId = WorkflowPageId | "devtools";
 type CollectionTaskDraft = {
   tunnelCode: string;
   tunnelName: string;
@@ -37,165 +52,44 @@ const createClientRequestId = () => {
 function taskTone(status: CollectionTaskStatus): "idle" | "ok" | "warn" | "danger" {
   if (status === "采集中") return "ok";
   if (status === "已暂停") return "warn";
-  if (status === "已停止") return "danger";
+  if (status === "已停止" || status === "异常中断" || status === "失败") return "danger";
   return "idle";
 }
 
-function TaskCreateDialog({
-  onClose,
-  onCreate,
-}: {
-  onClose: () => void;
-  onCreate: (drafts: CollectionTaskDraft[], idempotencyKey: string) => Promise<void>;
-}) {
-  const [rows, setRows] = useState<CollectionTaskDraft[]>(() => [createTaskDraft()]);
-  const [error, setError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-  const [idempotencyKey, setIdempotencyKey] = useState(createClientRequestId);
+function taskRuntimeLabel(task: CollectionTask): string {
+  if (["radar_initializing", "entry_rtk_capture", "recorder_preparing"].includes(task.operationPhase)) {
+    return "准备中";
+  }
+  if (task.operationPhase === "pausing") return "正在暂停";
+  if (task.operationPhase === "resuming") return "正在继续";
+  if (["stop_requested", "exit_rtk_capture", "finalizing"].includes(task.operationPhase)) {
+    return "正在停止";
+  }
+  return task.status;
+}
 
-  const markDraftChanged = () => {
-    setError(null);
-    setIdempotencyKey(createClientRequestId());
-  };
+function taskRuntimeTone(task: CollectionTask): "idle" | "ok" | "warn" | "danger" {
+  if ([
+    "radar_initializing",
+    "entry_rtk_capture",
+    "recorder_preparing",
+    "pausing",
+    "resuming",
+    "stop_requested",
+    "exit_rtk_capture",
+    "finalizing",
+  ].includes(task.operationPhase)) {
+    return "warn";
+  }
+  return taskTone(task.status);
+}
 
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !submitting) onClose();
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose, submitting]);
-
-  const updateRow = <K extends keyof CollectionTaskDraft,>(
-    index: number,
-    key: K,
-    value: CollectionTaskDraft[K],
-  ) => {
-    setRows((current) => current.map((row, rowIndex) =>
-      rowIndex === index ? { ...row, [key]: value } : row,
-    ));
-    markDraftChanged();
-  };
-
-  const validateRows = () => {
-    for (let index = 0; index < rows.length; index += 1) {
-      const row = rows[index];
-      const rowName = `第 ${index + 1} 行`;
-      const tunnelCode = row.tunnelCode.trim();
-      const tunnelName = row.tunnelName.trim();
-
-      if (!tunnelCode) return `${rowName}缺少隧道编号`;
-      if (!tunnelName) return `${rowName}缺少隧道名称`;
-    }
-    return null;
-  };
-
-  const submit = async () => {
-    const validationError = validateRows();
-    if (validationError) {
-      setError(validationError);
-      return;
-    }
-    setSubmitting(true);
-    setError(null);
-    try {
-      await onCreate(rows.map((row) => ({
-        tunnelCode: row.tunnelCode.trim(),
-        tunnelName: row.tunnelName.trim(),
-      })), idempotencyKey);
-    } catch (createError) {
-      setError(createError instanceof Error ? createError.message : "任务创建失败");
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  return (
-    <div
-      className="task-dialog-mask"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="task-dialog-title"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget && !submitting) onClose();
-      }}
-    >
-      <section className="task-dialog-panel task-dialog-panel--wide">
-        <header className="task-dialog-head">
-          <div>
-            <h2 id="task-dialog-title">创建检测任务</h2>
-            <p>可一次录入一条或多条隧道记录。任务编号由系统按创建顺序自动生成，只需填写隧道编号和隧道名称。</p>
-          </div>
-          <button type="button" disabled={submitting} onClick={onClose} aria-label="关闭任务创建窗口">×</button>
-        </header>
-
-        <div className="task-dialog-rows">
-          {rows.map((row, index) => (
-            <article className="task-dialog-row" key={`task-draft-${index}`}>
-              <span className="task-dialog-row__index">第 {index + 1} 项</span>
-              <label>
-                <span>隧道编号</span>
-                <input
-                  value={row.tunnelCode}
-                  onChange={(event) => updateRow(index, "tunnelCode", event.target.value)}
-                  placeholder="例如 T-001"
-                />
-              </label>
-              <label>
-                <span>隧道名称</span>
-                <input
-                  value={row.tunnelName}
-                  onChange={(event) => updateRow(index, "tunnelName", event.target.value)}
-                  placeholder="请输入隧道名称"
-                />
-              </label>
-              <div className="task-dialog-row__actions">
-                <button
-                  type="button"
-                  disabled={submitting}
-                  onClick={() => {
-                    setRows((current) => [
-                      ...current.slice(0, index + 1),
-                      { ...row },
-                      ...current.slice(index + 1),
-                    ]);
-                    markDraftChanged();
-                  }}
-                >复制</button>
-                <button
-                  type="button"
-                  disabled={submitting || rows.length === 1}
-                  onClick={() => {
-                    setRows((current) => current.filter((_, rowIndex) => rowIndex !== index));
-                    markDraftChanged();
-                  }}
-                >删除</button>
-              </div>
-            </article>
-          ))}
-        </div>
-
-        <button
-          type="button"
-          className="task-dialog-add-row"
-          disabled={submitting}
-          onClick={() => {
-            setRows((current) => [...current, createTaskDraft()]);
-            markDraftChanged();
-          }}
-        >＋ 添加任务</button>
-
-        {error && <p className="task-dialog-error" role="alert">{error}</p>}
-
-        <footer className="task-dialog-actions">
-          <button type="button" className="button" disabled={submitting} onClick={onClose}>取消</button>
-          <button type="button" className="button button--primary" disabled={submitting} onClick={submit}>
-            {submitting ? "正在保存" : `保存 ${rows.length} 项任务`}
-          </button>
-        </footer>
-      </section>
-    </div>
-  );
+function TaskCreateDialog({ onClose, onCreate }: { onClose: () => void; onCreate: (drafts: CollectionTaskDraft[], idempotencyKey: string) => Promise<void>; }) {
+  const [rows,setRows]=useState<CollectionTaskDraft[]>(()=>[createTaskDraft()]); const [error,setError]=useState<string|null>(null); const [submitting,setSubmitting]=useState(false); const [idempotencyKey,setIdempotencyKey]=useState(createClientRequestId);
+  const changed=()=>{setError(null);setIdempotencyKey(createClientRequestId());};
+  const updateRow=<K extends keyof CollectionTaskDraft,>(index:number,key:K,value:CollectionTaskDraft[K])=>{setRows(current=>current.map((row,i)=>i===index?{...row,[key]:value}:row));changed();};
+  const submit=async()=>{for(let i=0;i<rows.length;i+=1){if(!rows[i].tunnelCode.trim()){setError(`第 ${i+1} 行缺少隧道编号`);return;}if(!rows[i].tunnelName.trim()){setError(`第 ${i+1} 行缺少隧道名称`);return;}}setSubmitting(true);setError(null);try{await onCreate(rows.map(row=>({tunnelCode:row.tunnelCode.trim(),tunnelName:row.tunnelName.trim()})),idempotencyKey);}catch(e){setError(e instanceof Error?e.message:"任务创建失败");}finally{setSubmitting(false);}};
+  return <div className="task-dialog-mask" role="dialog" aria-modal="true"><section className="task-dialog-panel task-dialog-panel--wide"><header className="task-dialog-head"><div><h2>创建检测任务</h2><p>只填写隧道编号和隧道名称。任务编号由设备端按创建时间生成，例如 20260807_145601。</p></div><button type="button" disabled={submitting} onClick={onClose}>×</button></header><div className="task-dialog-rows">{rows.map((row,index)=><article className="task-dialog-row" key={index}><span className="task-dialog-row__index">第 {index+1} 项</span><label><span>隧道编号</span><input value={row.tunnelCode} onChange={e=>updateRow(index,"tunnelCode",e.target.value)} placeholder="例如 T-001"/></label><label><span>隧道名称</span><input value={row.tunnelName} onChange={e=>updateRow(index,"tunnelName",e.target.value)} placeholder="请输入隧道名称"/></label><div className="task-dialog-row__actions"><button type="button" disabled={submitting} onClick={()=>{setRows(current=>[...current.slice(0,index+1),{...row},...current.slice(index+1)]);changed();}}>复制</button><button type="button" disabled={submitting||rows.length===1} onClick={()=>{setRows(current=>current.filter((_,i)=>i!==index));changed();}}>删除</button></div></article>)}</div><button type="button" className="task-dialog-add-row" disabled={submitting} onClick={()=>{setRows(current=>[...current,createTaskDraft()]);changed();}}>＋ 添加任务</button>{error&&<p className="task-dialog-error" role="alert">{error}</p>}<footer className="task-dialog-actions"><button type="button" className="button" disabled={submitting} onClick={onClose}>取消</button><button type="button" className="button button--primary" disabled={submitting} onClick={submit}>{submitting?"正在保存":`保存 ${rows.length} 项任务`}</button></footer></section></div>;
 }
 
 function TaskSwitchDialog({
@@ -244,10 +138,10 @@ function TaskSwitchDialog({
               className={task.taskId === currentTaskId ? "active" : ""}
               onClick={() => onSelect(task.taskId)}
             >
-              <span>{formatTaskSequence(task.sequence)}</span>
+              <span>{task.displayId}</span>
               <div>
-                <strong>任务 {formatTaskSequence(task.sequence)}</strong>
-                <small>{task.tunnelCode} · {task.tunnelName}</small>
+                <strong>{task.tunnelCode} · {task.tunnelName}</strong>
+                <small>创建时间编号 {task.displayId}</small>
               </div>
               <StatusPill tone={taskTone(task.status)}>{task.status}</StatusPill>
             </button>
@@ -262,6 +156,7 @@ const navigation: Array<{ id: PageId; label: string; index: string }> = [
   { id: "dashboard", label: "采集首页", index: "01" },
   { id: "playback", label: "数据回放", index: "02" },
   { id: "report", label: "报告导出", index: "03" },
+  ...(DEVTOOLS_ENABLED ? [{ id: "devtools" as const, label: "测试", index: "DEV" }] : []),
 ];
 
 function StatusPill({
@@ -500,18 +395,18 @@ function Header({ page, task }: { page: PageId; task: CollectionTask | null }) {
 
 function Dashboard({
   tasks,
-  setTasks,
   selectedTaskId,
   setSelectedTaskId,
   onNavigate,
   taskRepositoryReady,
+  reloadTasks,
 }: {
   tasks: CollectionTask[];
-  setTasks: React.Dispatch<React.SetStateAction<CollectionTask[]>>;
   selectedTaskId: string | null;
   setSelectedTaskId: React.Dispatch<React.SetStateAction<string | null>>;
   onNavigate: (page: PageId) => void;
   taskRepositoryReady: boolean;
+  reloadTasks: () => Promise<void>;
 }) {
   const [expandedVisual, setExpandedVisual] = useState<"cloud" | "map" | null>(null);
   const [taskDialogOpen, setTaskDialogOpen] = useState(false);
@@ -519,12 +414,49 @@ function Dashboard({
   const [heightThreshold, setHeightThreshold] = useState("4.50");
   const [mountHeight, setMountHeight] = useState("1.86");
   const [operationLane, setOperationLane] = useState<CollectionTaskLane>("右车道");
+  const [controlSubmitting, setControlSubmitting] = useState<"start" | "pause" | "resume" | "stop" | "recover" | null>(null);
+  const [autoAdvanceTaskId, setAutoAdvanceTaskId] = useState<string | null>(null);
+  const [controlError, setControlError] = useState<string | null>(null);
+  const [controlAvailable, setControlAvailable] = useState(false);
+  const [controlDetail, setControlDetail] = useState("正在检查任务控制服务");
+  const [activeControlTaskId, setActiveControlTaskId] = useState<string | null>(null);
+  const [canPause, setCanPause] = useState(false);
+  const [canResume, setCanResume] = useState(false);
+  const [canStop, setCanStop] = useState(false);
+  const [canRecover, setCanRecover] = useState(false);
   const rtk = useRtkSocket();
   const rtkSnapshot = rtk.snapshot;
   const clearance = useClearanceSocket();
   const clearanceSnapshot = clearance.snapshot;
   const systemStatus = useSystemStatusSocket();
   const systemSnapshot = systemStatus.snapshot;
+
+  const refreshControlReadiness = useCallback(async () => {
+    try {
+      const readiness = await getTaskControlReadiness();
+      setControlAvailable(readiness.canStart);
+      setControlDetail(readiness.detail);
+      setActiveControlTaskId(readiness.activeTaskId);
+      setCanPause(readiness.canPause);
+      setCanResume(readiness.canResume);
+      setCanStop(readiness.canStop);
+      setCanRecover(readiness.canRecover);
+    } catch (error) {
+      setControlAvailable(false);
+      setControlDetail(error instanceof Error ? error.message : "任务控制服务不可用");
+      setActiveControlTaskId(null);
+      setCanPause(false);
+      setCanResume(false);
+      setCanStop(false);
+      setCanRecover(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshControlReadiness();
+    const timer = window.setInterval(() => void refreshControlReadiness(), 1000);
+    return () => window.clearInterval(timer);
+  }, [refreshControlReadiness]);
 
   useEffect(() => {
     if (!expandedVisual) return;
@@ -622,7 +554,7 @@ function Dashboard({
     return Number.isFinite(value) && value >= 0 ? `${value.toFixed(1)}%` : "--";
   };
   const controllerCpuText = formatPercentValue(systemSnapshot?.controller, "cpu_percent");
-  const activeTask = tasks.find((task) => task.status === "采集中" || task.status === "已暂停");
+  const activeTask = tasks.find((task) => isTaskActive(task));
   const selectedTask = tasks.find((task) => task.taskId === selectedTaskId);
   const currentTask = activeTask ?? selectedTask ?? tasks.find((task) => task.status === "待执行") ?? null;
   const pendingTasks = tasks.filter((task) => task.status === "待执行" && task.taskId !== currentTask?.taskId);
@@ -630,18 +562,18 @@ function Dashboard({
   const heightThresholdValid = Number.isFinite(parsedHeightThreshold) && parsedHeightThreshold > 0;
   const parsedMountHeight = Number(mountHeight);
   const mountHeightValid = Number.isFinite(parsedMountHeight) && parsedMountHeight > 0;
-  const captureReady = lidarConnected && rtkConnected && storageConnected;
-  const taskLocked = currentTask?.status === "采集中" || currentTask?.status === "已暂停";
+  const taskBusy = isTaskControlBusy(currentTask) || controlSubmitting !== null;
+  const taskLocked = isTaskActive(currentTask);
   const currentTaskStatus = currentTask?.status ?? "待执行";
-  const taskRunning = currentTask?.status === "采集中" || currentTask?.status === "已暂停";
-  const createTasks = async (drafts: CollectionTaskDraft[], idempotencyKey: string) => {
+  const currentTaskRuntimeLabel = currentTask ? taskRuntimeLabel(currentTask) : "无任务";
+  const taskRunning = currentTask?.status === "采集中" || currentTask?.status === "已暂停" || isTaskControlBusy(currentTask);
+  const createTasks = async (
+    drafts: CollectionTaskDraft[],
+    idempotencyKey: string,
+  ) => {
     const created = await createTaskBatch(drafts, idempotencyKey);
-    setTasks((current) => {
-      const createdIds = new Set(created.map((task) => task.taskId));
-      return [...current.filter((task) => !createdIds.has(task.taskId)), ...created]
-        .sort((left, right) => left.sequence - right.sequence);
-    });
-    if (!currentTask) setSelectedTaskId(created[0]?.taskId ?? null);
+    await reloadTasks();
+    setSelectedTaskId(created[0]?.taskId ?? null);
     setTaskDialogOpen(false);
   };
 
@@ -650,35 +582,101 @@ function Dashboard({
     setSelectedTaskId(taskId);
   };
 
+  const executeControl = async (
+    command: "start" | "pause" | "resume" | "stop" | "recover",
+    action: () => Promise<unknown>,
+  ) => {
+    setControlSubmitting(command);
+    setControlError(null);
+    try {
+      await action();
+      await reloadTasks();
+      await refreshControlReadiness();
+    } catch (error) {
+      setControlError(error instanceof Error ? error.message : "任务控制失败");
+      await reloadTasks().catch(() => undefined);
+    } finally {
+      setControlSubmitting(null);
+    }
+  };
+
   const startTask = () => {
     if (
       !currentTask ||
       currentTask.status !== "待执行" ||
-      !captureReady ||
+      taskBusy ||
+      !controlAvailable ||
       !heightThresholdValid ||
       !mountHeightValid
     ) return;
-    setTasks((current) => current.map((task) =>
-      task.taskId === currentTask.taskId ? { ...task, status: "采集中", lane: operationLane } : task,
-    ));
+    void executeControl("start", () => startTaskControl(currentTask.taskId, {
+      lane: operationLane,
+      lidarMountHeightM: parsedMountHeight,
+      clearanceThresholdM: parsedHeightThreshold,
+      expectedRevision: currentTask.statusRevision,
+      idempotencyKey: createClientRequestId(),
+    }));
   };
 
   const togglePauseTask = () => {
-    if (!currentTask || (currentTask.status !== "采集中" && currentTask.status !== "已暂停")) return;
-    const nextStatus: CollectionTaskStatus = currentTask.status === "采集中" ? "已暂停" : "采集中";
-    setTasks((current) => current.map((task) =>
-      task.taskId === currentTask.taskId ? { ...task, status: nextStatus } : task,
-    ));
+    if (!currentTask || taskBusy) return;
+    if (canPause && activeControlTaskId === currentTask.taskId) {
+      void executeControl("pause", () => pauseTaskControl(
+        currentTask.taskId, currentTask.statusRevision, createClientRequestId(),
+      ));
+      return;
+    }
+    if (canResume && activeControlTaskId === currentTask.taskId) {
+      void executeControl("resume", () => resumeTaskControl(
+        currentTask.taskId, currentTask.statusRevision, createClientRequestId(),
+      ));
+    }
   };
 
   const stopTask = () => {
-    if (!currentTask || (currentTask.status !== "采集中" && currentTask.status !== "已暂停")) return;
-    if (!window.confirm(`确认停止任务 ${formatTaskSequence(currentTask.sequence)}？当前任务控制仍为前端原型，不会创建可回放记录。`)) return;
-    setTasks((current) => current.map((task) =>
-      task.taskId === currentTask.taskId ? { ...task, status: "已停止" } : task,
+    if (
+      !currentTask ||
+      controlSubmitting !== null ||
+      !canStop ||
+      activeControlTaskId !== currentTask.taskId
+    ) return;
+    setAutoAdvanceTaskId(currentTask.taskId);
+    void executeControl("stop", () => stopTaskControl(
+      currentTask.taskId, currentTask.statusRevision, createClientRequestId(),
     ));
     setSelectedTaskId(currentTask.taskId);
   };
+
+  const recoverTask = () => {
+    if (
+      !currentTask ||
+      controlSubmitting !== null ||
+      !canRecover ||
+      activeControlTaskId !== currentTask.taskId
+    ) return;
+    void executeControl("recover", () => recoverTaskControl(
+      currentTask.taskId, currentTask.statusRevision, createClientRequestId(),
+    ));
+  };
+
+  useEffect(() => {
+    if (!autoAdvanceTaskId) return;
+    const stopped = tasks.find((task) => task.taskId === autoAdvanceTaskId);
+    if (!stopped) {
+      setAutoAdvanceTaskId(null);
+      return;
+    }
+    if (stopped.status === "已停止") {
+      const pending = tasks
+        .filter((task) => task.status === "待执行")
+        .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+      const next = pending.find((task) => task.createdAt > stopped.createdAt) ?? pending[0] ?? null;
+      setSelectedTaskId(next?.taskId ?? stopped.taskId);
+      setAutoAdvanceTaskId(null);
+    } else if (stopped.status === "异常中断" || stopped.status === "失败") {
+      setAutoAdvanceTaskId(null);
+    }
+  }, [autoAdvanceTaskId, tasks, setSelectedTaskId]);
 
   return (
     <div className="page-stack dashboard-page">
@@ -852,7 +850,11 @@ function Dashboard({
               description="作业参数、当前任务与采集控制"
               trailing={
                 <div className="task-operation-head-actions">
-                  <button type="button" disabled={!taskRepositoryReady} onClick={() => setTaskDialogOpen(true)}>创建任务</button>
+                  <button
+                    type="button"
+                    disabled={!taskRepositoryReady || taskLocked}
+                    onClick={() => setTaskDialogOpen(true)}
+                  >创建任务</button>
                 </div>
               }
             />
@@ -915,19 +917,27 @@ function Dashboard({
                 </div>
               </section>
 
-              <section className={`task-current-card task-current-card--${currentTask ? taskTone(currentTaskStatus) : "idle"}`} aria-label="当前任务">
+              <section className={`task-current-card task-current-card--${currentTask ? taskRuntimeTone(currentTask) : "idle"}`} aria-label="当前任务">
                 <div className="task-current-card__head">
                   <span>当前任务</span>
-                  <StatusPill tone={currentTask ? taskTone(currentTaskStatus) : "idle"}>
-                    {currentTask ? currentTaskStatus : "无任务"}
+                  <StatusPill tone={currentTask ? taskRuntimeTone(currentTask) : "idle"}>
+                    {currentTaskRuntimeLabel}
                   </StatusPill>
                 </div>
 
                 {currentTask ? (
                   <div className="task-current-card__content">
                     <div className="task-current-card__identity">
-                      <strong>任务 {formatTaskSequence(currentTask.sequence)}</strong>
+                      <strong>{currentTask.displayId}</strong>
                       <small>{currentTask.tunnelCode} · {currentTask.tunnelName} · {currentTask.lane ?? operationLane}</small>
+                      <div className="task-current-card__runtime">
+                        <span>当前阶段 {taskPhaseLabels[currentTask.operationPhase]}</span>
+                        <span>入口 RTK {rtkCaptureLabels[currentTask.entryRtkStatus]}</span>
+                        <span>出口 RTK {rtkCaptureLabels[currentTask.exitRtkStatus]}</span>
+                      </div>
+                      {currentTask.lastErrorMessage && (
+                        <small className="task-current-card__error">{currentTask.lastErrorMessage}</small>
+                      )}
                     </div>
                     <div className="task-current-card__actions">
                       <button
@@ -954,7 +964,7 @@ function Dashboard({
                 <div className="task-section-heading task-queue-section__head">
                   <div>
                     <h3>待测任务</h3>
-                    <span>按当前队列顺序显示</span>
+                    <span>按创建时间顺序显示</span>
                   </div>
                   <small>{pendingTasks.length} 项</small>
                 </div>
@@ -969,10 +979,10 @@ function Dashboard({
                       disabled={taskLocked}
                       onClick={() => selectTask(task.taskId)}
                     >
-                      <span className="task-queue-list__index">{formatTaskSequence(task.sequence)}</span>
+                      <span className="task-queue-list__index">{task.displayId}</span>
                       <div>
-                        <strong>任务 {formatTaskSequence(task.sequence)}</strong>
-                        <small>{task.tunnelCode} · {task.tunnelName} · {task.lane ?? operationLane}</small>
+                        <strong>{task.tunnelCode} · {task.tunnelName}</strong>
+                        <small>{task.displayId} · {task.lane ?? operationLane}</small>
                       </div>
                       <span className="task-queue-list__arrow" aria-hidden="true">›</span>
                     </button>
@@ -985,7 +995,7 @@ function Dashboard({
               {taskRunning ? (
                 <div className={`task-running-state${currentTask?.status === "已暂停" ? " task-running-state--paused" : ""}`}>
                   <i />
-                  <span>{currentTask?.status === "已暂停" ? "采集已暂停" : "正在采集"}</span>
+                  <span>{currentTask ? taskPhaseLabels[currentTask.operationPhase] : "任务处理中"}</span>
                 </div>
               ) : (
                 <button
@@ -994,7 +1004,8 @@ function Dashboard({
                   disabled={
                     !currentTask ||
                     currentTask.status !== "待执行" ||
-                    !captureReady ||
+                    taskBusy ||
+                    !controlAvailable ||
                     !heightThresholdValid ||
                     !mountHeightValid
                   }
@@ -1004,24 +1015,47 @@ function Dashboard({
                       ? "请输入有效的高度阈值"
                       : !mountHeightValid
                         ? "请输入有效的雷达安装高度"
-                        : !captureReady
-                          ? "请确认雷达、RTK 和存储均已连接"
-                          : "开始采集"}
+                        : !controlAvailable
+                          ? controlDetail
+                          : "立即开始采集，不等待传感器真实数据检查"}
                   onClick={startTask}
-                >开始采集</button>
+                >{controlSubmitting === "start" ? "正在开始" : "开始采集"}</button>
               )}
               <button
                 type="button"
                 className="button task-pause-button"
-                disabled={!currentTask || (currentTask.status !== "采集中" && currentTask.status !== "已暂停")}
+                disabled={
+                  !currentTask || taskBusy ||
+                  !((canPause || canResume) && activeControlTaskId === currentTask.taskId)
+                }
                 onClick={togglePauseTask}
-              >{currentTask?.status === "已暂停" ? "继续" : "暂停"}</button>
+              >{controlSubmitting === "pause"
+                ? "正在暂停"
+                : controlSubmitting === "resume"
+                  ? "正在继续"
+                  : currentTask?.status === "已暂停" ? "继续" : "暂停"}</button>
               <button
                 type="button"
                 className="button task-stop-button"
-                disabled={!currentTask || (currentTask.status !== "采集中" && currentTask.status !== "已暂停")}
+                disabled={
+                  !currentTask || controlSubmitting !== null ||
+                  !canStop || activeControlTaskId !== currentTask.taskId
+                }
                 onClick={stopTask}
-              >停止</button>
+              >{controlSubmitting === "stop" ? "正在停止" : "停止"}</button>
+              {currentTask && canRecover && activeControlTaskId === currentTask.taskId && (
+                <button
+                  type="button"
+                  className="button task-recover-button"
+                  disabled={controlSubmitting !== null}
+                  onClick={recoverTask}
+                >{controlSubmitting === "recover" ? "正在恢复" : "恢复控制"}</button>
+              )}
+              {(controlError || (!controlAvailable && currentTask?.status === "待执行")) && (
+                <div className="task-operation-actions__message" role={controlError ? "alert" : "status"}>
+                  {controlError ?? controlDetail}
+                </div>
+              )}
             </footer>
           </article>
         </aside>
@@ -1055,123 +1089,69 @@ export default function Home() {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [taskQueryState, setTaskQueryState] = useState<"loading" | "ready" | "error">("loading");
   const [taskQueryError, setTaskQueryError] = useState<string | null>(null);
-  const selectedTask = tasks.find((task) => task.taskId === selectedTaskId) ?? null;
+  const taskStatus = useTaskStatusSocket();
 
-  const loadPersistedTasks = useCallback(async () => {
-    setTaskQueryState("loading");
+  const loadPersistedData = useCallback(async (showLoading = true) => {
+    if (showLoading) setTaskQueryState("loading");
     setTaskQueryError(null);
     try {
       const persistedTasks = await listTasks();
       setTasks(persistedTasks);
-      setSelectedTaskId((current) => {
-        if (current && persistedTasks.some((task) => task.taskId === current)) return current;
-        return persistedTasks[0]?.taskId ?? null;
-      });
+      setSelectedTaskId((current) => current && persistedTasks.some((task) => task.taskId === current)
+        ? current
+        : persistedTasks.find((task) => isTaskActive(task))?.taskId ?? persistedTasks[0]?.taskId ?? null);
       setTaskQueryState("ready");
     } catch (error) {
-      const detail = error instanceof TaskApiError || error instanceof Error
-        ? error.message
-        : "任务列表读取失败";
-      setTaskQueryError(detail);
+      setTaskQueryError(error instanceof Error ? error.message : "任务列表读取失败");
       setTaskQueryState("error");
     }
   }, []);
 
+  useEffect(() => { void loadPersistedData(true); }, [loadPersistedData]);
   useEffect(() => {
-    void loadPersistedTasks();
-  }, [loadPersistedTasks]);
+    const snapshot = taskStatus.snapshot;
+    if (!snapshot) return;
+    const labels: Record<typeof snapshot.status, CollectionTaskStatus> = {
+      pending: "待执行", running: "采集中", paused: "已暂停", completed: "已停止", interrupted: "异常中断", failed: "失败",
+    };
+    setTasks((current) => current.map((task) => task.taskId === snapshot.taskId ? {
+      ...task, status: labels[snapshot.status], operationPhase: snapshot.operationPhase,
+      statusRevision: snapshot.statusRevision, entryRtkStatus: snapshot.entryRtkStatus,
+      exitRtkStatus: snapshot.exitRtkStatus, hasMeasurements: snapshot.hasMeasurements,
+      recordingPath: snapshot.recordingPath, lastErrorCode: snapshot.errorCode,
+      lastErrorMessage: snapshot.errorCode ? snapshot.message : null,
+    } : task));
+    void loadPersistedData(false);
+  }, [taskStatus.snapshot, loadPersistedData]);
 
-  const navigateTo = (page: PageId) => setActivePage(page);
-
+  const selectedTask = tasks.find((task) => task.taskId === selectedTaskId) ?? null;
+  const reloadTasks = useCallback(() => loadPersistedData(false), [loadPersistedData]);
   const removePersistedTask = async (taskId: string) => {
-    const deletedIndex = tasks.findIndex((task) => task.taskId === taskId);
+    const index = tasks.findIndex((task) => task.taskId === taskId);
     await deleteTask(taskId);
-    const remainingTasks = tasks.filter((task) => task.taskId !== taskId);
-    setTasks(remainingTasks);
-    setSelectedTaskId((current) => {
-      if (current !== taskId) return current;
-      if (remainingTasks.length === 0) return null;
-      const nextIndex = Math.min(Math.max(deletedIndex, 0), remainingTasks.length - 1);
-      return remainingTasks[nextIndex].taskId;
-    });
+    await loadPersistedData(false);
+    const remaining = tasks.filter((task) => task.taskId !== taskId);
+    setSelectedTaskId((current) => current !== taskId ? current : remaining[index]?.taskId ?? remaining[index - 1]?.taskId ?? null);
   };
 
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <div className="brand">
-          <div className="brand__mark"><span>T</span></div>
-          <div><strong>三维采集系统</strong><span>隧道净空测量终端</span></div>
-        </div>
+        <div className="brand"><div className="brand__mark"><span>T</span></div><div><strong>三维采集系统</strong><span>隧道净空测量终端</span></div></div>
         <div className="nav-label">工作台</div>
-        <nav aria-label="主导航">
-          {navigation.map((item) => (
-            <button
-              type="button"
-              key={item.id}
-              className={activePage === item.id ? "active" : ""}
-              onClick={() => navigateTo(item.id)}
-              aria-current={activePage === item.id ? "page" : undefined}
-            >
-              <span>{item.index}</span>{item.label}<i>›</i>
-            </button>
-          ))}
-        </nav>
-        <div className="sidebar__bottom">
-          <div className="device-card">
-            <div className="device-card__icon">RK</div>
-            <div><strong>车载主控终端</strong><span>RK3588 · 本地运行</span></div>
-            <i />
-          </div>
-          <div className="version">CAPTURE SYSTEM · V1.0</div>
-        </div>
+        <nav aria-label="主导航">{navigation.map((item) => (
+          <button type="button" key={item.id} className={activePage === item.id ? "active" : ""} onClick={() => setActivePage(item.id)} aria-current={activePage === item.id ? "page" : undefined}><span>{item.index}</span>{item.label}<i>›</i></button>
+        ))}</nav>
+        <div className="sidebar__bottom"><div className="device-card"><div className="device-card__icon">RK</div><div><strong>车载主控终端</strong><span>RK3588 · 本地运行</span></div><i /></div><div className="version">CAPTURE SYSTEM · V1.0</div></div>
       </aside>
       <main className={activePage === "dashboard" ? "main--dashboard" : undefined}>
         {activePage !== "dashboard" && <Header page={activePage} task={selectedTask} />}
         <div className="page-content">
-          {taskQueryState !== "ready" && (
-            <section
-              className={`task-data-notice task-data-notice--${taskQueryState}`}
-              role={taskQueryState === "error" ? "alert" : "status"}
-            >
-              <div>
-                <strong>{taskQueryState === "loading" ? "正在读取设备任务记录" : "任务记录读取失败"}</strong>
-                <span>{taskQueryState === "loading"
-                  ? "任务列表从 FastAPI 持久化接口加载"
-                  : taskQueryError ?? "无法读取设备端任务数据库"}</span>
-              </div>
-              {taskQueryState === "error" && (
-                <button type="button" onClick={() => void loadPersistedTasks()}>重新读取</button>
-              )}
-            </section>
-          )}
-          {activePage === "dashboard" && (
-            <Dashboard
-              tasks={tasks}
-              setTasks={setTasks}
-              selectedTaskId={selectedTaskId}
-              setSelectedTaskId={setSelectedTaskId}
-              onNavigate={navigateTo}
-              taskRepositoryReady={taskQueryState === "ready"}
-            />
-          )}
-          {activePage === "playback" && (
-            <PlaybackWorkspace
-              tasks={tasks}
-              selectedTaskId={selectedTaskId}
-              onSelectTask={setSelectedTaskId}
-              onDeleteTask={removePersistedTask}
-              onNavigate={navigateTo}
-            />
-          )}
-          {activePage === "report" && (
-            <ReportWorkspace
-              tasks={tasks}
-              selectedTaskId={selectedTaskId}
-              onSelectTask={setSelectedTaskId}
-              onNavigate={navigateTo}
-            />
-          )}
+          {taskQueryState !== "ready" && <section className={`task-data-notice task-data-notice--${taskQueryState}`} role={taskQueryState === "error" ? "alert" : "status"}><div><strong>{taskQueryState === "loading" ? "正在读取设备任务记录" : "任务记录读取失败"}</strong><span>{taskQueryState === "loading" ? "任务列表从 FastAPI 持久化接口加载" : taskQueryError ?? "无法读取设备端任务数据库"}</span></div>{taskQueryState === "error" && <button type="button" onClick={() => void loadPersistedData()}>重新读取</button>}</section>}
+          {activePage === "dashboard" && <Dashboard tasks={tasks} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} onNavigate={setActivePage} taskRepositoryReady={taskQueryState === "ready"} reloadTasks={reloadTasks} />}
+          {activePage === "playback" && <PlaybackWorkspace tasks={tasks} selectedTaskId={selectedTaskId} onSelectTask={setSelectedTaskId} onDeleteTask={removePersistedTask} onDataChanged={reloadTasks} onNavigate={setActivePage} />}
+          {activePage === "report" && <ReportWorkspace tasks={tasks} selectedTaskId={selectedTaskId} onSelectTask={setSelectedTaskId} onNavigate={setActivePage} />}
+          {activePage === "devtools" && DEVTOOLS_ENABLED && DevToolsWorkspace && <DevToolsWorkspace />}
         </div>
       </main>
     </div>

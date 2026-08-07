@@ -1,297 +1,42 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-
-import {
-  downloadGeneratedFile,
-  generateSummaryPdf,
-  generateTaskTxt,
-  loadReportPreview,
-  type GeneratedExportFile,
-  type ReportPreview,
-  type ReportRtkEndpoint,
-  type ReportTaskPreview,
-} from "@/components/report/reportExportApi";
+import { downloadGeneratedFile, generateSummaryPdf, generateTaskTxt, loadReportPreview, type GeneratedExportFile, type ReportPreview, type ReportRtkEndpoint, type ReportTaskPreview } from "@/components/report/reportExportApi";
 import TaskBrowser from "@/components/workflow/TaskBrowser";
-import { formatTaskSequence } from "@/components/workflow/taskModel";
 import type { CollectionTask, WorkflowPageId } from "@/components/workflow/taskModel";
 
+type Props={tasks:CollectionTask[];selectedTaskId:string|null;onSelectTask:(id:string)=>void;onNavigate:(page:WorkflowPageId)=>void};
+type PreviewState="idle"|"loading"|"ready"|"error"; type ExportState="idle"|"generating"|"done"|"error";
+const pdfColumns=["任务编号","隧道编号","检测车道","最低高度","记录时间","隧道入口 RTK","隧道出口 RTK"];
+const statusText:Record<ReportTaskPreview["status"],string>={pending:"待执行",running:"采集中",paused:"已暂停",completed:"已停止",interrupted:"异常中断",failed:"失败"};
+const fh=(v:number|null)=>v===null?"--":`${v.toFixed(3)} m`; const ft=(v:string|null)=>{if(!v)return"--";const d=new Date(v);return Number.isNaN(d.getTime())?"--":d.toLocaleString("zh-CN",{hour12:false})};
+const fr=(e:ReportRtkEndpoint|null)=>!e||!e.valid?"未记录":`${e.latitudeDeg.toFixed(7)}, ${e.longitudeDeg.toFixed(7)}`; const et=(e:unknown)=>e instanceof Error?e.message:"导出操作失败";
 
-type ReportWorkspaceProps = {
-  tasks: CollectionTask[];
-  selectedTaskId: string | null;
-  onSelectTask: (taskId: string) => void;
-  onNavigate: (page: WorkflowPageId) => void;
-};
-
-type PreviewState = "loading" | "ready" | "error";
-type ExportState = "idle" | "generating" | "done" | "error";
-
-const txtFields = [
-  { name: "记录时间", detail: "数据源时间和设备写入时间，精确到毫秒" },
-  { name: "隧道编号", detail: "当前任务对应的隧道业务编号" },
-  { name: "检测车道", detail: "任务开始时冻结的左车道或右车道" },
-  { name: "实时高度", detail: "有效样本的净空高度，无效样本保持空值" },
-  { name: "最低高度", detail: "当前任务全部有效样本中的最低高度" },
-  { name: "隧道入口 RTK", detail: "入口经纬度和高程，无有效定位时标记未记录" },
-  { name: "隧道出口 RTK", detail: "出口经纬度和高程，无有效定位时标记未记录" },
-];
-
-const pdfColumns = [
-  "任务编号",
-  "隧道编号",
-  "检测车道",
-  "最低高度",
-  "记录时间",
-  "隧道入口 RTK",
-  "隧道出口 RTK",
-];
-
-const statusText: Record<ReportTaskPreview["status"], string> = {
-  pending: "待执行",
-  running: "采集中",
-  paused: "已暂停",
-  completed: "已停止",
-  interrupted: "异常中断",
-  failed: "失败",
-};
-
-const formatHeight = (value: number | null) => value === null ? "--" : `${value.toFixed(3)} m`;
-
-const formatTime = (value: string | null) => {
-  if (!value) return "--";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "--";
-  return date.toLocaleString("zh-CN", { hour12: false });
-};
-
-const formatRtk = (endpoint: ReportRtkEndpoint | null) => {
-  if (!endpoint || !endpoint.valid) return "未记录";
-  return `${endpoint.latitudeDeg.toFixed(7)}, ${endpoint.longitudeDeg.toFixed(7)}`;
-};
-
-const errorText = (error: unknown) => error instanceof Error ? error.message : "导出操作失败";
-
-export default function ReportWorkspace({
-  tasks,
-  selectedTaskId,
-  onSelectTask,
-  onNavigate,
-}: ReportWorkspaceProps) {
-  const [previewState, setPreviewState] = useState<PreviewState>("loading");
-  const [preview, setPreview] = useState<ReportPreview | null>(null);
-  const [previewError, setPreviewError] = useState<string | null>(null);
-  const [txtState, setTxtState] = useState<ExportState>("idle");
-  const [pdfState, setPdfState] = useState<ExportState>("idle");
-  const [txtMessage, setTxtMessage] = useState<string | null>(null);
-  const [pdfMessage, setPdfMessage] = useState<string | null>(null);
-
-  const taskRevision = useMemo(
-    () => tasks.map((task) => `${task.taskId}:${task.updatedAt}:${task.hasMeasurements}`).join("|"),
-    [tasks],
-  );
-
-  useEffect(() => {
-    let cancelled = false;
-    setPreviewState("loading");
-    setPreviewError(null);
-    loadReportPreview()
-      .then((result) => {
-        if (cancelled) return;
-        setPreview(result);
-        setPreviewState("ready");
-      })
-      .catch((error) => {
-        if (cancelled) return;
-        setPreview(null);
-        setPreviewError(errorText(error));
-        setPreviewState("error");
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [taskRevision]);
-
-  const selectedTask = tasks.find((task) => task.taskId === selectedTaskId) ?? null;
-  const selectedPreview = preview?.tasks.find((task) => task.taskId === selectedTaskId) ?? null;
-  const exportableTasks = preview?.tasks.filter((task) => task.exportable) ?? [];
-  const selectedTaskReady = selectedPreview?.exportable === true;
-  const pdfReady = exportableTasks.length > 0;
-  const taskNumber = selectedTask ? formatTaskSequence(selectedTask.sequence) : "--";
-  const selectedStatus = selectedPreview ? statusText[selectedPreview.status] : selectedTask?.status ?? "待选择";
-  const blockerText = !selectedTask
-    ? "请先选择需要导出 50 Hz 明细的任务"
-    : previewState === "loading"
-      ? "正在核对任务测量记录"
-      : previewState === "error"
-        ? previewError ?? "导出预览读取失败"
-        : selectedPreview?.blockedReason ?? "当前任务满足正式 TXT 导出条件";
-
-  const runDownload = async (
-    kind: "txt" | "pdf",
-    generator: () => Promise<GeneratedExportFile>,
-  ) => {
-    const setState = kind === "txt" ? setTxtState : setPdfState;
-    const setMessage = kind === "txt" ? setTxtMessage : setPdfMessage;
-    setState("generating");
-    setMessage(null);
-    try {
-      const file = await generator();
-      await downloadGeneratedFile(file);
-      setState("done");
-      setMessage(`${file.fileName} 已生成并开始下载`);
-    } catch (error) {
-      setState("error");
-      setMessage(errorText(error));
-    }
-  };
-
-  return (
-    <div className="page-stack report-page report-page--simple">
-      <section className="panel workflow-context-bar">
-        <div className="workflow-context-bar__identity">
-          <span>当前导出对象</span>
-          <strong>{selectedTask ? `任务 ${taskNumber}` : "尚未选择任务"}</strong>
-          <small>{selectedTask
-            ? `${selectedTask.tunnelCode} · ${selectedTask.tunnelName}`
-            : "TXT 按当前任务导出，PDF 汇总全部满足正式导出条件的隧道记录"}</small>
-        </div>
-        <div className="workflow-context-bar__states" aria-label="导出状态">
-          <div><span>当前任务</span><strong className={selectedTaskReady ? "is-ready" : "is-pending"}>{selectedStatus}</strong></div>
-          <div><span>可汇总任务</span><strong className={pdfReady ? "is-ready" : "is-pending"}>{previewState === "ready" ? `${exportableTasks.length}/${preview?.taskCount ?? 0}` : "--"}</strong></div>
-          <div><span>导出接口</span><strong className={previewState === "ready" ? "is-ready" : "is-blocked"}>{previewState === "ready" ? "可用" : previewState === "loading" ? "检查中" : "异常"}</strong></div>
-        </div>
-        <div className="workflow-context-bar__actions">
-          <button type="button" className="button" onClick={() => onNavigate("playback")}>返回数据回放</button>
-          <button type="button" className="button button--primary" onClick={() => onNavigate("dashboard")}>返回采集首页</button>
-        </div>
-      </section>
-
-      <section className="report-simple-layout">
-        <TaskBrowser
-          tasks={tasks}
-          selectedTaskId={selectedTaskId}
-          onSelectTask={onSelectTask}
-          heading="选择导出任务"
-        />
-
-        <main className="report-simple-main">
-          <article className="panel report-task-summary">
-            <header className="report-simple-heading">
-              <div>
-                <span>当前任务</span>
-                <h2>导出对象</h2>
-              </div>
-              <strong className={selectedTaskReady ? "is-ready" : "is-pending"}>{selectedStatus}</strong>
-            </header>
-
-            <dl className="report-task-summary__grid">
-              <div><dt>任务编号</dt><dd>{selectedTask ? taskNumber : "--"}</dd></div>
-              <div><dt>隧道编号</dt><dd>{selectedTask?.tunnelCode ?? "--"}</dd></div>
-              <div><dt>隧道名称</dt><dd>{selectedTask?.tunnelName ?? "--"}</dd></div>
-              <div><dt>检测车道</dt><dd>{selectedPreview?.lane ?? selectedTask?.lane ?? "未记录"}</dd></div>
-            </dl>
-
-            <p className={`report-export-blocker${selectedTaskReady ? " is-ready" : ""}`} role="status">
-              <strong>{selectedTaskReady ? "可以导出" : "当前不能导出"}</strong>
-              <span>{blockerText}</span>
-            </p>
-          </article>
-
-          <section className="report-export-grid" aria-label="导出格式">
-            <article className="panel report-export-card report-export-card--txt">
-              <header className="report-export-card__head">
-                <span className="report-export-card__type" aria-hidden="true">TXT</span>
-                <div>
-                  <h2>50 Hz 测量明细</h2>
-                  <p>当前选中任务每个采样周期输出一行，无效样本保留空高度和无效原因。</p>
-                </div>
-                <strong>50 Hz</strong>
-              </header>
-
-              <div className="report-field-list" aria-label="TXT字段">
-                {txtFields.map((field, index) => (
-                  <div key={field.name}>
-                    <span>{String(index + 1).padStart(2, "0")}</span>
-                    <div><strong>{field.name}</strong><small>{field.detail}</small></div>
-                  </div>
-                ))}
-              </div>
-
-              <footer className="report-export-card__footer">
-                <div>
-                  <span>文件名称</span>
-                  <strong>{selectedTask ? `任务${taskNumber}_${selectedTask.tunnelCode}_50Hz测量明细.txt` : "任务编号_隧道编号_50Hz测量明细.txt"}</strong>
-                  {txtMessage && <small className={txtState === "error" ? "is-error" : "is-success"}>{txtMessage}</small>}
-                </div>
-                <button
-                  type="button"
-                  className="button button--primary"
-                  disabled={!selectedTaskReady || txtState === "generating"}
-                  onClick={() => selectedTaskId && runDownload("txt", () => generateTaskTxt(selectedTaskId))}
-                >
-                  {txtState === "generating" ? "正在生成" : "导出 TXT"}
-                </button>
-              </footer>
-            </article>
-
-            <article className="panel report-export-card report-export-card--pdf">
-              <header className="report-export-card__head">
-                <span className="report-export-card__type" aria-hidden="true">PDF</span>
-                <div>
-                  <h2>隧道净空检测汇总</h2>
-                  <p>按任务序号汇总正常完成、来源为正式记录且包含有效净空样本的任务。</p>
-                </div>
-                <strong>{exportableTasks.length} 项</strong>
-              </header>
-
-              <section className="report-pdf-outline" aria-label="PDF内容预览">
-                <header>
-                  <span>报告标题</span>
-                  <strong>隧道净空检测汇总报告</strong>
-                </header>
-                <div className="report-pdf-table" role="table" aria-label="隧道汇总字段">
-                  <div className="report-pdf-table__row report-pdf-table__row--head" role="row">
-                    {pdfColumns.map((column) => <span key={column} role="columnheader">{column}</span>)}
-                  </div>
-                  {exportableTasks.length === 0 ? (
-                    <div className="report-pdf-table__row" role="row">
-                      {pdfColumns.map((column) => <span key={column} role="cell">--</span>)}
-                    </div>
-                  ) : exportableTasks.map((task) => (
-                    <div className="report-pdf-table__row" role="row" key={task.taskId}>
-                      <span role="cell">{formatTaskSequence(task.sequence)}</span>
-                      <span role="cell">{task.tunnelCode}</span>
-                      <span role="cell">{task.lane ?? "未记录"}</span>
-                      <span role="cell">{formatHeight(task.minimumHeightM)}</span>
-                      <span role="cell">{formatTime(task.startedAt)}</span>
-                      <span role="cell">{formatRtk(task.entryRtk)}</span>
-                      <span role="cell">{formatRtk(task.exitRtk)}</span>
-                    </div>
-                  ))}
-                </div>
-                <p>无有效 RTK 端点时字段标记为未记录。界面测试数据、异常中断记录和无有效高度的任务不会进入正式 PDF。</p>
-              </section>
-
-              <footer className="report-export-card__footer">
-                <div>
-                  <span>文件名称</span>
-                  <strong>隧道净空检测汇总报告.pdf</strong>
-                  {pdfMessage && <small className={pdfState === "error" ? "is-error" : "is-success"}>{pdfMessage}</small>}
-                </div>
-                <button
-                  type="button"
-                  className="button button--primary"
-                  disabled={!pdfReady || pdfState === "generating"}
-                  onClick={() => runDownload("pdf", generateSummaryPdf)}
-                >
-                  {pdfState === "generating" ? "正在生成" : "导出 PDF"}
-                </button>
-              </footer>
-            </article>
-          </section>
-        </main>
-      </section>
-    </div>
-  );
+export default function ReportWorkspace({tasks,selectedTaskId,onSelectTask,onNavigate}:Props){
+  const [checked,setChecked]=useState<Set<string>>(()=>new Set(selectedTaskId?[selectedTaskId]:[]));
+  const [previewState,setPreviewState]=useState<PreviewState>("idle"); const [preview,setPreview]=useState<ReportPreview|null>(null); const [previewError,setPreviewError]=useState<string|null>(null);
+  const [txtState,setTxtState]=useState<ExportState>("idle"); const [pdfState,setPdfState]=useState<ExportState>("idle"); const [txtMessage,setTxtMessage]=useState<string|null>(null); const [pdfMessage,setPdfMessage]=useState<string|null>(null);
+  const selectedTask=tasks.find(t=>t.taskId===selectedTaskId)??null; const selectedIds=useMemo(()=>tasks.filter(t=>checked.has(t.taskId)).map(t=>t.taskId),[checked,tasks]);
+  const revision=useMemo(()=>tasks.map(t=>`${t.taskId}:${t.updatedAt}:${t.hasMeasurements}`).join("|"),[tasks]);
+  useEffect(()=>{setChecked(current=>{const next=new Set([...current].filter(id=>tasks.some(t=>t.taskId===id)));if(next.size===0&&selectedTaskId&&tasks.some(t=>t.taskId===selectedTaskId))next.add(selectedTaskId);return next;});},[revision,tasks,selectedTaskId]);
+  useEffect(()=>{let cancelled=false;if(selectedIds.length===0){setPreview(null);setPreviewState("idle");return()=>{cancelled=true};}setPreviewState("loading");setPreviewError(null);loadReportPreview(selectedIds).then(p=>{if(!cancelled){setPreview(p);setPreviewState("ready")}}).catch(e=>{if(!cancelled){setPreview(null);setPreviewState("error");setPreviewError(et(e))}});return()=>{cancelled=true};},[selectedIds.join("|"),revision]);
+  const selectedPreview=preview?.tasks.find(t=>t.taskId===selectedTaskId)??null; const exportable=preview?.tasks.filter(t=>t.exportable)??[]; const txtReady=selectedPreview?.exportable===true; const pdfReady=exportable.length>0;
+  const toggle=(id:string)=>setChecked(c=>{const n=new Set(c);n.has(id)?n.delete(id):n.add(id);return n;});
+  const toggleDate=(_:string,ids:string[])=>setChecked(c=>{const n=new Set(c);const all=ids.every(id=>n.has(id));ids.forEach(id=>all?n.delete(id):n.add(id));return n;});
+  const run=async(kind:"txt"|"pdf",generator:()=>Promise<GeneratedExportFile>)=>{const ss=kind==="txt"?setTxtState:setPdfState;const sm=kind==="txt"?setTxtMessage:setPdfMessage;ss("generating");sm(null);try{const f=await generator();await downloadGeneratedFile(f);ss("done");sm(`${f.fileName} 已生成并开始下载`);}catch(e){ss("error");sm(et(e));}};
+  const blocker=!selectedTask?"请先选择需要导出明细的任务":selectedPreview?.blockedReason??(txtReady?"当前任务满足正式 TXT 导出条件":"请将当前任务加入 PDF 选择后核对导出条件");
+  return <div className="page-stack report-page report-page--simple">
+    <section className="panel workflow-context-bar"><div className="workflow-context-bar__identity"><span>报告选择</span><strong>{checked.size} 个任务已选择</strong><small>TXT 面向当前任务，PDF 汇总勾选且满足正式导出条件的任务</small></div><div className="workflow-context-bar__states"><div><span>当前任务</span><strong>{selectedTask?.displayId??"--"}</strong></div><div><span>已选择</span><strong>{checked.size} 项</strong></div><div><span>可汇总</span><strong className={pdfReady?"is-ready":"is-pending"}>{previewState==="ready"?`${exportable.length}/${preview?.taskCount??0}`:"--"}</strong></div><div><span>导出接口</span><strong className={previewState==="error"?"is-blocked":"is-ready"}>{previewState==="error"?"异常":"可用"}</strong></div></div><div className="workflow-context-bar__actions"><button type="button" className="button" onClick={()=>onNavigate("playback")}>返回数据回放</button><button type="button" className="button button--primary" onClick={()=>onNavigate("dashboard")}>返回采集首页</button></div></section>
+    {previewError&&<p className="batch-operation-message is-error" role="alert">{previewError}</p>}
+    <section className="report-simple-layout">
+      <TaskBrowser tasks={tasks} selectedTaskId={selectedTaskId} onSelectTask={onSelectTask} heading="选择导出任务" selectable checkedTaskIds={checked} onToggleChecked={toggle} onToggleDateChecked={toggleDate}/>
+      <main className="report-simple-main">
+        <article className="panel report-task-summary"><header className="report-simple-heading"><div><span>当前任务</span><h2>{selectedTask?.displayId??"导出对象"}</h2></div><strong className={txtReady?"is-ready":"is-pending"}>{selectedPreview?statusText[selectedPreview.status]:selectedTask?.status??"待选择"}</strong></header><dl className="report-task-summary__grid"><div><dt>任务编号</dt><dd>{selectedTask?.displayId??"--"}</dd></div><div><dt>创建时间</dt><dd>{ft(selectedTask?.createdAt??null)}</dd></div><div><dt>隧道编号</dt><dd>{selectedTask?.tunnelCode??"--"}</dd></div><div><dt>隧道名称</dt><dd>{selectedTask?.tunnelName??"--"}</dd></div><div><dt>检测车道</dt><dd>{selectedPreview?.lane??selectedTask?.lane??"未记录"}</dd></div></dl><p className={`report-export-blocker${txtReady?" is-ready":""}`}><strong>{txtReady?"可以导出":"当前不能导出"}</strong><span>{blocker}</span></p></article>
+        <section className="report-export-grid">
+          <article className="panel report-export-card report-export-card--txt"><header className="report-export-card__head"><span className="report-export-card__type">TXT</span><div><h2>50 Hz 测量明细</h2><p>当前任务逐采样导出，无效样本保持空高度并记录原因。</p></div><strong>50 Hz</strong></header><footer className="report-export-card__footer"><div><span>文件名称</span><strong>{selectedTask?`${selectedTask.displayId}_${selectedTask.tunnelCode}_50Hz测量明细.txt`:"时间编号_隧道编号_50Hz测量明细.txt"}</strong>{txtMessage&&<small className={txtState==="error"?"is-error":"is-success"}>{txtMessage}</small>}</div><button type="button" className="button button--primary" disabled={!txtReady||txtState==="generating"} onClick={()=>selectedTask&&run("txt",()=>generateTaskTxt(selectedTask.taskId))}>{txtState==="generating"?"正在生成":"导出 TXT"}</button></footer></article>
+          <article className="panel report-export-card report-export-card--pdf"><header className="report-export-card__head"><span className="report-export-card__type">PDF</span><div><h2>隧道净空检测汇总</h2><p>PDF 只汇总当前勾选且符合正式记录条件的任务，不再依赖作业批次。</p></div><strong>{exportable.length} 项</strong></header><section className="report-pdf-outline"><header><span>报告标题</span><strong>隧道净空检测汇总报告</strong></header><div className="report-pdf-table"><div className="report-pdf-table__row report-pdf-table__row--head">{pdfColumns.map(c=><span key={c}>{c}</span>)}</div>{exportable.length===0?<div className="report-pdf-table__row">{pdfColumns.map(c=><span key={c}>--</span>)}</div>:exportable.map(t=><div className="report-pdf-table__row" key={t.taskId}><span>{t.displayId}</span><span>{t.tunnelCode}</span><span>{t.lane??"未记录"}</span><span>{fh(t.minimumHeightM)}</span><span>{ft(t.startedAt)}</span><span>{fr(t.entryRtk)}</span><span>{fr(t.exitRtk)}</span></div>)}</div><p>异常中断、测试数据和无有效高度的任务不会进入正式 PDF。</p></section><footer className="report-export-card__footer"><div><span>文件名称</span><strong>生成时间_隧道净空检测汇总报告.pdf</strong>{pdfMessage&&<small className={pdfState==="error"?"is-error":"is-success"}>{pdfMessage}</small>}</div><button type="button" className="button button--primary" disabled={!pdfReady||pdfState==="generating"} onClick={()=>run("pdf",()=>generateSummaryPdf(selectedIds))}>{pdfState==="generating"?"正在生成":"导出 PDF"}</button></footer></article>
+        </section>
+      </main>
+    </section>
+  </div>;
 }

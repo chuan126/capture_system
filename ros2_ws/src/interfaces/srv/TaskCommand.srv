@@ -1,0 +1,10 @@
+string task_id
+string command_id
+uint64 expected_revision
+---
+bool accepted
+string status
+string operation_phase
+uint64 status_revision
+string error_code
+string message

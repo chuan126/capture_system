@@ -2,7 +2,7 @@
 
 软件版本：`0.2.0`
 
-文档核对日期：2026-08-06
+文档核对日期：2026-08-07
 
 运行于 RK3588 的车载隧道点云采集与单帧顶部净空测量系统。系统接入 ODIN1 Lite
 激光雷达和 RTK，在设备端完成点云逐点运动补偿、近水平顶面检测、状态监控和
@@ -35,11 +35,19 @@ RTK 串口
 FastAPI
 ├→ /api/v1/tasks
 ├→ /api/v1/tasks/batch
+├→ /api/v1/tasks/{task_id}/start|pause|resume|stop
 ├→ /ws/v1/cloud-preview
 ├→ /ws/v1/clearance
 ├→ /ws/v1/rtk
-└→ /ws/v1/system-status
+├→ /ws/v1/system-status
+└→ /ws/v1/task-status
 → 浏览器采集首页、数据回放和报告导出
+
+浏览器任务命令
+→ FastAPI TaskControlBridge
+→ task_manager
+→ data_recorder
+→ CAPTURE_DATA_ROOT/tasks/<task_id>/measurements.db
 ```
 
 网页点云预览与净空算法共用补偿后的局部东北天点云。当前生产配置不使用厂商
@@ -54,46 +62,78 @@ SLAM 点云作为网页预览输入。
 - RTK 串口接入、NMEA 解析结果发布和网页字段映射。
 - 雷达、RTK、RK3588 资源和数据目录容量的统一系统诊断。
 - 局部东北天点云的 5 Hz、最多 10,000 点网页预览。
-- FastAPI 静态页面托管、健康检查、任务元数据 SQLite 持久化、历史测量文件读取和四路同源 WebSocket。
+- FastAPI 静态页面托管、健康检查、任务元数据 SQLite 持久化、历史测量文件读取和实时 WebSocket。
+- 任务使用创建时间生成显示编号，例如 `20260807_145601`；同一秒批量创建时追加 `_02`、`_03`，内部始终使用稳定 UUID。
+- 设备端 `task_manager` 状态机，支持开始、暂停、继续、停止、过渡阶段看门狗、人工恢复、状态版本和幂等控制。
+- 设备端 `data_recorder`，保存原始净空源帧、50 Hz 最近源帧保持序列、RTK、暂停区间和任务事件。
+- 开始与停止时自动保存最新 RTK 快照。无有效坐标时保存“坐标未确认”，不阻塞高速作业流程。
+- FastAPI 任务控制 HTTP 接口和任务状态 WebSocket。浏览器不直接访问 ROS 2。
 - 采集首页的点云、地图、净空曲线、RTK 指标、设备状态和任务创建界面。
 
 ## 当前边界
 
-- `task_manager` 和 `data_recorder` 仍是规划目录，没有可运行 ROS 2 节点。
-- 任务创建和任务列表已经接入 FastAPI 和设备端 SQLite。任务切换、开始、暂停和停止
-  仍只修改浏览器内存，尚未调用 ROS 2 Service 或 Action，也不会控制设备端采集节点。
-- 独立任务管理页面已经删除。任务创建入口只保留在采集首页任务控制卡片中。
-- 数据回放页面可以读取任务测量 SQLite 文件并显示完整高度曲线、无效断点、统计结果和 RTK 端点。报告页已经接入正式 TXT 明细和 PDF 汇总生成。当前仍没有设备端正式记录节点，因此只有已经存在且标记为正式记录的测量数据库能够导出。
-- 数据回放页面提供任务逻辑删除。删除后任务从普通列表隐藏，测量文件暂不物理清理。
+- 任务列表和任务状态保存于设备端 SQLite。前端显示编号取任务创建时间，删除历史任务不会改变或重置后续编号；内部状态键始终使用稳定 UUID。开始、暂停、继续和停止通过 FastAPI 转发到 ROS 2 `task_manager`，前端不维护独立的任务状态机。
+- 任务开始不等待雷达或 RTK 真实数据检查。记录器在没有净空源帧时按 50 Hz 写入
+  `source_unavailable`，源帧超时后写入 `source_timeout`，不会伪造有效高度。
+- 50 Hz 记录使用最近源帧保持。每条记录保存源帧时间、源帧序号、源年龄、重复标志
+  和重复序号，不能解释为雷达或净空算法真实产生了 50 Hz 独立测量结果。
+- 独立任务管理页面已经删除。任务创建入口只保留在采集首页任务控制卡片中，创建时只填写隧道编号和隧道名称，不再要求用户管理作业批次。
+- 数据回放页面可以读取任务测量 SQLite 文件并显示完整高度曲线、无效断点、统计结果和 RTK 端点。报告页已经接入正式 TXT 明细和 PDF 汇总生成。正常停止且包含有效样本的正式记录可以导出。
+- 开始和停止均为单击执行，不显示确认弹窗。停止完成后按创建时间自动选中下一项待执行任务，但不会自动开始。
+- 数据回放页面提供任务逻辑删除和本地数据清理。逻辑删除只隐藏任务；本地数据清理可按任务或按日期多选，物理删除所选任务目录并保留任务索引。
 - `localization` 目前只包含姿态变换相关实现，尚未实现进出洞稳定窗口、洞内里程和
   出口约束修正。
-- 当前没有正式路面模型、车辆通行包络和设备端任务累计最小净空写入节点。任务级最低值由报告后端从正式测量数据库计算。
+- 当前没有正式路面模型和车辆通行包络。任务级最低值由回放和报告后端从正式测量数据库计算。
 
 完整状态见 [当前实现状态](docs/当前实现状态.md)。
 
 ## 构建
 
-在 RK3588 上执行全量构建：
+统一使用 `scripts/build/build.sh`。首次部署或环境异常时先检查环境：
 
 ```bash
 cd /home/cat/Project/capture_system
-scripts/build/build_all.sh release
+bash scripts/build/build.sh doctor
 ```
 
-仅构建设备静态网页：
+RK3588 全量 Release 构建：
 
 ```bash
-scripts/build/build_web.sh
+bash scripts/build/build.sh all --release
 ```
 
-业务工作空间单独构建：
+
+构建分为客户版和开发测试版。客户版为默认值，不编译测试工作台，也不注册开发诊断接口。
+开发测试版用于 RK3588 现场调试：
 
 ```bash
-source /opt/ros/humble/setup.bash
-source /home/cat/Project/capture_system/third_party/odin_ros_driver/install/setup.bash
-cd /home/cat/Project/capture_system/ros2_ws
-colcon build --symlink-install
+# 客户交付
+bash scripts/build/build.sh all --release --variant customer
+
+# 开发调试，包含“测试”页面与 /api/dev、/ws/dev
+bash scripts/build/build.sh all --release --variant development
 ```
+
+开发测试工具说明见 `docs/development/devtools.md`。
+
+如果怀疑旧 CMake/colcon 缓存污染，执行一次干净构建。该命令保留 `.venv` 和
+`frontend/node_modules`，不会强制重新联网安装依赖：
+
+```bash
+bash scripts/build/build.sh all --release --clean
+```
+
+常用分项入口：
+
+```bash
+bash scripts/build/build.sh workspace --release   # 仅业务 ROS 2
+bash scripts/build/build.sh web                   # 仅设备静态网页
+bash scripts/build/build.sh backend               # 仅后端 Python 环境
+bash scripts/build/build.sh verify                # 只验证已有产物
+```
+
+旧入口 `scripts/build/build_all.sh release` 和 `scripts/build/build_web.sh` 继续保留，
+内部转发到统一脚本。完整命令见 [工程脚本](scripts/README.md)。
 
 ## 运行
 
@@ -146,6 +186,7 @@ capture_system/                 # 工程根目录
 - [系统总体架构](docs/architecture/系统总体架构.md)
 - [ROS 2 架构](docs/architecture/ROS2架构.md)
 - [数据流设计](docs/architecture/数据流设计.md)
+- [任务历史与数据清理 HTTP 接口](docs/interfaces/task_history_http_api.md)
 - [采集首页操作说明](docs/user_manual/用户手册说明.md)
 - [文档核对记录](docs/文档核对记录_2026-08-06.md)
 

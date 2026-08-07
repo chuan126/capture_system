@@ -1,0 +1,13 @@
+string task_id
+string command
+int64 requested_at_ns
+---
+bool success
+string recording_path
+string rtk_status
+uint64 total_samples
+uint64 valid_samples
+uint64 invalid_samples
+bool complete
+string error_code
+string message

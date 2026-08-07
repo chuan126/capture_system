@@ -34,6 +34,10 @@ class RtkHub:
     def client_count(self) -> int:
         return len(self._sessions)
 
+    @property
+    def latest_snapshot(self) -> RtkSnapshot | None:
+        return self._latest_snapshot
+
     def set_ros_availability(
         self,
         available: bool,

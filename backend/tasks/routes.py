@@ -21,10 +21,13 @@ from backend.measurements.repository import (
 from backend.tasks.models import (
     TaskBatchCreateRequest,
     TaskCreateRequest,
+    TaskPurgeDataRequest,
+    TaskPurgeDataResponse,
     TaskResponse,
     TaskStatus,
 )
 from backend.tasks.repository import (
+    BatchConflictError,
     TaskDeleteConflictError,
     TaskIdempotencyConflictError,
     TaskNotFoundError,
@@ -47,17 +50,32 @@ def _measurement_repository(request: Request) -> MeasurementRepository:
 def _response(record: TaskRecord) -> TaskResponse:
     return TaskResponse(
         task_id=record.task_id,
+        display_id=record.display_id,
+        batch_id=record.batch_id,
+        batch_code=record.batch_code,
         sequence=record.sequence,
+        global_sequence=record.global_sequence,
         display_sequence=record.display_sequence,
         tunnel_code=record.tunnel_code,
         tunnel_name=record.tunnel_name,
         status=record.status,
+        operation_phase=record.operation_phase,
+        status_revision=record.status_revision,
         created_at=record.created_at,
         updated_at=record.updated_at,
+        start_requested_at=record.start_requested_at,
         started_at=record.started_at,
+        stop_requested_at=record.stop_requested_at,
         completed_at=record.completed_at,
+        entry_rtk_status=record.entry_rtk_status,
+        exit_rtk_status=record.exit_rtk_status,
         has_measurements=record.has_measurements,
         recording_path=record.recording_path,
+        local_data_purged_at=record.local_data_purged_at,
+        purged_bytes=record.purged_bytes,
+        last_error_code=record.last_error_code,
+        last_error_message=record.last_error_message,
+        warning_code=record.warning_code,
         schema_version=record.schema_version,
         deleted_at=record.deleted_at,
         delete_reason=record.delete_reason,
@@ -144,7 +162,7 @@ def create_task(
             idempotency_key=idempotency_key,
         )[0]
         return _response(record)
-    except TaskIdempotencyConflictError as error:
+    except (TaskIdempotencyConflictError, BatchConflictError) as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
     except TaskStorageError as error:
         raise _storage_failure(error) from error
@@ -162,7 +180,7 @@ def create_task_batch(
             idempotency_key=idempotency_key,
         )
         return [_response(record) for record in records]
-    except TaskIdempotencyConflictError as error:
+    except (TaskIdempotencyConflictError, BatchConflictError) as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
     except TaskStorageError as error:
         raise _storage_failure(error) from error
@@ -176,6 +194,7 @@ def list_tasks(
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
     order: Literal["asc", "desc"] = "asc",
+    batch_id: str | None = None,
 ) -> list[TaskResponse]:
     try:
         records = _repository(request).list_tasks(
@@ -184,6 +203,7 @@ def list_tasks(
             limit=limit,
             offset=offset,
             order=order,
+            batch_id=batch_id,
         )
         return [_response(record) for record in records]
     except TaskStorageError as error:
@@ -205,6 +225,23 @@ def get_task_measurements(task_id: str, request: Request) -> MeasurementHistoryR
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=str(error),
         ) from error
+    except TaskStorageError as error:
+        raise _storage_failure(error) from error
+
+
+@router.post("/purge-data", response_model=TaskPurgeDataResponse)
+def purge_task_data(payload: TaskPurgeDataRequest, request: Request) -> TaskPurgeDataResponse:
+    try:
+        task_ids, released_bytes = _repository(request).purge_task_data(payload.task_ids)
+        return TaskPurgeDataResponse(
+            removed_task_count=len(task_ids),
+            released_bytes=released_bytes,
+            task_ids=task_ids,
+        )
+    except TaskNotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务不存在") from error
+    except TaskDeleteConflictError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
     except TaskStorageError as error:
         raise _storage_failure(error) from error
 

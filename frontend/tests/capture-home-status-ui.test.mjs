@@ -88,9 +88,10 @@ test("height threshold, mount height and lane are shared task-card settings", ()
   assert.doesNotMatch(taskDialog, />作业车道/);
 });
 
-test("task creation uses automatic sequence numbers and only asks for tunnel fields", () => {
+test("task creation uses creation-time identifiers and only asks for tunnel fields", () => {
   assert.match(taskDialog, />创建检测任务</);
-  assert.match(taskDialog, /任务编号由系统按创建顺序自动生成/);
+  assert.match(taskDialog, /任务编号由设备端按创建时间生成/);
+  assert.match(taskDialog, /20260807_145601/);
   assert.match(taskDialog, />隧道编号</);
   assert.match(taskDialog, />隧道名称</);
   assert.match(taskDialog, />＋ 添加任务</);
@@ -98,12 +99,11 @@ test("task creation uses automatic sequence numbers and only asks for tunnel fie
   assert.match(taskDialog, />删除<\/button>/);
   assert.match(taskDialog, /row\.tunnelCode/);
   assert.match(taskDialog, /row\.tunnelName/);
-  assert.doesNotMatch(taskDialog, />任务名称|row\.taskName/);
+  assert.doesNotMatch(taskDialog, />任务名称|row\.taskName|batchMode|作业批次/);
   assert.match(page, /createTaskBatch\(drafts, idempotencyKey\)/);
-  assert.match(page, /formatTaskSequence\(task\.sequence\)/);
-  assert.doesNotMatch(page, /createTaskId|nextTaskSequence/);
-  assert.doesNotMatch(taskDialog, /startingSequence/);
-  assert.doesNotMatch(taskDialog, /row\.mountHeight|row\.lane/);
+  assert.match(page, /task\.displayId/);
+  assert.doesNotMatch(page, /createTaskId|nextTaskSequence|formatTaskSequence/);
+  assert.doesNotMatch(taskDialog, /startingSequence|row\.mountHeight|row\.lane/);
 });
 
 test("task card follows parameters, current task, pending tasks and controls order", () => {
@@ -152,7 +152,11 @@ test("task start validates the shared numeric settings", () => {
   assert.match(page, /const mountHeightValid/);
   assert.match(page, /!heightThresholdValid \|\|[\s\S]*!mountHeightValid/);
   assert.match(page, /请输入有效的雷达安装高度/);
-  assert.match(page, /status: "采集中", lane: operationLane/);
+  assert.match(page, /startTaskControl\(currentTask\.taskId/);
+  assert.match(page, /lidarMountHeightM: parsedMountHeight/);
+  assert.match(page, /clearanceThresholdM: parsedHeightThreshold/);
+  assert.doesNotMatch(page, /status: "采集中", lane: operationLane/);
+  assert.doesNotMatch(page, /!captureReady/);
 });
 
 test("task card omits progress and measurement sections", () => {
@@ -198,4 +202,40 @@ test("capture dashboard keeps notebook text, icons and controls readable", () =>
   assert.match(css, /\.task-operation-actions \.button \{[^}]*min-height:\s*42px[^}]*font-size:\s*11px/i);
   assert.match(css, /@media \(max-width:\s*1440px\) and \(min-width:\s*1181px\)[\s\S]*?\.dashboard-layout \{ grid-template-columns:\s*1fr/i);
   assert.match(css, /@media \(max-width:\s*1440px\) and \(min-width:\s*1181px\)[\s\S]*?\.main--dashboard \{ overflow-y:\s*auto/i);
+});
+
+test("task start follows backend readiness instead of diagnostic card states", () => {
+  assert.match(page, /setControlAvailable\(readiness\.canStart\)/);
+  assert.doesNotMatch(page, /setControlAvailable\(readiness\.state\s*!==/);
+  assert.doesNotMatch(page, /captureReady|isDeviceConnected\(systemStatus/);
+});
+
+
+test("start and stop execute without confirmation dialogs", () => {
+  assert.doesNotMatch(page, /window\.confirm|confirm\(/);
+  assert.match(page, /executeControl\("start"/);
+  assert.match(page, /executeControl\("stop"/);
+});
+
+test("task creation no longer exposes operation-batch choices", () => {
+  assert.match(taskDialog, /创建检测任务/);
+  assert.match(taskDialog, /按创建时间生成/);
+  assert.doesNotMatch(taskDialog, /提交后自动新建作业|加入当前作业|开始一次新作业|batchMode/);
+  assert.doesNotMatch(taskCard, />新建作业<|>结束作业|作业批次/);
+});
+
+test("completed stop automatically selects the next pending task by creation time", () => {
+  assert.match(page, /autoAdvanceTaskId/);
+  assert.match(page, /task\.status === "待执行"/);
+  assert.match(page, /left\.createdAt\.localeCompare\(right\.createdAt\)/);
+  assert.match(page, /task\.createdAt > stopped\.createdAt/);
+  assert.match(page, /setSelectedTaskId\(next\?\.taskId/);
+  assert.doesNotMatch(page, /task\.batchId === stopped\.batchId/);
+});
+
+test("active transitional tasks retain stop and recovery controls", () => {
+  assert.match(page, /setCanStop\(readiness\.canStop\)/);
+  assert.match(page, /setCanRecover\(readiness\.canRecover\)/);
+  assert.match(page, /recoverTaskControl/);
+  assert.match(taskCard, /恢复控制/);
 });

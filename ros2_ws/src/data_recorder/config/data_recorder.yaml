@@ -1,0 +1,12 @@
+data_recorder_node:
+  ros__parameters:
+    data_root: "/home/cat/.local/share/capture_system"
+    clearance_topic: "/capture/clearance/result"
+    rtk_fix_topic: "/capture/rtk/fix"
+    rtk_status_topic: "/capture/rtk/status"
+    sample_rate_hz: 50.0
+    source_timeout_ms: 250.0
+    transaction_batch_size: 100
+    software_version: "0.2.0"
+    algorithm_version: "clearance_engine-current"
+    config_version: "clearance_engine_small_board_1cm.yaml"
