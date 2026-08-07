@@ -28,3 +28,18 @@ test("development frontend only talks to FastAPI development namespace", () => {
   assert.match(api, /`\/api\/dev\/recordings\/\$\{profile\}\/start`/);
   assert.doesNotMatch(workspace + api, /rclpy|rclcpp|roslib|rosbridge/i);
 });
+
+
+test("development telemetry fields have explicit render-safe types", () => {
+  for (const declaration of [
+    "candidate_count?: number",
+    "selected_inlier_count?: number",
+    "processing_time_ms?: number | null",
+    "valid_point_ratio?: number | null",
+    "status_revision?: number",
+    "total_samples?: number",
+  ]) {
+    assert.ok(api.includes(declaration), `missing ${declaration}`);
+  }
+  assert.doesNotMatch(api, /\[key: string\]: unknown/);
+});

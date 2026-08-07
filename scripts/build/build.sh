@@ -517,10 +517,8 @@ verify_customer_frontend() {
   fi
 }
 
-build_web() {
-  step "前端设备静态页面"
+ensure_frontend_dependencies() {
   check_web_tools
-  check_frontend_source_imports
   local fp old need=0
   fp="$(frontend_fingerprint)"
   old="$(cat "${STATE_DIR}/frontend.fingerprint" 2>/dev/null || true)"
@@ -535,6 +533,21 @@ build_web() {
   else
     ok "前端依赖未变化，跳过 npm ci"
   fi
+}
+
+frontend_typecheck() {
+  step "前端 TypeScript 预检查"
+  check_frontend_source_imports
+  ensure_frontend_dependencies
+  generate_devtools_entry
+  (cd "$FRONTEND" && npm run typecheck) || die "前端 TypeScript 类型检查失败。请先修复上方错误，再执行耗时的 SDK/ROS 2 构建"
+  ok "前端 TypeScript 类型检查通过"
+}
+
+build_web() {
+  step "前端设备静态页面"
+  check_frontend_source_imports
+  ensure_frontend_dependencies
   generate_devtools_entry
   clean_web
   (cd "$FRONTEND" && CAPTURE_BUILD_VARIANT="$VARIANT" CAPTURE_DEVTOOLS_ENABLED="$([[ "$VARIANT" == "development" ]] && echo 1 || echo 0)" npm run build:device)
@@ -597,10 +610,11 @@ main() {
     workspace) check_layout; build_workspace ;;
     ros) check_layout; build_driver; build_workspace ;;
     backend) check_layout; setup_backend ;;
-    web) check_layout; build_web ;;
+    web) check_layout; frontend_typecheck; build_web ;;
     verify) check_layout; check_ros_tools; run_verify ;;
     all)
       run_doctor
+      frontend_typecheck
       build_driver
       build_workspace
       setup_backend

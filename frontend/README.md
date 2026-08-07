@@ -157,7 +157,8 @@ npm install
 npm run dev
 ```
 
-设备静态构建推荐从项目根目录执行：
+设备静态构建推荐从项目根目录执行。统一构建脚本会先运行 `tsc --noEmit` 类型检查，再执行 Next.js 设备静态构建；`all` 模式中的类型检查发生在 SDK 和 ROS 2 编译之前。
+
 
 ```bash
 bash scripts/build/build.sh web

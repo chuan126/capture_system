@@ -110,6 +110,8 @@ bash scripts/operation/run_lan_preview.sh
 
 ## 构建前快速检查
 
-`doctor` 和 `web` 会在进入耗时构建前检查生产前端的 TypeScript import 路径。`frontend/app`、`frontend/components` 和 `frontend/worker` 中的相对导入不得显式以 `.ts` 或 `.tsx` 结尾；发现后会立即列出文件与行号并停止，避免在 SDK 和 ROS 2 编译完成后才由 Next.js 报错。
+`doctor` 会检查生产前端的 TypeScript import 路径。`frontend/app`、`frontend/components` 和 `frontend/worker` 中的相对导入不得显式以 `.ts` 或 `.tsx` 结尾；发现后会立即列出文件与行号并停止。
+
+`all` 和 `web` 在进入正式构建前还会安装或复用前端依赖，并执行 `npm run typecheck`（`tsc --noEmit`）。`all` 会在 ODIN SDK 和 ROS 2 编译之前完成这一检查，因此开发测试页或正式页面的 TypeScript 类型错误不会再等到几分钟后的 Next.js 构建阶段才暴露。
 
 `doctor` 还会检查源码时间戳。若源码文件比 RK3588 当前系统时间晚 120 秒以上，构建会直接停止。应先确认 `timedatectl`/NTP 正常，并优先在板端解压 Linux `.tar.gz` 交付包，避免错误时间戳导致 Make 报告时钟错误。

@@ -202,7 +202,7 @@ function ClearancePanel({ overview }: { overview: DevOverview | null }) {
       <div className="dev-metric-grid dev-metric-grid--4">
         <Metric label="当前算法值" value={snapshot?.lidar_to_top_m == null ? "--" : `${fixed(snapshot.lidar_to_top_m, 3)} m`} detail={snapshot?.valid ? "有效" : snapshot ? snapshot.invalid_reason : "等待数据"} />
         <Metric label="源帧频率" value={`${fixed(source?.rate_hz, 1)} Hz`} detail={source?.age_ms == null ? "--" : `${fixed(source.age_ms, 0)} ms前`} />
-        <Metric label="候选平面" value={source?.candidate_count != null ? String(source.candidate_count) : "--"} detail={`内点 ${source?.selected_inlier_count != null ? String(source.selected_inlier_count) : "--"}`} />
+        <Metric label="候选平面" value={source?.candidate_count ?? "--"} detail={`内点 ${source?.selected_inlier_count ?? "--"}`} />
         <Metric label="处理时间" value={source?.processing_time_ms == null ? "--" : `${fixed(source.processing_time_ms, 2)} ms`} detail={`有效点 ${source?.valid_point_ratio == null ? "--" : `${(Number(source.valid_point_ratio) * 100).toFixed(1)}%`}`} />
         <Metric label="平面面积" value={source?.selected_area_m2 == null ? "--" : `${fixed(source.selected_area_m2, 3)} m²`} />
         <Metric label="平面倾角" value={source?.selected_tilt_deg == null ? "--" : `${fixed(source.selected_tilt_deg, 2)}°`} />
@@ -249,7 +249,7 @@ function RecordingPanel({ overview }: { overview: DevOverview | null }) {
   return <div className="dev-section-stack">
     <section className="panel dev-panel"><div className="panel-head"><div><h2>任务控制链路</h2><p>{control?.detail ?? error ?? "正在读取"}</p></div><button className="button" onClick={() => void refreshControl()}>刷新Service状态</button></div>
       <div className="dev-service-grid">{(["start", "pause", "resume", "stop", "recover"] as const).map((name) => <div key={name}><span>{name}</span><strong className={services?.[name] ? "is-ready" : "is-blocked"}>{services?.[name] ? "可用" : "不可用"}</strong></div>)}</div>
-      <div className="dev-metric-grid dev-metric-grid--4"><Metric label="活动任务" value={control?.activeTaskId ?? (task?.task_id != null ? String(task.task_id) : null) ?? "--"} /><Metric label="内部阶段" value={control?.activePhase ?? (task?.operation_phase != null ? String(task.operation_phase) : null) ?? "--"} /><Metric label="状态版本" value={task?.status_revision != null ? String(task.status_revision) : "--"} /><Metric label="记录器" value={recording?.status != null ? String(recording.status) : "--"} detail={String(recording?.message ?? "")} /></div>
+      <div className="dev-metric-grid dev-metric-grid--4"><Metric label="活动任务" value={control?.activeTaskId ?? task?.task_id ?? "--"} /><Metric label="内部阶段" value={control?.activePhase ?? task?.operation_phase ?? "--"} /><Metric label="状态版本" value={task?.status_revision ?? "--"} /><Metric label="记录器" value={recording?.status ?? "--"} detail={String(recording?.message ?? "")} /></div>
     </section>
     <RecordingControl profile="diagnostic" title="独立诊断记录" description="记录净空、RTK、任务状态、系统诊断和高频里程计到独立MCAP，不创建正式任务。" />
     <RecordingControl profile="raw-cloud" title="原始点云记录" description="记录完整 /capture/lidar/points_raw PointCloud2。文件可能较大，仅用于开发调试。" />

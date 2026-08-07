@@ -8,7 +8,45 @@ export type DevTopicTelemetry = {
   last_sensor_stamp_ns: number | null;
   age_ms: number | null;
   state: "waiting" | "stale" | "streaming";
-  [key: string]: unknown;
+
+  // PointCloud2 telemetry.
+  point_count?: number;
+  frame_id?: string;
+  point_step?: number;
+  data_bytes?: number;
+
+  // ClearanceResult telemetry.
+  valid?: boolean;
+  lidar_to_top_m?: number | null;
+  candidate_count?: number;
+  selected_inlier_count?: number;
+  selected_area_m2?: number | null;
+  selected_tilt_deg?: number | null;
+  residual_p95_m?: number | null;
+  valid_point_ratio?: number | null;
+  processing_time_ms?: number | null;
+  invalid_reason?: string;
+
+  // RTK telemetry.
+  fix_status?: number;
+  latitude?: number | null;
+  longitude?: number | null;
+  altitude?: number | null;
+  satellite_count?: number;
+  hdop?: number | null;
+  pdop?: number | null;
+  gps_state?: number;
+
+  // TaskStatus / RecordingStatus telemetry.
+  task_id?: string;
+  status?: string;
+  operation_phase?: string;
+  status_revision?: number;
+  message?: string;
+  total_samples?: number;
+  valid_samples?: number;
+  invalid_samples?: number;
+  recording_path?: string;
 };
 
 export type DevOverview = {

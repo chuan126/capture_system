@@ -77,3 +77,12 @@ def test_production_frontend_imports_do_not_use_ts_or_tsx_suffixes() -> None:
                 if pattern.search(line):
                     failures.append(f"{path.relative_to(frontend)}:{lineno}:{line.strip()}")
     assert failures == []
+
+
+def test_all_runs_frontend_typecheck_before_expensive_ros_builds() -> None:
+    source = (BUILD_DIR / "build.sh").read_text()
+    assert "frontend_typecheck()" in source
+    all_block = source[source.index("    all)") : source.index("      ;;", source.index("    all)"))]
+    assert all_block.index("frontend_typecheck") < all_block.index("build_driver")
+    assert "npm run typecheck" in source
+    assert "请先修复上方错误，再执行耗时的 SDK/ROS 2 构建" in source
