@@ -86,7 +86,7 @@ rtk_driver/                                      # RTK ROS 2驱动包根目录
 
 ```bash
 source /opt/ros/humble/setup.bash
-cd /home/cat/Project/capture_system/ros2_ws
+cd /path/to/capture_system/ros2_ws
 colcon build --symlink-install --packages-up-to rtk_driver
 source install/setup.bash
 colcon test --packages-select interfaces rtk_driver

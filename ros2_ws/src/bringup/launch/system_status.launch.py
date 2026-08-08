@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
@@ -24,7 +25,7 @@ def generate_launch_description() -> LaunchDescription:
             ),
             DeclareLaunchArgument(
                 "storage_data_path",
-                default_value="/home/cat/.local/share/capture_system",
+                default_value=os.getenv("CAPTURE_DATA_ROOT", str(Path.cwd() / "runtime")),
                 description="任务数据根目录，供系统监控检查磁盘容量和可写性",
             ),
             Node(

@@ -46,3 +46,7 @@ def test_devtools_websocket_route_only_exists_in_development(tmp_path: Path) -> 
     development_paths = {getattr(route, "path", None) for route in development.routes}
     assert "/ws/dev/raw-cloud-preview" not in customer_paths
     assert "/ws/dev/raw-cloud-preview" in development_paths
+    assert "/api/dev/recordings/raw-sensor/start" not in customer_paths
+    assert "/api/dev/recordings/raw-sensor/start" in development_paths
+    assert "/api/dev/recordings/algorithm-debug/start" in development_paths
+    assert "/api/dev/recordings/full-debug/start" in development_paths

@@ -19,7 +19,7 @@ scripts/                         # 构建和运行脚本
 首次使用先执行：
 
 ```bash
-cd /home/cat/Project/capture_system
+cd /path/to/capture_system
 bash scripts/build/build.sh doctor
 ```
 
@@ -90,7 +90,7 @@ bash scripts/build/build.sh all --release --variant development
 ## 一键运行
 
 ```bash
-cd /home/cat/Project/capture_system
+cd /path/to/capture_system
 bash scripts/operation/run_lan_preview.sh
 ```
 

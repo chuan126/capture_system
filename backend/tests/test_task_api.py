@@ -4,6 +4,7 @@ import re
 from fastapi.testclient import TestClient
 
 from backend.main import create_app
+from backend.tasks.repository import TaskRepository
 
 
 def make_static_site(directory: Path) -> None:
@@ -220,6 +221,43 @@ def test_delete_running_task_returns_409(tmp_path: Path) -> None:
     assert "不能删除" in response.json()["detail"]
 
 
+def test_delete_selected_tasks_is_one_transaction_and_hides_all_selected(tmp_path: Path) -> None:
+    static_dir = tmp_path / "site"
+    make_static_site(static_dir)
+    data_root = tmp_path / "runtime"
+
+    with TestClient(create_app(static_dir, data_root=data_root, start_ros_bridge=False)) as client:
+        first = client.post("/api/v1/tasks", json={"tunnel_code": "T-301", "tunnel_name": "批量删除一"}).json()
+        second = client.post("/api/v1/tasks", json={"tunnel_code": "T-302", "tunnel_name": "批量删除二"}).json()
+        third = client.post("/api/v1/tasks", json={"tunnel_code": "T-303", "tunnel_name": "保留任务"}).json()
+        response = client.post("/api/v1/tasks/delete-selected", json={"task_ids": [first["task_id"], second["task_id"]]})
+        listed = client.get("/api/v1/tasks").json()
+
+    assert response.status_code == 200
+    assert response.json()["deleted_task_count"] == 2
+    assert response.json()["task_ids"] == [first["task_id"], second["task_id"]]
+    assert [task["task_id"] for task in listed] == [third["task_id"]]
+
+
+def test_delete_selected_tasks_rolls_back_when_one_task_is_active(tmp_path: Path) -> None:
+    import sqlite3
+
+    static_dir = tmp_path / "site"
+    make_static_site(static_dir)
+    data_root = tmp_path / "runtime"
+
+    with TestClient(create_app(static_dir, data_root=data_root, start_ros_bridge=False)) as client:
+        first = client.post("/api/v1/tasks", json={"tunnel_code": "T-311", "tunnel_name": "应保留"}).json()
+        second = client.post("/api/v1/tasks", json={"tunnel_code": "T-312", "tunnel_name": "活动任务"}).json()
+        with sqlite3.connect(data_root / "capture.db") as connection:
+            connection.execute("UPDATE tasks SET status='running' WHERE task_id=?", (second["task_id"],))
+        response = client.post("/api/v1/tasks/delete-selected", json={"task_ids": [first["task_id"], second["task_id"]]})
+        listed = client.get("/api/v1/tasks").json()
+
+    assert response.status_code == 409
+    assert {task["task_id"] for task in listed} == {first["task_id"], second["task_id"]}
+
+
 def test_task_creation_without_batch_input_generates_time_identifier(tmp_path: Path) -> None:
     static_dir = tmp_path / "site"
     make_static_site(static_dir)
@@ -266,6 +304,47 @@ def test_legacy_batch_mode_field_is_rejected_from_task_creation(tmp_path: Path) 
 
     assert response.status_code == 422
     assert tasks == []
+
+
+def test_purge_task_data_accepts_logically_deleted_task(tmp_path: Path) -> None:
+    import sqlite3
+
+    static_dir = tmp_path / "site"
+    make_static_site(static_dir)
+    data_root = tmp_path / "runtime"
+
+    with TestClient(
+        create_app(static_dir, data_root=data_root, start_ros_bridge=False)
+    ) as client:
+        task = client.post(
+            "/api/v1/tasks",
+            json={"tunnel_code": "T-420", "tunnel_name": "删除后清理测试"},
+        ).json()
+        task_dir = data_root / "tasks" / task["task_id"]
+        task_dir.mkdir(parents=True, exist_ok=True)
+        measurement = task_dir / "measurements.db"
+        measurement.write_bytes(b"x" * 2048)
+        with sqlite3.connect(data_root / "capture.db") as connection:
+            connection.execute(
+                "UPDATE tasks SET status='completed', has_measurements=1, recording_path=? WHERE task_id=?",
+                (f"{task['task_id']}/measurements.db", task["task_id"]),
+            )
+
+        deleted = client.delete(f"/api/v1/tasks/{task['task_id']}")
+        purge = client.post("/api/v1/tasks/purge-data", json={"task_ids": [task["task_id"]]})
+
+    assert deleted.status_code == 204
+    assert purge.status_code == 200
+    assert purge.json()["removed_task_count"] == 1
+    assert purge.json()["released_bytes"] == 2048
+    assert not task_dir.exists()
+
+    repository = TaskRepository(data_root / "capture.db", data_root / "tasks")
+    persisted = repository.get_task(task["task_id"], include_deleted=True)
+    assert persisted.deleted_at is not None
+    assert persisted.has_measurements is False
+    assert persisted.recording_path is None
+    assert persisted.local_data_purged_at is not None
 
 
 def test_purge_task_data_removes_files_but_keeps_task_index(tmp_path: Path) -> None:

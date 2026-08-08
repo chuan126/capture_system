@@ -39,7 +39,7 @@
 并行编译参数影响结果：
 
 ```bash
-cd /home/cat/Project/capture_system
+cd /path/to/capture_system
 scripts/build/build.sh workspace --release
 ```
 

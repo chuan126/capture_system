@@ -11,8 +11,11 @@ from pydantic import BaseModel, Field
 
 from backend.devtools.parameters import DevParameterError, DevParameterService
 from backend.devtools.recording import (
+    ALGORITHM_DEBUG_PROFILE,
     DIAGNOSTIC_PROFILE,
+    FULL_DEBUG_PROFILE,
     RAW_CLOUD_PROFILE,
+    RAW_SENSOR_PROFILE,
     DevRecordingError,
     RosbagRecordingManager,
 )
@@ -81,7 +84,7 @@ def create_devtools_router() -> APIRouter:
     @router.get("/parameters")
     def parameters(request: Request) -> dict[str, object]:
         service: DevParameterService = request.app.state.dev_parameter_service
-        return {"parameters": service.list_parameters()}
+        return {"parameters": service.list_parameters(ui_only=True)}
 
     @router.put("/parameters/{key:path}")
     def set_parameter(key: str, payload: ParameterSetRequest, request: Request) -> dict[str, object]:
@@ -111,21 +114,33 @@ def create_devtools_router() -> APIRouter:
     def recordings(request: Request) -> dict[str, object]:
         return {"recordings": _recording_manager(request).list_recordings()}
 
-    @router.post("/recordings/raw-cloud/start", status_code=status.HTTP_202_ACCEPTED)
-    def start_raw_cloud(payload: RecordingStartRequest, request: Request) -> dict[str, object]:
+    def _start_profile(profile, payload: RecordingStartRequest, request: Request) -> dict[str, object]:
         _ensure_no_formal_task_active(request)
         try:
-            return _recording_manager(request).start(RAW_CLOUD_PROFILE, payload.duration_seconds)
+            return _recording_manager(request).start(profile, payload.duration_seconds)
         except DevRecordingError as error:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
 
+    @router.post("/recordings/raw-sensor/start", status_code=status.HTTP_202_ACCEPTED)
+    def start_raw_sensor(payload: RecordingStartRequest, request: Request) -> dict[str, object]:
+        return _start_profile(RAW_SENSOR_PROFILE, payload, request)
+
+    @router.post("/recordings/algorithm-debug/start", status_code=status.HTTP_202_ACCEPTED)
+    def start_algorithm_debug(payload: RecordingStartRequest, request: Request) -> dict[str, object]:
+        return _start_profile(ALGORITHM_DEBUG_PROFILE, payload, request)
+
+    @router.post("/recordings/full-debug/start", status_code=status.HTTP_202_ACCEPTED)
+    def start_full_debug(payload: RecordingStartRequest, request: Request) -> dict[str, object]:
+        return _start_profile(FULL_DEBUG_PROFILE, payload, request)
+
+    # 兼容旧 development 接口。正式前端不再使用这两个入口。
+    @router.post("/recordings/raw-cloud/start", status_code=status.HTTP_202_ACCEPTED)
+    def start_raw_cloud(payload: RecordingStartRequest, request: Request) -> dict[str, object]:
+        return _start_profile(RAW_CLOUD_PROFILE, payload, request)
+
     @router.post("/recordings/diagnostic/start", status_code=status.HTTP_202_ACCEPTED)
     def start_diagnostic(payload: RecordingStartRequest, request: Request) -> dict[str, object]:
-        _ensure_no_formal_task_active(request)
-        try:
-            return _recording_manager(request).start(DIAGNOSTIC_PROFILE, payload.duration_seconds)
-        except DevRecordingError as error:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+        return _start_profile(DIAGNOSTIC_PROFILE, payload, request)
 
     @router.post("/recordings/stop")
     def stop_recording(request: Request) -> dict[str, object]:

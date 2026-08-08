@@ -1,6 +1,6 @@
 # 任务历史测量 HTTP 接口
 
-核对日期：2026-08-07
+核对日期：2026-08-08
 
 ## 1. 接口边界
 
@@ -30,9 +30,24 @@ DELETE /api/v1/tasks/{task_id}
 
 成功返回 HTTP 204。任务不存在返回 HTTP 404。数据库不可用返回 HTTP 503。
 
-## 3. 本地任务数据物理清理
+## 3. 多任务逻辑删除
 
-普通删除不会释放主要磁盘空间。需要释放空间时调用
+客户数据回放页面使用
+
+```http
+POST /api/v1/tasks/delete-selected
+Content-Type: application/json
+
+{
+  "task_ids": ["uuid-1", "uuid-2"]
+}
+```
+
+后端先读取并检查全部任务，再在同一个 SQLite 事务中写入 `deleted_at` 和 `delete_reason`。任一任务不存在、已经删除、正在采集、处于暂停状态或占用活动槽时，整批请求失败，不提交部分删除。成功返回删除数量和任务 UUID 列表。单任务 `DELETE /api/v1/tasks/{task_id}` 继续保留兼容。
+
+## 4. 本地任务数据物理清理
+
+普通逻辑删除不会释放主要磁盘空间。物理清理只作为维护接口保留：
 
 ```http
 POST /api/v1/tasks/purge-data
@@ -43,14 +58,11 @@ Content-Type: application/json
 }
 ```
 
-前端可以按单任务选择，也可以按创建日期一次选择多个任务。后端先检查全部任务；任何任务处于
-活动状态时整次请求返回 HTTP 409，不静默跳过。成功时删除
-`CAPTURE_DATA_ROOT/tasks/<task_id>/`，并保留中央任务索引、UUID、时间编号、状态历史和清理时间。
-清理后的任务仍可显示历史元数据，但没有本地曲线、TXT 或任务目录文件。
+接口按 `task_id` 查找任务，不排除已逻辑删除记录，因此逻辑删除后仍可继续物理清理。后端先检查全部任务；任何任务处于活动状态时整次请求返回 HTTP 409，不静默跳过。成功时删除 `CAPTURE_DATA_ROOT/tasks/<task_id>/`，并保留中央任务索引、UUID、时间编号、状态历史和清理时间。客户数据回放页面不提供该入口。
 
 该接口不依赖旧作业批次状态。
 
-## 4. 历史测量读取
+## 5. 历史测量读取
 
 ```http
 GET /api/v1/tasks/{task_id}/measurements
@@ -75,7 +87,7 @@ GET /api/v1/tasks/{task_id}/measurements
 
 任务无测量记录返回 HTTP 404。测量文件缺失、损坏、版本不支持或任务 ID 不一致返回 HTTP 503。
 
-## 5. 测量文件结构
+## 6. 测量文件结构
 
 ```text
 CAPTURE_DATA_ROOT/
@@ -103,6 +115,6 @@ CAPTURE_DATA_ROOT/
 `repeat_index`。没有源帧或源帧超时的记录保持无效和空高度。重复记录不能解释为 50 Hz 独立
 算法源帧。
 
-## 6. 当前限制
+## 7. 当前限制
 
 单次接口最多读取 500000 个样本。当前实现返回完整任务序列，尚未实现分块传输和多级降采样。

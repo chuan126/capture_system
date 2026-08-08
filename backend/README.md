@@ -1,6 +1,6 @@
 # Web 后端
 
-核对日期：2026-08-07
+核对日期：2026-08-08
 
 FastAPI 是浏览器访问 RK3588 的唯一 HTTP 和 WebSocket 入口。当前后端承担页面托管、
 实时展示桥、任务元数据持久化、任务控制桥、历史测量文件读取和正式文件生成。
@@ -12,11 +12,18 @@ FastAPI 是浏览器访问 RK3588 的唯一 HTTP 和 WebSocket 入口。当前�
 | 地址 | 类型 | 数据来源 |
 | --- | --- | --- |
 | `/api/health` | HTTP JSON | FastAPI 自身 |
+| `/api/v1/map/config` | HTTP JSON | 设备统一高德 JS API Key，不返回安全密钥 |
+| `/_AMapService/*` | HTTP GET 代理 | 服务端读取设备持久化安全密钥后转发高德 Web 服务 |
+| `/api/v1/network/wifi/status` | HTTP JSON | NetworkManager 当前 Wi-Fi 连接 SSID |
+| `/api/v1/network/wifi/networks` | HTTP JSON | NetworkManager 当前扫描缓存 |
+| `/api/v1/network/wifi/rescan` | HTTP POST JSON | NetworkManager 主动扫描无线网络 |
+| `/api/v1/network/wifi/connect` | HTTP POST JSON | NetworkManager 建立 Wi-Fi 连接 |
 | `/api/v1/tasks` | HTTP JSON | SQLite 任务元数据创建和查询 |
 | `/api/v1/tasks/batch` | HTTP JSON | SQLite 批量创建事务 |
 | `/api/v1/tasks/{task_id}` | HTTP JSON | SQLite 单任务查询 |
 | `/api/v1/tasks/{task_id}` | HTTP DELETE | 任务逻辑删除，运行中和暂停任务拒绝删除 |
-| `/api/v1/tasks/purge-data` | HTTP POST JSON | 物理清理所选任务本地数据并保留任务索引 |
+| `/api/v1/tasks/delete-selected` | HTTP POST JSON | 单事务逻辑删除所选任务，活动任务导致整批拒绝 |
+| `/api/v1/tasks/purge-data` | HTTP POST JSON | 维护接口，物理清理所选任务本地数据并保留任务索引，已逻辑删除任务也可按 UUID 清理 |
 | `/api/v1/task-control/readiness` | HTTP JSON | 任务控制桥及各控制 Service 的逐项可用性，不检查传感器真实数据 |
 | `/api/v1/tasks/{task_id}/start` | HTTP POST | 冻结作业参数并调用 ROS 2 开始 Service |
 | `/api/v1/tasks/{task_id}/pause` | HTTP POST | 调用 ROS 2 暂停 Service |
@@ -37,7 +44,19 @@ FastAPI 是浏览器访问 RK3588 的唯一 HTTP 和 WebSocket 入口。当前�
 
 旧的模拟报告测试接口已经移除。正式导出只接受 `data_origin=recorded`、任务正常完成、记录完整且至少含一个有效高度样本的任务。
 
-## 2. 实时桥行为
+## 2. 高德地图设备配置
+
+高德地图配置由采集首页提交给 `PUT /api/v1/map/config`，并保存在 `CAPTURE_DATA_ROOT/settings/device_settings.json`。`GET /api/v1/map/config` 只向浏览器返回 JS API Key、是否已配置安全密钥以及同源代理路径 `/_AMapService`，不返回安全密钥明文。`web.env` 中的高德环境变量只用于首次迁移兼容。代理会移除浏览器自行提交的 `jscode` 后附加设备端持久化安全密钥。
+
+修改设备配置后需要重启 Web 服务。多个浏览器访问同一 RK3588 时共享同一设备配置。
+
+## 3. 设备端 Wi-Fi 管理
+
+正式前端通过同源 FastAPI 调用 NetworkManager。浏览器不执行 `nmcli`，连接成功后只显示 NetworkManager 当前确认的真实 SSID。连接密码不写入任务数据库、任务事件、开发 MCAP、浏览器存储或普通日志。后端使用权限为 `0600` 的临时 `passwd-file` 把密码交给 `nmcli connection up`，命令完成后删除临时文件。
+
+Web 服务继续以 `cat` 用户运行。systemd 部署需要安装 `system/polkit-1/rules.d/50-capture-networkmanager.rules`，只授权 NetworkManager 网络控制和连接配置操作。NetworkManager、无线网卡或权限不可用时，接口返回真实不可用状态，不生成模拟网络。
+
+## 4. 实时桥行为
 
 - 每类 ROS 2 桥使用独立 `rclpy.Context` 和后台单线程执行器；
 - FastAPI asyncio 事件循环不执行 ROS 回调；
@@ -67,9 +86,9 @@ FastAPI 不逐点解析 PointCloud2，不做过滤、限点或坐标转换。上
 无效算法帧中的 NaN 转换为 JSON `null`，同时保留 `valid` 和 `invalid_reason`。
 后端不补值、不累计任务最低值，也不叠加雷达安装高度。
 
-## 3. 任务控制和持久化
+## 5. 任务控制和持久化
 
-任务数据库默认位于 `CAPTURE_DATA_ROOT/capture.db`，任务目录位于 `CAPTURE_DATA_ROOT/tasks/`。设备配置将根目录设置为 `/home/cat/.local/share/capture_system`，不写入项目源码目录。
+任务数据库默认位于 `CAPTURE_DATA_ROOT/capture.db`，任务目录位于 `CAPTURE_DATA_ROOT/tasks/`。设备配置将根目录设置为 `<project_root>/runtime`，不写入项目源码目录。
 
 新任务同时保存稳定 `task_id` 和面向界面的 `display_id`。`task_id` 为 UUID，用于状态、接口和文件目录。`display_id` 由后端根据创建时间生成，格式为 `YYYYMMDD_HHMMSS`；同一秒创建多条任务时依次追加 `_02`、`_03`。历史删除不会重排或复用显示编号。旧数据库中的批次字段只用于迁移和兼容，不再参与当前前端任务管理。
 
@@ -77,7 +96,8 @@ FastAPI 不逐点解析 PointCloud2，不做过滤、限点或坐标转换。上
 
 - 任务创建、查询、逻辑删除和重启持久化；
 - 批量创建使用单个 SQLite 事务和幂等键；
-- `/api/v1/tasks/purge-data` 按所选任务物理删除任务目录，保留任务元数据和清理时间；
+- `/api/v1/tasks/delete-selected` 在单个 SQLite 事务中逻辑删除多个任务，任一任务活动、已删除或不存在时整批拒绝；
+- `/api/v1/tasks/purge-data` 作为维护接口按所选任务物理删除任务目录，保留任务元数据和清理时间；逻辑删除后的任务仍可按 UUID 清理；
 - FastAPI 使用独立 `rclpy.Context` 将开始、暂停、继续、停止和恢复请求转发给 `task_manager`；
 - 各任务控制 Service 独立判定可用性，辅助 Service 不会锁死其他控制按钮；
 - 每个控制请求携带任务状态版本和幂等键；
@@ -92,7 +112,7 @@ PDF 报告由客户端显式提交任务 ID 集合，后端只汇总其中满足
 旧 `/api/v1/batches...` 接口和数据库批次字段暂时保留用于历史数据兼容，不作为当前前端工作流。
 
 
-## 开发测试接口
+## 6. 开发测试接口
 
 开发诊断能力仅在构建变体 `development` 中注册。`customer` 变体下以下路由不存在并
 返回 404，不采用仅隐藏前端入口的方式。
@@ -102,44 +122,43 @@ PDF 报告由客户端显式提交任务 ID 集合，后端只汇总其中满足
 | `/api/dev/overview` | Linux 系统资源和真实 ROS 数据频率、数据年龄、累计消息数 |
 | `/api/dev/task-control` | 五个任务控制 Service 的独立可用性与活动任务状态 |
 | `/api/dev/rtk/snapshot` | 读取当前 RTK 快照，不写入正式任务 |
-| `/api/dev/parameters` | 读取白名单 ROS 参数 |
+| `/api/dev/parameters` | 读取由 bringup 装订配置定义的核心 ROS 参数 |
 | `/api/dev/parameters/{key}` | 临时修改允许动态更新的白名单参数 |
 | `/api/dev/recordings/status` | 开发录制状态 |
 | `/api/dev/recordings` | 开发录制文件列表 |
-| `/api/dev/recordings/raw-cloud/start` | 保存原始 `/capture/lidar/points_raw` 到 MCAP |
-| `/api/dev/recordings/diagnostic/start` | 保存固定诊断 Topic 集合到 MCAP |
+| `/api/dev/recordings/raw-sensor/start` | 原频率保存当前原始点云、IMU、原始高频里程计、SLAM里程计和雷达上下线事件 |
+| `/api/dev/recordings/algorithm-debug/start` | 保存时间适配里程计、补偿点云、净空、RTK、任务、记录器和系统诊断 |
+| `/api/dev/recordings/full-debug/start` | 同时保存原始传感器链和算法链 |
+| `/api/dev/recordings/raw-cloud/start` | 兼容旧开发入口，只保存原始点云 |
+| `/api/dev/recordings/diagnostic/start` | 兼容旧开发入口，保存旧诊断 Topic 集合 |
 | `/api/dev/recordings/stop` | 停止当前开发录制 |
 | `/api/dev/recordings/{id}` | 删除指定开发录制 |
 | `/ws/dev/raw-cloud-preview` | 原始传感器坐标点云的限点、限频预览 |
 
-原始点云保存不经过浏览器预览。FastAPI 只允许固定录制配置，并启动
-`ros2 bag record --storage mcap` 保存完整 `sensor_msgs/PointCloud2` 消息。页面无法提交
-任意 Topic、输出路径或 Shell 命令。数据目录固定为
-`CAPTURE_DATA_ROOT/dev-tests/raw-cloud/`。连续录制期间后台持续检查剩余空间，低于 2 GiB 安全下限时自动停止。客户版后端不导入这些路由。正式采集任务处于活动状态时，开发录制和临时调参返回 409，避免开发工具影响正式记录。
+开发录制不经过浏览器预览。FastAPI 只允许固定录制配置，并启动 `ros2 bag record --storage mcap` 直接订阅 ROS Topic，不设置抽样或降频参数。当前 `raw_sensor` 只记录项目已经存在并默认启用或映射的原始点云、IMU、原始高频里程计、SLAM里程计和雷达上下线事件；本版不接入视觉数据和传感器内部温度。页面无法提交任意 Topic、输出路径或 Shell 命令。数据目录固定在 `CAPTURE_DATA_ROOT/dev-tests/`。连续录制期间后台持续检查剩余空间，低于 2 GiB 安全下限时自动停止。客户版后端不导入这些路由。正式采集任务处于活动状态时，开发录制和临时调参返回 409，避免开发工具影响正式记录。
 
-开发参数页只允许白名单参数。净空节点已实现对应动态参数回调；运动补偿节点当前未实现
-运行时参数回调，因此其参数只读。临时参数不会改写 YAML，节点重启后恢复配置文件值。
+核心参数清单由 `ros2_ws/src/bringup/config/dev_parameter_bindings.yaml` 统一装订，节点所属 YAML 仍是正式参数来源。装订表使用 `ui_visible` 区分参数页显示项和仅用于实验快照的参数。当前参数页只返回八项净空核心参数，并分别返回正式 YAML 配置值和 ROS 2 节点实际运行值。单个运行值读取失败不会隐藏其他参数；节点不可用时配置值仍可见，但运行值明确为空。`region.min_span_cells` 与 `ransac.min_remaining_points` 只读。临时参数不会改写 YAML。每次开发录制都会在 MCAP 目录中保存 `parameter_snapshot.yaml`、`capture_manifest.json` 和 `source_config_sha256.txt`，参数快照仍覆盖完整装订表。
 
-## 4. 运行
+## 7. 运行
 
 ```bash
-cd /home/cat/Project/capture_system
+cd /path/to/capture_system
 scripts/operation/run_web.sh
 ```
 
 该脚本先检查 `CAPTURE_DATA_ROOT` 可创建且可写，再加载 ROS 2、厂商驱动和业务工作
 空间，以单 worker 启动 Uvicorn。
 
-## 5. 测试
+## 8. 测试
 
 ```bash
-cd /home/cat/Project/capture_system
+cd /path/to/capture_system
 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python -m pytest backend/tests -q
 ```
 
 2026-08-07 在当前修改环境重新执行，结果以当次实际测试日志为准。
 
-## 6. 边界
+## 9. 边界
 
 - 不直接连接雷达、串口或 ODIN SDK；
 - 保存任务元数据、转发任务控制并只读加载任务测量文件，不复制设备端状态机；

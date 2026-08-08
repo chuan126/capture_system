@@ -1,3 +1,5 @@
+import os
+from pathlib import Path
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
@@ -10,7 +12,7 @@ def generate_launch_description() -> LaunchDescription:
         [
             DeclareLaunchArgument(
                 "data_root",
-                default_value="/home/cat/.local/share/capture_system",
+                default_value=os.getenv("CAPTURE_DATA_ROOT", str(Path.cwd() / "runtime")),
                 description="任务索引和每任务测量文件的设备端数据目录",
             ),
             Node(

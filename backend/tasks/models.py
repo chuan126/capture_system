@@ -75,6 +75,17 @@ class TaskBatchCreateRequest(BaseModel):
     tasks: list[TaskCreateRequest] = Field(min_length=1, max_length=100)
 
 
+class TaskDeleteManyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    task_ids: list[str] = Field(min_length=1, max_length=500)
+
+
+class TaskDeleteManyResponse(BaseModel):
+    deleted_task_count: int
+    task_ids: list[str]
+
+
 class TaskPurgeDataRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

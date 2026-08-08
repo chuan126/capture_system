@@ -28,6 +28,10 @@ from backend.exports.service import ReportExportService
 from backend.tasks.repository import TaskRepository, TaskStorageError
 from backend.tasks.routes import router as task_router
 from backend.tasks.control_routes import router as task_control_router
+from backend.amap.routes import router as amap_router
+from backend.device_settings import DeviceSettingsError, DeviceSettingsStore
+from backend.networking.manager import NetworkManagerWifi
+from backend.networking.routes import router as wifi_router
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_STATIC_DIR = PROJECT_ROOT / "frontend" / "out"
@@ -37,15 +41,17 @@ LOGGER = logging.getLogger(__name__)
 def resolve_static_dir() -> Path:
     configured_path = os.getenv("CAPTURE_STATIC_DIR")
     if configured_path:
-        return Path(configured_path).expanduser().resolve()
+        path = Path(configured_path).expanduser()
+        return (path if path.is_absolute() else PROJECT_ROOT / path).resolve()
     return DEFAULT_STATIC_DIR
 
 
 def resolve_data_root() -> Path:
     configured_path = os.getenv("CAPTURE_DATA_ROOT")
     if configured_path:
-        return Path(configured_path).expanduser().resolve()
-    return (Path.home() / ".local" / "share" / "capture_system").resolve()
+        path = Path(configured_path).expanduser()
+        return (path if path.is_absolute() else PROJECT_ROOT / path).resolve()
+    return (PROJECT_ROOT / "runtime").resolve()
 
 
 def resolve_devtools_enabled() -> bool:
@@ -100,15 +106,19 @@ def create_app(
         pdf_font_path=resolved_pdf_font_path,
     )
     development_tools_enabled = resolve_devtools_enabled() if devtools_enabled is None else devtools_enabled
+    device_settings_store = DeviceSettingsStore(runtime_data_root)
+    wifi_manager = NetworkManagerWifi()
     dev_telemetry_bridge = None
     dev_raw_cloud_bridge = None
     dev_raw_cloud_hub = None
     dev_recording_manager = None
     dev_parameter_service = None
+    dev_parameter_bridge = None
     dev_system_metrics = None
     devtools_http_router = None
     devtools_ws_router = None
     if development_tools_enabled:
+        from backend.devtools.parameter_bridge import DevParameterBridge
         from backend.devtools.parameters import DevParameterService
         from backend.devtools.recording import RosbagRecordingManager
         from backend.devtools.routes import create_devtools_router, create_devtools_websocket_router
@@ -117,8 +127,12 @@ def create_app(
 
         dev_telemetry_bridge = DevTelemetryBridge()
         dev_raw_cloud_hub = CloudPreviewHub()
-        dev_recording_manager = RosbagRecordingManager(runtime_data_root)
-        dev_parameter_service = DevParameterService()
+        dev_parameter_bridge = DevParameterBridge()
+        dev_parameter_service = DevParameterService(bridge=dev_parameter_bridge)
+        dev_recording_manager = RosbagRecordingManager(
+            runtime_data_root,
+            parameter_snapshot_provider=dev_parameter_service.snapshot,
+        )
         dev_system_metrics = SystemMetricsSampler()
         devtools_http_router = create_devtools_router()
         devtools_ws_router = create_devtools_websocket_router()
@@ -137,6 +151,15 @@ def create_app(
                 f"Expected {index_file}; run scripts/build/build.sh web first."
             )
 
+        runtime_data_root.mkdir(parents=True, exist_ok=True)
+        (runtime_data_root / "tasks").mkdir(parents=True, exist_ok=True)
+        (runtime_data_root / "reports").mkdir(parents=True, exist_ok=True)
+        (runtime_data_root / "dev-tests").mkdir(parents=True, exist_ok=True)
+        try:
+            device_settings_store.initialize()
+        except DeviceSettingsError as error:
+            # 地图配置损坏不能阻断正式任务、记录和实时监视；地图接口会继续明确返回配置错误。
+            LOGGER.error("%s", error)
         try:
             task_repository.initialize()
         except TaskStorageError as error:
@@ -179,6 +202,9 @@ def create_app(
                 task_control_started, task_control_bridge.error
             )
             application.state.task_control_bridge = task_control_bridge
+            if development_tools_enabled and dev_parameter_bridge is not None and dev_parameter_service is not None:
+                dev_parameter_bridge.start()
+                dev_parameter_service.start()
             if development_tools_enabled and dev_telemetry_bridge is not None and dev_raw_cloud_hub is not None:
                 from backend.devtools.raw_cloud_bridge import DevRawCloudPreviewBridge
 
@@ -189,6 +215,9 @@ def create_app(
                 raw_started = active_dev_raw_cloud_bridge.start()
                 dev_raw_cloud_hub.set_ros_availability(raw_started, active_dev_raw_cloud_bridge.error)
         else:
+            if development_tools_enabled and dev_parameter_bridge is not None and dev_parameter_service is not None:
+                dev_parameter_bridge.start()
+                dev_parameter_service.start()
             task_status_hub.set_ros_availability(False, "任务控制ROS桥未启动")
             if development_tools_enabled and dev_raw_cloud_hub is not None:
                 dev_raw_cloud_hub.set_ros_availability(False, "开发ROS桥未启动")
@@ -210,6 +239,10 @@ def create_app(
                 active_dev_raw_cloud_bridge.stop()
             if dev_telemetry_bridge is not None:
                 dev_telemetry_bridge.stop()
+            if dev_parameter_service is not None:
+                dev_parameter_service.stop()
+            if dev_parameter_bridge is not None:
+                dev_parameter_bridge.stop()
             if dev_recording_manager is not None:
                 dev_recording_manager.stop_on_shutdown()
 
@@ -235,6 +268,8 @@ def create_app(
     application.state.dev_recording_manager = dev_recording_manager
     application.state.dev_parameter_service = dev_parameter_service
     application.state.dev_system_metrics = dev_system_metrics
+    application.state.device_settings_store = device_settings_store
+    application.state.wifi_manager = wifi_manager
 
     @application.get("/api/health", tags=["system"])
     async def health() -> dict[str, str]:
@@ -245,6 +280,8 @@ def create_app(
     application.include_router(task_router)
     application.include_router(task_control_router)
     application.include_router(export_router)
+    application.include_router(amap_router)
+    application.include_router(wifi_router)
     application.include_router(websocket_router)
 
     if development_tools_enabled:

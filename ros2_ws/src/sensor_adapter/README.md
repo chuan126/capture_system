@@ -41,8 +41,8 @@
 
 ```bash
 source /opt/ros/humble/setup.bash
-source /home/cat/Project/capture_system/third_party/odin_ros_driver/install/setup.bash
-source /home/cat/Project/capture_system/ros2_ws/install/setup.bash
+source /path/to/capture_system/third_party/odin_ros_driver/install/setup.bash
+source /path/to/capture_system/ros2_ws/install/setup.bash
 ```
 
 只启动雷达驱动和 Topic 映射：

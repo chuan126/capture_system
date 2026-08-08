@@ -18,7 +18,7 @@
 | `system_monitor/controller` | RK3588的`/proc`和thermal sysfs | CPU、内存和最高温度 |
 | `system_monitor/storage` | 数据目录实际所属文件系统 | 挂载源、挂载点、总容量、可用容量和可写性 |
 
-默认数据目录为`/home/cat/.local/share/capture_system`。容量通过`statvfs`实时读取，
+默认数据目录为`<project_root>/runtime`。容量通过`statvfs`实时读取，
 可用容量使用`f_bavail`，不会写死设备名称或把多个磁盘容量相加。将独立数据盘挂载
 到该目录后会自动报告新文件系统；若记录目录改变，启动脚本会将 `CAPTURE_DATA_ROOT` 作为 `storage_data_path` 传入。单独启动节点时必须显式覆盖该参数。
 

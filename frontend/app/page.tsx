@@ -6,6 +6,7 @@ import { useClearanceSocket } from "@/components/clearance/useClearanceSocket";
 import type { ClearanceSnapshot } from "@/components/clearance/clearanceProtocol";
 import RealtimeAmap from "@/components/map/RealtimeAmap";
 import PointCloudViewer from "@/components/point-cloud/PointCloudViewer";
+import WifiControl from "@/components/network/WifiControl";
 import { useRtkSocket } from "@/components/rtk/useRtkSocket";
 import { useSystemStatusSocket } from "@/components/system-status/useSystemStatusSocket";
 import { isDeviceConnected } from "@/components/system-status/systemStatusProtocol";
@@ -14,7 +15,7 @@ import PlaybackWorkspace from "@/components/playback/PlaybackWorkspace";
 import ReportWorkspace from "@/components/report/ReportWorkspace";
 import { DEVTOOLS_ENABLED, DevToolsWorkspace } from "@/components/devtools/devtoolsEntry.generated";
 import { useTaskStatusSocket } from "@/components/task-status/useTaskStatusSocket";
-import { createTaskBatch, deleteTask, listTasks, TaskApiError } from "@/components/workflow/taskApi";
+import { createTask, listTasks, TaskApiError } from "@/components/workflow/taskApi";
 import {
   getTaskControlReadiness,
   pauseTaskControl,
@@ -84,12 +85,38 @@ function taskRuntimeTone(task: CollectionTask): "idle" | "ok" | "warn" | "danger
   return taskTone(task.status);
 }
 
-function TaskCreateDialog({ onClose, onCreate }: { onClose: () => void; onCreate: (drafts: CollectionTaskDraft[], idempotencyKey: string) => Promise<void>; }) {
-  const [rows,setRows]=useState<CollectionTaskDraft[]>(()=>[createTaskDraft()]); const [error,setError]=useState<string|null>(null); const [submitting,setSubmitting]=useState(false); const [idempotencyKey,setIdempotencyKey]=useState(createClientRequestId);
-  const changed=()=>{setError(null);setIdempotencyKey(createClientRequestId());};
-  const updateRow=<K extends keyof CollectionTaskDraft,>(index:number,key:K,value:CollectionTaskDraft[K])=>{setRows(current=>current.map((row,i)=>i===index?{...row,[key]:value}:row));changed();};
-  const submit=async()=>{for(let i=0;i<rows.length;i+=1){if(!rows[i].tunnelCode.trim()){setError(`第 ${i+1} 行缺少隧道编号`);return;}if(!rows[i].tunnelName.trim()){setError(`第 ${i+1} 行缺少隧道名称`);return;}}setSubmitting(true);setError(null);try{await onCreate(rows.map(row=>({tunnelCode:row.tunnelCode.trim(),tunnelName:row.tunnelName.trim()})),idempotencyKey);}catch(e){setError(e instanceof Error?e.message:"任务创建失败");}finally{setSubmitting(false);}};
-  return <div className="task-dialog-mask" role="dialog" aria-modal="true"><section className="task-dialog-panel task-dialog-panel--wide"><header className="task-dialog-head"><div><h2>创建检测任务</h2><p>只填写隧道编号和隧道名称。任务编号由设备端按创建时间生成，例如 20260807_145601。</p></div><button type="button" disabled={submitting} onClick={onClose}>×</button></header><div className="task-dialog-rows">{rows.map((row,index)=><article className="task-dialog-row" key={index}><span className="task-dialog-row__index">第 {index+1} 项</span><label><span>隧道编号</span><input value={row.tunnelCode} onChange={e=>updateRow(index,"tunnelCode",e.target.value)} placeholder="例如 T-001"/></label><label><span>隧道名称</span><input value={row.tunnelName} onChange={e=>updateRow(index,"tunnelName",e.target.value)} placeholder="请输入隧道名称"/></label><div className="task-dialog-row__actions"><button type="button" disabled={submitting} onClick={()=>{setRows(current=>[...current.slice(0,index+1),{...row},...current.slice(index+1)]);changed();}}>复制</button><button type="button" disabled={submitting||rows.length===1} onClick={()=>{setRows(current=>current.filter((_,i)=>i!==index));changed();}}>删除</button></div></article>)}</div><button type="button" className="task-dialog-add-row" disabled={submitting} onClick={()=>{setRows(current=>[...current,createTaskDraft()]);changed();}}>＋ 添加任务</button>{error&&<p className="task-dialog-error" role="alert">{error}</p>}<footer className="task-dialog-actions"><button type="button" className="button" disabled={submitting} onClick={onClose}>取消</button><button type="button" className="button button--primary" disabled={submitting} onClick={submit}>{submitting?"正在保存":`保存 ${rows.length} 项任务`}</button></footer></section></div>;
+function TaskCreateDialog({ onClose, onCreate }: { onClose: () => void; onCreate: (draft: CollectionTaskDraft, idempotencyKey: string) => Promise<CollectionTask>; }) {
+  const [draft, setDraft] = useState<CollectionTaskDraft>(() => createTaskDraft());
+  const [error, setError] = useState<string | null>(null);
+  const [savedDisplayId, setSavedDisplayId] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [idempotencyKey, setIdempotencyKey] = useState(createClientRequestId);
+  const update = <K extends keyof CollectionTaskDraft,>(key: K, value: CollectionTaskDraft[K]) => {
+    setDraft((current) => ({ ...current, [key]: value }));
+    setError(null);
+    setSavedDisplayId(null);
+    setIdempotencyKey(createClientRequestId());
+  };
+  const submit = async (continueCreating: boolean) => {
+    const tunnelCode = draft.tunnelCode.trim();
+    const tunnelName = draft.tunnelName.trim();
+    if (!tunnelCode) { setError("请输入隧道编号"); return; }
+    if (!tunnelName) { setError("请输入隧道名称"); return; }
+    setSubmitting(true);
+    setError(null);
+    try {
+      const created = await onCreate({ tunnelCode, tunnelName }, idempotencyKey);
+      if (!continueCreating) { onClose(); return; }
+      setSavedDisplayId(created.displayId);
+      setDraft(createTaskDraft());
+      setIdempotencyKey(createClientRequestId());
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "任务创建失败");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+  return <div className="task-dialog-mask" role="dialog" aria-modal="true"><section className="task-dialog-panel"><header className="task-dialog-head"><div><h2>创建检测任务</h2><p>每次保存一个任务。保存成功后可继续创建下一项，任务编号由设备端按创建时间生成，例如 20260807_145601。</p></div><button type="button" disabled={submitting} onClick={onClose}>×</button></header><div className="task-dialog-single"><label><span>隧道编号</span><input value={draft.tunnelCode} onChange={event=>update("tunnelCode",event.target.value)} placeholder="例如 T-001" autoFocus/></label><label><span>隧道名称</span><input value={draft.tunnelName} onChange={event=>update("tunnelName",event.target.value)} placeholder="请输入隧道名称"/></label></div>{savedDisplayId&&<p className="task-dialog-success" role="status">已保存任务 {savedDisplayId}，可以继续创建下一项。</p>}{error&&<p className="task-dialog-error" role="alert">{error}</p>}<footer className="task-dialog-actions"><button type="button" className="button" disabled={submitting} onClick={onClose}>取消</button><button type="button" className="button" disabled={submitting} onClick={()=>void submit(false)}>{submitting?"正在保存":"保存并关闭"}</button><button type="button" className="button button--primary" disabled={submitting} onClick={()=>void submit(true)}>{submitting?"正在保存":"保存并继续创建"}</button></footer></section></div>;
 }
 
 function TaskSwitchDialog({
@@ -567,14 +594,14 @@ function Dashboard({
   const currentTaskStatus = currentTask?.status ?? "待执行";
   const currentTaskRuntimeLabel = currentTask ? taskRuntimeLabel(currentTask) : "无任务";
   const taskRunning = currentTask?.status === "采集中" || currentTask?.status === "已暂停" || isTaskControlBusy(currentTask);
-  const createTasks = async (
-    drafts: CollectionTaskDraft[],
+  const createSingleTask = async (
+    draft: CollectionTaskDraft,
     idempotencyKey: string,
   ) => {
-    const created = await createTaskBatch(drafts, idempotencyKey);
+    const created = await createTask(draft, idempotencyKey);
     await reloadTasks();
-    setSelectedTaskId(created[0]?.taskId ?? null);
-    setTaskDialogOpen(false);
+    setSelectedTaskId(created.taskId);
+    return created;
   };
 
   const selectTask = (taskId: string) => {
@@ -1064,7 +1091,7 @@ function Dashboard({
       {taskDialogOpen && (
         <TaskCreateDialog
           onClose={() => setTaskDialogOpen(false)}
-          onCreate={createTasks}
+          onCreate={createSingleTask}
         />
       )}
 
@@ -1126,13 +1153,7 @@ export default function Home() {
 
   const selectedTask = tasks.find((task) => task.taskId === selectedTaskId) ?? null;
   const reloadTasks = useCallback(() => loadPersistedData(false), [loadPersistedData]);
-  const removePersistedTask = async (taskId: string) => {
-    const index = tasks.findIndex((task) => task.taskId === taskId);
-    await deleteTask(taskId);
-    await loadPersistedData(false);
-    const remaining = tasks.filter((task) => task.taskId !== taskId);
-    setSelectedTaskId((current) => current !== taskId ? current : remaining[index]?.taskId ?? remaining[index - 1]?.taskId ?? null);
-  };
+
 
   return (
     <div className="app-shell">
@@ -1142,14 +1163,14 @@ export default function Home() {
         <nav aria-label="主导航">{navigation.map((item) => (
           <button type="button" key={item.id} className={activePage === item.id ? "active" : ""} onClick={() => setActivePage(item.id)} aria-current={activePage === item.id ? "page" : undefined}><span>{item.index}</span>{item.label}<i>›</i></button>
         ))}</nav>
-        <div className="sidebar__bottom"><div className="device-card"><div className="device-card__icon">RK</div><div><strong>车载主控终端</strong><span>RK3588 · 本地运行</span></div><i /></div><div className="version">CAPTURE SYSTEM · V1.0</div></div>
+        <div className="sidebar__bottom"><WifiControl /><div className="device-card"><div className="device-card__icon">RK</div><div><strong>车载主控终端</strong><span>RK3588 · 本地运行</span></div><i /></div><div className="version">CAPTURE SYSTEM · V1.0</div></div>
       </aside>
       <main className={activePage === "dashboard" ? "main--dashboard" : undefined}>
         {activePage !== "dashboard" && <Header page={activePage} task={selectedTask} />}
         <div className="page-content">
           {taskQueryState !== "ready" && <section className={`task-data-notice task-data-notice--${taskQueryState}`} role={taskQueryState === "error" ? "alert" : "status"}><div><strong>{taskQueryState === "loading" ? "正在读取设备任务记录" : "任务记录读取失败"}</strong><span>{taskQueryState === "loading" ? "任务列表从 FastAPI 持久化接口加载" : taskQueryError ?? "无法读取设备端任务数据库"}</span></div>{taskQueryState === "error" && <button type="button" onClick={() => void loadPersistedData()}>重新读取</button>}</section>}
           {activePage === "dashboard" && <Dashboard tasks={tasks} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} onNavigate={setActivePage} taskRepositoryReady={taskQueryState === "ready"} reloadTasks={reloadTasks} />}
-          {activePage === "playback" && <PlaybackWorkspace tasks={tasks} selectedTaskId={selectedTaskId} onSelectTask={setSelectedTaskId} onDeleteTask={removePersistedTask} onDataChanged={reloadTasks} onNavigate={setActivePage} />}
+          {activePage === "playback" && <PlaybackWorkspace tasks={tasks} selectedTaskId={selectedTaskId} onSelectTask={setSelectedTaskId} onDataChanged={reloadTasks} onNavigate={setActivePage} />}
           {activePage === "report" && <ReportWorkspace tasks={tasks} selectedTaskId={selectedTaskId} onSelectTask={setSelectedTaskId} onNavigate={setActivePage} />}
           {activePage === "devtools" && DEVTOOLS_ENABLED && DevToolsWorkspace && <DevToolsWorkspace />}
         </div>

@@ -1,6 +1,6 @@
 task_manager_node:
   ros__parameters:
-    data_root: "/home/cat/.local/share/capture_system"
+    data_root: "runtime"
     recorder_prepare_service: "/capture/recording/prepare"
     recorder_control_service: "/capture/recording/control"
     recorder_service_timeout_ms: 5000

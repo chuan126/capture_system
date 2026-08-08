@@ -85,7 +85,7 @@ East/North/Up”的局部零姿态用途，不能混用于严格重力高度计�
 
 ```bash
 source /opt/ros/humble/setup.bash
-cd /home/cat/Project/capture_system/ros2_ws
+cd /path/to/capture_system/ros2_ws
 colcon build --symlink-install --packages-select localization
 source install/setup.bash
 colcon test --packages-select localization

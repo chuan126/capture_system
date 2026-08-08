@@ -1,19 +1,12 @@
+# 本文件仅说明服务结构。不要直接复制到 /etc/systemd/system。
+# 请运行 sudo bash scripts/deploy/install_systemd.sh，由安装脚本写入当前项目真实路径和运行用户。
 [Unit]
 Description=Capture System LAN Web Service
-After=network.target
 
 [Service]
 Type=simple
-User=cat
-Group=cat
-WorkingDirectory=/home/cat/Project/capture_system
-EnvironmentFile=/home/cat/Project/capture_system/config/network/web.env
-Environment=PYTHONUNBUFFERED=1
-ExecStart=/home/cat/Project/capture_system/scripts/operation/run_web.sh
-Restart=on-failure
-RestartSec=3
-NoNewPrivileges=true
-PrivateTmp=true
-
-[Install]
-WantedBy=multi-user.target
+WorkingDirectory=@PROJECT_ROOT@
+EnvironmentFile=@PROJECT_ROOT@/config/network/web.env
+Environment=CAPTURE_PROJECT_ROOT=@PROJECT_ROOT@
+Environment=CAPTURE_DATA_ROOT=@PROJECT_ROOT@/runtime
+ExecStart=@PROJECT_ROOT@/scripts/operation/run_web.sh

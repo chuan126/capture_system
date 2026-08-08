@@ -2773,6 +2773,7 @@ table {
 
 .dev-record-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
 .dev-record-list { margin-top: 12px; border-top: 1px solid #e0e6ec; }
+.dev-record-list--compact { max-height: 280px; overflow-y: auto; padding-right: 4px; }
 .dev-record-list > div { min-height: 54px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid #e7ecf1; padding: 8px 0; }
 .dev-record-list > div > div { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .dev-record-list strong { font-size: 12px; color: #293847; overflow-wrap: anywhere; }
@@ -2811,3 +2812,88 @@ table {
   .dev-parameter-list > div { grid-template-columns: 1fr; }
   .dev-pointcloud-stage { height: 360px; }
 }
+
+.task-dialog-single { display: grid; gap: 14px; padding: 18px 0 4px; }
+.task-dialog-single label { display: grid; gap: 7px; }
+.task-dialog-single label > span { color: var(--muted); font-size: 12px; font-weight: 700; }
+.task-dialog-single input { width: 100%; min-height: 40px; border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; background: #fff; color: var(--text); }
+.task-dialog-success { margin: 12px 0 0; color: #2e6b49; font-size: 12px; }
+
+.task-browser__head-actions {
+  display: flex !important;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.task-browser__head-actions button {
+  min-height: 30px;
+  padding: 5px 10px;
+  color: #44566f;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+  font-size: 11px;
+  cursor: pointer;
+}
+.task-browser__head-actions button:disabled { cursor: not-allowed; opacity: .45; }
+
+/* 设备端 Wi-Fi 管理 */
+.wifi-sidebar-button {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  width: 100%;
+  min-height: 42px;
+  margin-bottom: 9px;
+  padding: 0 11px;
+  color: #5f6e84;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: #fff;
+  text-align: left;
+}
+.wifi-sidebar-button span { font-size: 10px; font-weight: 700; }
+.wifi-sidebar-button strong { overflow: hidden; margin-left: 8px; color: var(--text); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.wifi-sidebar-button i { color: #9aa6b8; font-style: normal; }
+.wifi-sidebar-button:hover { border-color: #bfd2ef; background: #f7faff; }
+.wifi-dialog-panel { width: min(520px, 100%); }
+.wifi-current { display: flex; align-items: center; justify-content: space-between; min-height: 43px; padding: 0 12px; border: 1px solid var(--line); border-radius: 9px; background: #fafcff; }
+.wifi-current span { color: var(--muted); font-size: 11px; }
+.wifi-current strong { max-width: 70%; overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.wifi-dialog-toolbar { display: flex; align-items: center; justify-content: space-between; margin-top: 3px; }
+.wifi-dialog-toolbar strong { font-size: 12px; }
+.wifi-network-list { display: grid; max-height: 260px; overflow-y: auto; border: 1px solid var(--line); border-radius: 9px; }
+.wifi-network-list > button { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 53px; padding: 8px 12px; border: 0; border-bottom: 1px solid var(--line-soft); background: #fff; text-align: left; }
+.wifi-network-list > button:last-child { border-bottom: 0; }
+.wifi-network-list > button:hover, .wifi-network-list > button.active { background: #f4f8ff; }
+.wifi-network-list > button.connected { box-shadow: inset 3px 0 var(--green); }
+.wifi-network-list > button > div { display: grid; min-width: 0; gap: 3px; }
+.wifi-network-list > button strong { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.wifi-network-list > button span, .wifi-network-list > button small { color: var(--muted); font-size: 10px; }
+.wifi-network-empty { padding: 20px 12px; color: var(--muted); text-align: center; font-size: 11px; }
+.wifi-connect-form { display: grid; gap: 10px; padding: 11px 12px; border: 1px solid var(--line); border-radius: 9px; background: #fafcff; }
+.wifi-connect-form > div { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.wifi-connect-form > div span, .wifi-connect-form label > span { color: var(--muted); font-size: 10px; }
+.wifi-connect-form > div strong { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.wifi-connect-form label { display: grid; gap: 5px; }
+.wifi-connect-form input { height: 38px; font-size: 11px; }
+
+/* 开发参数页同时展示正式配置值与ROS实际运行值。 */
+.dev-parameter-values { display: grid; grid-template-columns: minmax(92px, .7fr) minmax(220px, 1.3fr); gap: 10px; align-items: center; }
+.dev-parameter-values > div { display: grid; gap: 4px; min-width: 0; }
+.dev-parameter-values small { color: var(--muted); font-size: 9px; }
+.dev-parameter-values > div > strong { font-size: 12px; font-variant-numeric: tabular-nums; }
+.dev-parameter-values > div > span { color: var(--red); font-size: 9px; }
+@media (max-width: 760px) {
+  .dev-parameter-values { grid-template-columns: 1fr; }
+}
+
+/* 设备端高德地图配置 */
+.map-panel-actions { display: flex; align-items: center; gap: 8px; }
+.amap-settings { margin: 0 0 12px; padding: 14px; border: 1px solid var(--line, #d7dee8); border-radius: 10px; background: #fff; display: grid; gap: 10px; }
+.amap-settings > div:first-child { display: grid; gap: 4px; }
+.amap-settings > div:first-child span { color: #667085; font-size: 12px; }
+.amap-settings label { display: grid; gap: 5px; font-size: 12px; color: #475467; }
+.amap-settings input { width: 100%; min-height: 36px; border: 1px solid #cfd7e3; border-radius: 7px; padding: 7px 9px; font: inherit; }
+.amap-settings__actions { display: flex; justify-content: flex-end; gap: 8px; }
+.amap-settings__error { color: #b42318; font-size: 12px; }

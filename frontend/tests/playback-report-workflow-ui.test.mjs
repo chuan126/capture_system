@@ -47,13 +47,21 @@ test("stopped tasks expose direct playback and report navigation", () => {
   assert.match(page, /onNavigate\("report"\)/);
 });
 
-test("playback keeps one complete task curve and supports date-grouped local-data cleanup", () => {
+test("playback task browser follows task creation order", () => {
+  assert.match(playback, /heading="选择回放任务" sortOrder="asc"/);
+  assert.match(taskBrowser, /sortOrder\?: "asc" \| "desc"/);
+  assert.match(taskBrowser, /const direction=sortOrder==="asc"\?1:-1/);
+});
+
+test("playback keeps one complete task curve and supports filtered multi-task deletion", () => {
   assert.match(playback, /选择回放任务/);
   assert.match(playback, /完整净空高度曲线/);
   assert.match(playback, /50 Hz 测量序列/);
   assert.match(playback, /统计与数据质量/);
-  assert.match(playback, /purgeTaskData\(cleanupIds\)/);
-  assert.match(playback, /清理所选数据/);
+  assert.match(playback, /deleteSelectedTasks\(deleteIds\)/);
+  assert.match(playback, /删除所选任务/);
+  assert.match(playback, /showSelectAll/);
+  assert.match(taskBrowser, /取消全选|全选/);
   assert.match(taskBrowser, /formatTaskDateKey\(dateKey\)/);
   assert.match(taskBrowser, /选择当日/);
   assert.doesNotMatch(playback, /playback-control-panel|playback-scrubber|点云回放|地图轨迹|PlaybackView/);
@@ -78,13 +86,13 @@ test("interactive clearance chart supports pan, zoom, reset and hover without mo
   assert.match(playback, /samples=\{history\?\.samples\?\?\[]\}/);
 });
 
-test("playback separates logical task deletion from physical measurement-data cleanup", () => {
-  assert.match(playback, />删除任务<\/button>/);
-  assert.match(playback, /function DeleteDialog/);
-  assert.match(playback, /任务将从列表移除。此操作不负责释放测量文件空间/);
-  assert.match(playback, /onDeleteTask\(selectedTask\.taskId\)/);
-  assert.match(playback, /measurements\.db 和单任务导出文件将被物理删除/);
-  assert.match(taskApi, /\/api\/v1\/tasks\/purge-data/);
+test("playback removes physical cleanup from customer UI and deletes selected tasks logically", () => {
+  assert.match(playback, /确定删除所选 \${deleteIds\.length} 个任务吗？/);
+  assert.match(playback, /deleteSelectedTasks\(deleteIds\)/);
+  assert.match(taskApi, /\/api\/v1\/tasks\/delete-selected/);
+  assert.doesNotMatch(playback, /清理所选数据|purgeTaskData|任务索引|measurements\.db/);
+  assert.doesNotMatch(taskApi, /\/api\/v1\/tasks\/purge-data/);
+  assert.match(taskBrowser, /disabledTaskIds/);
   assert.match(css, /\.button--danger-outline/);
 });
 

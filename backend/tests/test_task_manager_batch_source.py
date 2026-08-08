@@ -1,7 +1,7 @@
 from pathlib import Path
 
 
-def test_task_manager_uses_batch_local_sequence_and_active_batch_guard() -> None:
+def test_task_manager_does_not_use_legacy_batch_state_for_task_control() -> None:
     source = (
         Path(__file__).parents[2]
         / "ros2_ws"
@@ -12,9 +12,11 @@ def test_task_manager_uses_batch_local_sequence_and_active_batch_guard() -> None
     ).read_text(encoding="utf-8")
 
     assert "COALESCE(tasks.batch_sequence,tasks.sequence)" in source
-    assert "JOIN operation_batches ON operation_batches.batch_id=tasks.batch_id" in source
-    assert 'task->batch_status != "active"' in source
-    assert "任务所属作业已经结束" in source
+    assert "FROM tasks WHERE tasks.task_id=? AND tasks.deleted_at IS NULL" in source
+    assert "JOIN operation_batches ON operation_batches.batch_id=tasks.batch_id" not in source
+    assert "batch_status" not in source
+    assert "batch_not_active" not in source
+    assert "任务所属作业已经结束" not in source
 
 
 def test_task_manager_releases_stuck_transitions_without_system_restart() -> None:

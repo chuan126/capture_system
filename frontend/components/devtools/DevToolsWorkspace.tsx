@@ -21,6 +21,7 @@ import {
   type DevParameter,
   type DevRecording,
   type DevRecordingStatus,
+  type DevRecordingRouteProfile,
   type DevTopicTelemetry,
 } from "./devtoolsApi";
 
@@ -117,6 +118,7 @@ function OverviewPanel({ overview }: { overview: DevOverview | null }) {
 
 function LidarPanel({ overview }: { overview: DevOverview | null }) {
   const [preview, setPreview] = useState<"raw" | "compensated">("raw");
+  const recordingController = useDevRecordingController(true);
   const raw = overview?.telemetry.topics.raw_cloud;
   const compensated = overview?.telemetry.topics.compensated_cloud;
   return <div className="dev-section-stack">
@@ -138,7 +140,7 @@ function LidarPanel({ overview }: { overview: DevOverview | null }) {
         <Metric label="补偿数据年龄" value={compensated?.age_ms == null ? "--" : `${fixed(compensated.age_ms, 0)} ms`} detail={`帧 ${compensated?.frame_id ?? "--"}`} />
       </div>
     </section>
-    <RecordingControl compact profile="raw-cloud" title="保存原始点云" description="保存 /capture/lidar/points_raw 的完整 PointCloud2 为MCAP。浏览器预览的降采样点不会写入录制文件。" />
+    <RecordingControl controller={recordingController} compact profile="raw-cloud" title="保存原始点云" description="保存 /capture/lidar/points_raw 的完整 PointCloud2 为MCAP。浏览器预览的降采样点不会写入录制文件。" />
   </div>;
 }
 
@@ -215,30 +217,77 @@ function ClearancePanel({ overview }: { overview: DevOverview | null }) {
   </div>;
 }
 
-function RecordingControl({ profile, title, description, compact = false }: { profile: "raw-cloud" | "diagnostic"; title: string; description: string; compact?: boolean }) {
+const storedProfileName: Record<DevRecordingRouteProfile, DevRecording["profile"]> = {
+  "raw-cloud": "raw_cloud",
+  diagnostic: "diagnostic",
+  "raw-sensor": "raw_sensor",
+  "algorithm-debug": "algorithm_debug",
+  "full-debug": "full_debug",
+};
+
+type RecordingController = {
+  status: DevRecordingStatus | null;
+  records: DevRecording[];
+  error: string | null;
+  busy: boolean;
+  start: (profile: DevRecordingRouteProfile, duration: 5 | 10 | 30 | null) => Promise<void>;
+  stop: () => Promise<void>;
+  deleteRecording: (recordingId: string) => Promise<void>;
+};
+
+function useDevRecordingController(includeRecords: boolean): RecordingController {
   const [status, setStatus] = useState<DevRecordingStatus | null>(null);
   const [records, setRecords] = useState<DevRecording[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const refresh = useCallback(async () => {
-    try {
-      const [nextStatus, nextRecords] = await Promise.all([getDevRecordingStatus(), listDevRecordings()]);
-      setStatus(nextStatus); setRecords(nextRecords); setError(null);
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "录制状态读取失败"); }
+  const [busy, setBusy] = useState(false);
+  const refreshStatus = useCallback(async () => {
+    try { setStatus(await getDevRecordingStatus()); setError(null); } catch (reason) { setError(reason instanceof Error ? reason.message : "录制状态读取失败"); }
   }, []);
-  useEffect(() => { void refresh(); const timer = window.setInterval(() => void refresh(), 1000); return () => window.clearInterval(timer); }, [refresh]);
-  const start = async (duration: 5 | 10 | 30 | null) => { try { await startDevRecording(profile, duration); await refresh(); } catch (reason) { setError(reason instanceof Error ? reason.message : "录制启动失败"); } };
-  const stop = async () => { try { await stopDevRecording(); await refresh(); } catch (reason) { setError(reason instanceof Error ? reason.message : "停止录制失败"); } };
-  const ownRecords = records.filter((record) => record.profile === (profile === "raw-cloud" ? "raw_cloud" : "diagnostic"));
+  const refreshRecords = useCallback(async () => {
+    if (!includeRecords) return;
+    try { setRecords(await listDevRecordings()); } catch (reason) { setError(reason instanceof Error ? reason.message : "录制历史读取失败"); }
+  }, [includeRecords]);
+  useEffect(() => {
+    void refreshStatus();
+    void refreshRecords();
+    const timer = window.setInterval(() => void refreshStatus(), 1000);
+    return () => window.clearInterval(timer);
+  }, [refreshRecords, refreshStatus]);
+  const startRecording = async (profile: DevRecordingRouteProfile, duration: 5 | 10 | 30 | null) => {
+    if (busy || status?.active) return;
+    setBusy(true); setError(null);
+    try { setStatus(await startDevRecording(profile, duration)); } catch (reason) { setError(reason instanceof Error ? reason.message : "录制启动失败"); } finally { setBusy(false); }
+  };
+  const stopRecording = async () => {
+    if (busy || !status?.active) return;
+    setBusy(true); setError(null);
+    try { setStatus(await stopDevRecording()); await refreshRecords(); } catch (reason) { setError(reason instanceof Error ? reason.message : "停止录制失败"); } finally { setBusy(false); }
+  };
+  const deleteRecording = async (recordingId: string) => {
+    if (busy) return;
+    if (!window.confirm("确定删除该开发录制吗？此操作不可恢复。")) return;
+    setBusy(true); setError(null);
+    try { await deleteDevRecording(recordingId); await refreshRecords(); } catch (reason) { setError(reason instanceof Error ? reason.message : "删除失败"); } finally { setBusy(false); }
+  };
+  return { status, records, error, busy, start: startRecording, stop: stopRecording, deleteRecording };
+}
+
+function RecordingControl({ controller, profile, title, description, compact = false }: { controller: RecordingController; profile: DevRecordingRouteProfile; title: string; description: string; compact?: boolean }) {
+  const { status, records, error, busy } = controller;
+  const ownRecords = records.filter((record) => record.profile === storedProfileName[profile]);
+  const visibleRecords = compact ? ownRecords : ownRecords.slice(0, 10);
+  const recordingBusy = busy || status?.active === true;
   return <section className={`panel dev-panel ${compact ? "dev-recording-compact" : ""}`}>
-    <div className="panel-head"><div><h2>{title}</h2><p>{description}</p></div><div className={`dev-state ${status?.active ? "dev-state--streaming" : "dev-state--waiting"}`}>{status?.active ? `录制中 ${status.elapsed_seconds.toFixed(1)} s` : "空闲"}</div></div>
-    <div className="dev-record-actions"><button className="button" disabled={status?.active} onClick={() => void start(5)}>记录 5 秒</button><button className="button" disabled={status?.active} onClick={() => void start(10)}>记录 10 秒</button><button className="button" disabled={status?.active} onClick={() => void start(30)}>记录 30 秒</button>{profile === "raw-cloud" && <button className="button" disabled={status?.active} onClick={() => void start(null)}>连续记录</button>}<button className="button button--danger-outline" disabled={!status?.active} onClick={() => void stop()}>停止</button></div>
-    <div className="dev-metric-grid dev-metric-grid--3"><Metric label="当前文件" value={status?.recording_id ?? "--"} detail={status?.path ?? ""} /><Metric label="已写入" value={bytesText(status?.bytes)} /><Metric label="剩余空间" value={bytesText(status?.free_bytes)} /></div>
+    <div className="panel-head"><div><h2>{title}</h2><p>{description}</p></div><div className={`dev-state ${status?.active ? "dev-state--streaming" : "dev-state--waiting"}`}>{busy ? "处理中" : status?.active ? `录制中 ${status.elapsed_seconds.toFixed(1)} s` : "空闲"}</div></div>
+    <div className="dev-record-actions"><button className="button" disabled={recordingBusy} onClick={() => void controller.start(profile, 5)}>记录 5 秒</button><button className="button" disabled={recordingBusy} onClick={() => void controller.start(profile, 10)}>记录 10 秒</button><button className="button" disabled={recordingBusy} onClick={() => void controller.start(profile, 30)}>记录 30 秒</button>{profile !== "diagnostic" && <button className="button" disabled={recordingBusy} onClick={() => void controller.start(profile, null)}>连续记录</button>}<button className="button button--danger-outline" disabled={busy || !status?.active} onClick={() => void controller.stop()}>停止</button></div>
+    <div className="dev-metric-grid dev-metric-grid--4"><Metric label="当前文件" value={status?.recording_id ?? "--"} detail={status?.path ?? ""} /><Metric label="已写入" value={bytesText(status?.bytes)} /><Metric label="剩余空间" value={bytesText(status?.free_bytes)} /><Metric label="参数快照" value={status?.parameter_snapshot_complete === true ? "完整" : status?.parameter_snapshot_complete === false ? "有缺项" : "写入中"} detail="录制启动不等待参数快照，快照使用常驻ROS参数桥的最近真实值" /></div>
     {error && <div className="dev-message dev-message--error"><strong>{error}</strong></div>}
-    {!compact && <div className="dev-record-list">{ownRecords.slice(0, 10).map((record) => <div key={record.recording_id}><div><strong>{record.recording_id}</strong><span>{bytesText(record.bytes)} · {new Date(record.modified_at_ns / 1_000_000).toLocaleString("zh-CN")}</span></div><button className="button button--quiet" disabled={record.active} onClick={async () => { try { await deleteDevRecording(record.recording_id); await refresh(); } catch (reason) { setError(reason instanceof Error ? reason.message : "删除失败"); } }}>删除</button></div>)}</div>}
+    {visibleRecords.length > 0 && <div className={`dev-record-list${compact ? " dev-record-list--compact" : ""}`}>{visibleRecords.map((record) => <div key={record.recording_id}><div><strong>{record.recording_id}</strong><span>{bytesText(record.bytes)} · {new Date(record.modified_at_ns / 1_000_000).toLocaleString("zh-CN")} · 参数快照 {record.parameter_snapshot_complete === true ? "完整" : record.parameter_snapshot_complete === false ? "有缺项" : "未记录"}</span></div><button className="button button--quiet" disabled={record.active || busy} onClick={() => void controller.deleteRecording(record.recording_id)}>删除</button></div>)}</div>}
   </section>;
 }
 
 function RecordingPanel({ overview }: { overview: DevOverview | null }) {
+  const recordingController = useDevRecordingController(true);
   const [control, setControl] = useState<TaskControlReadiness | null>(null);
   const [error, setError] = useState<string | null>(null);
   const refreshControl = useCallback(async () => { try { setControl(await getTaskControlReadiness()); setError(null); } catch (reason) { setError(reason instanceof Error ? reason.message : "任务控制状态读取失败"); } }, []);
@@ -251,8 +300,9 @@ function RecordingPanel({ overview }: { overview: DevOverview | null }) {
       <div className="dev-service-grid">{(["start", "pause", "resume", "stop", "recover"] as const).map((name) => <div key={name}><span>{name}</span><strong className={services?.[name] ? "is-ready" : "is-blocked"}>{services?.[name] ? "可用" : "不可用"}</strong></div>)}</div>
       <div className="dev-metric-grid dev-metric-grid--4"><Metric label="活动任务" value={control?.activeTaskId ?? task?.task_id ?? "--"} /><Metric label="内部阶段" value={control?.activePhase ?? task?.operation_phase ?? "--"} /><Metric label="状态版本" value={task?.status_revision ?? "--"} /><Metric label="记录器" value={recording?.status ?? "--"} detail={String(recording?.message ?? "")} /></div>
     </section>
-    <RecordingControl profile="diagnostic" title="独立诊断记录" description="记录净空、RTK、任务状态、系统诊断和高频里程计到独立MCAP，不创建正式任务。" />
-    <RecordingControl profile="raw-cloud" title="原始点云记录" description="记录完整 /capture/lidar/points_raw PointCloud2。文件可能较大，仅用于开发调试。" />
+    <RecordingControl controller={recordingController} profile="raw-sensor" title="原始传感器记录" description="按ROS原始发布频率记录点云、IMU、原始高频里程计、SLAM里程计和雷达上下线事件。当前不录制视觉和传感器内部温度。" />
+    <RecordingControl controller={recordingController} profile="algorithm-debug" title="算法诊断记录" description="记录时间适配里程计、运动补偿点云、净空、RTK、任务、记录器和系统诊断，不创建正式任务。" />
+    <RecordingControl controller={recordingController} profile="full-debug" title="完整开发记录" description="同时记录当前原始传感器链和算法处理链，ROS Topic不经浏览器且不降频。" />
   </div>;
 }
 
@@ -272,9 +322,10 @@ function ParameterPanel({ embeddedPrefix }: { embeddedPrefix?: string }) {
     const value = parameter.kind === "bool" ? raw === "true" : parameter.kind === "int" ? Number.parseInt(raw, 10) : Number.parseFloat(raw);
     try { await setDevParameter(parameter.key, value); setEditing((current) => ({ ...current, [parameter.key]: "" })); await refresh(); } catch (reason) { setError(reason instanceof Error ? reason.message : "参数设置失败"); }
   };
-  return <section className="panel dev-panel"><div className="panel-head"><div><h2>{embeddedPrefix ? "当前实际参数" : "运行时参数"}</h2><p>白名单参数只修改当前ROS节点，重启后恢复YAML值。页面不会自动改写配置文件。</p></div><button className="button" onClick={() => void refresh()}>重新读取</button></div>
+  const formatValue = (value: DevParameter["value"], unit: string) => value === null || value === undefined ? "--" : `${String(value)}${unit ? ` ${unit}` : ""}`;
+  return <section className="panel dev-panel"><div className="panel-head"><div><h2>{embeddedPrefix ? "当前实际参数" : "核心参数装订"}</h2><p>正式配置值来自所属YAML，运行值由常驻ROS 2参数桥后台批量读取并缓存。节点不可用时不以配置值代替运行值；可写项只修改当前ROS节点，重启后恢复YAML值。</p></div><button className="button" onClick={() => void refresh()}>重新读取</button></div>
     {error && <div className="dev-message dev-message--error"><strong>{error}</strong></div>}
-    <div className="dev-parameter-list">{visible.map((parameter) => <div key={parameter.key} className={!parameter.available ? "is-unavailable" : ""}><div><strong>{parameter.label}</strong><span>{parameter.node} · {parameter.parameter}</span><small>{parameter.note || parameter.detail}</small></div><div className="dev-parameter-control"><input disabled={!parameter.available || !parameter.writable} value={editing[parameter.key] ?? String(parameter.value ?? "")} onChange={(event) => setEditing((current) => ({ ...current, [parameter.key]: event.target.value }))} /><span>{parameter.unit}</span><button className="button button--quiet" disabled={!parameter.available || !parameter.writable} onClick={() => void apply(parameter)}>应用</button></div></div>)}</div>
+    <div className="dev-parameter-list">{visible.map((parameter) => <div key={parameter.key} className={!parameter.available ? "is-unavailable" : ""}><div><strong>{parameter.label}</strong><span>{parameter.node} · {parameter.parameter}</span><small>{parameter.note}{parameter.source_config ? ` · ${parameter.source_config}` : ""}</small></div><div className="dev-parameter-values"><div><small>配置值</small><strong>{parameter.config_available ? formatValue(parameter.configured_value, parameter.unit) : "--"}</strong>{!parameter.config_available && <span title={parameter.config_detail}>配置不可用</span>}</div><div><small>运行值</small>{parameter.writable ? <div className="dev-parameter-control"><input disabled={!parameter.available} value={editing[parameter.key] ?? String(parameter.value ?? "")} placeholder="--" onChange={(event) => setEditing((current) => ({ ...current, [parameter.key]: event.target.value }))} /><span>{parameter.unit}</span><button className="button button--quiet" disabled={!parameter.available} onClick={() => void apply(parameter)}>应用</button></div> : <strong>{parameter.available ? formatValue(parameter.value, parameter.unit) : "--"}</strong>}{!parameter.available && <span title={parameter.detail}>节点不可用</span>}</div></div></div>)}</div>
   </section>;
 }
 

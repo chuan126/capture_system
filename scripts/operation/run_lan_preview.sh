@@ -98,11 +98,13 @@ if [[ -f "${runtime_config}" ]]; then
   set +a
 fi
 web_port="${UVICORN_PORT:-8000}"
-data_root="${CAPTURE_DATA_ROOT:-/home/cat/.local/share/capture_system}"
+data_root="${CAPTURE_DATA_ROOT:-${project_root}/runtime}"
 if [[ "${data_root}" != /* ]]; then
   data_root="$(realpath -m -- "${project_root}/${data_root}")"
 fi
-mkdir -p "${data_root}/tasks"
+export CAPTURE_PROJECT_ROOT="${project_root}"
+export CAPTURE_DATA_ROOT="${data_root}"
+mkdir -p "${data_root}/tasks" "${data_root}/reports" "${data_root}/dev-tests" "${data_root}/settings"
 if [[ ! -w "${data_root}" || ! -w "${data_root}/tasks" ]]; then
   print_error "任务数据目录不可写：${data_root}"
   exit 1

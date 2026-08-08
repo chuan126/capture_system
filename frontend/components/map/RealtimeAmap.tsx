@@ -69,12 +69,16 @@ function wgs84ToGcj02(lat: number, lon: number): [number, number] {
 const MAX_TRACK_POINTS = 2500;
 const AMAP_JS_URL =
   "https://webapi.amap.com/maps?v=2.0&plugin=AMap.Scale,AMap.ToolBar";
-const STORAGE_KEY_KEY = "amap_js_key";
-const STORAGE_KEY_CODE = "amap_security_code";
-
 type AmapConfig = {
   key: string;
-  securityCode: string;
+  serviceHost: string;
+};
+
+type AmapDeviceConfig = {
+  configured: boolean;
+  js_api_key: string | null;
+  security_configured: boolean;
+  service_host: string | null;
 };
 
 type TrackPoint = {
@@ -91,7 +95,7 @@ type AmapMapLike = {
   setZoomAndCenter?: (zoom: number, center: [number, number]) => void;
 };
 
-function loadAmapScript(key: string, securityCode: string): Promise<void> {
+function loadAmapScript(key: string, serviceHost: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const existing = document.querySelector(
       'script[src*="webapi.amap.com"]',
@@ -104,7 +108,7 @@ function loadAmapScript(key: string, securityCode: string): Promise<void> {
     }
 
     (window as unknown as Record<string, unknown>)._AMapSecurityConfig = {
-      securityJsCode: securityCode,
+      serviceHost,
     };
 
     const script = document.createElement("script");
@@ -217,15 +221,17 @@ export default function RealtimeAmap({
   expanded = false,
   onToggleExpanded = () => undefined,
 }: RealtimeAmapProps) {
-  const [config, setConfig] = useState<AmapConfig>({ key: "", securityCode: "" });
-  const [configHydrated, setConfigHydrated] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
-  const [draftKey, setDraftKey] = useState("");
-  const [draftCode, setDraftCode] = useState("");
+  const [config, setConfig] = useState<AmapConfig | null>(null);
+  const [mapError, setMapError] = useState<string | null>(null);
   const [mapState, setMapState] = useState<
     "no_key" | "loading" | "error" | "ready"
   >("no_key");
   const [trackPointCount, setTrackPointCount] = useState(0);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsKey, setSettingsKey] = useState("");
+  const [settingsSecurityCode, setSettingsSecurityCode] = useState("");
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<AmapMapLike | null>(null);
@@ -234,38 +240,73 @@ export default function RealtimeAmap({
   const trackPointsRef = useRef<TrackPoint[]>([]);
   const lastPositionRef = useRef<[number, number] | null>(null);
 
-  useEffect(() => {
+  const loadDeviceConfig = useCallback(async () => {
     if (typeof window === "undefined") return;
-
-    const storedKey =
-      localStorage.getItem(STORAGE_KEY_KEY) ??
-      process.env.NEXT_PUBLIC_AMAP_KEY ??
-      "";
-    const storedCode =
-      localStorage.getItem(STORAGE_KEY_CODE) ??
-      process.env.NEXT_PUBLIC_AMAP_SECURITY_CODE ??
-      "";
-
-    setConfig({ key: storedKey, securityCode: storedCode });
-    setDraftKey(storedKey);
-    setDraftCode(storedCode);
-    setMapState(storedKey ? "loading" : "no_key");
-    setConfigHydrated(true);
+    setMapState("loading");
+    setMapError(null);
+    const response = await fetch("/api/v1/map/config", { cache: "no-store", headers: { Accept: "application/json" } });
+    if (!response.ok) throw new Error(`设备地图配置读取失败：HTTP ${response.status}`);
+    const payload = await response.json() as AmapDeviceConfig;
+    setSettingsKey(payload.js_api_key ?? "");
+    if (!payload.configured || !payload.js_api_key || !payload.service_host) {
+      setConfig(null);
+      setMapState("no_key");
+      return;
+    }
+    const serviceHost = new URL(payload.service_host, window.location.origin).toString().replace(/\/$/, "");
+    setConfig({ key: payload.js_api_key, serviceHost });
   }, []);
 
-  const initMap = useCallback(async (key: string, code: string) => {
+  useEffect(() => {
+    void loadDeviceConfig().catch((error) => {
+      setConfig(null);
+      setMapState("error");
+      setMapError(error instanceof Error ? error.message : "设备地图配置读取失败");
+    });
+  }, [loadDeviceConfig]);
+
+  const saveDeviceConfig = useCallback(async () => {
+    const key = settingsKey.trim();
+    const securityCode = settingsSecurityCode.trim();
+    if (!key || !securityCode) {
+      setSettingsError("地图 Key 和安全密钥不能为空");
+      return;
+    }
+    setSettingsSaving(true);
+    setSettingsError(null);
+    try {
+      const response = await fetch("/api/v1/map/config", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ js_api_key: key, security_js_code: securityCode }),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null) as { detail?: string } | null;
+        throw new Error(payload?.detail ?? `地图配置保存失败：HTTP ${response.status}`);
+      }
+      setSettingsSecurityCode("");
+      setSettingsOpen(false);
+      await loadDeviceConfig();
+    } catch (error) {
+      setSettingsError(error instanceof Error ? error.message : "地图配置保存失败");
+    } finally {
+      setSettingsSaving(false);
+    }
+  }, [loadDeviceConfig, settingsKey, settingsSecurityCode]);
+
+  const initMap = useCallback(async (key: string, serviceHost: string) => {
     if (!containerRef.current) return;
 
     setMapState("loading");
     try {
-      await loadAmapScript(key, code);
+      await loadAmapScript(key, serviceHost);
       const AMap = (window as unknown as Record<string, unknown>).AMap as
         | Record<string, unknown>
         | undefined;
       const MapConstructor = AMap?.Map as (new (...args: unknown[]) => AmapMapLike) | undefined;
 
       if (!AMap || !MapConstructor) {
-        throw new Error("AMap.Map 不可用，请检查 Key、安全密钥和域名白名单");
+        throw new Error("AMap.Map 不可用，请检查设备地图配置、网络和域名白名单");
       }
 
       mapRef.current?.destroy?.();
@@ -300,33 +341,16 @@ export default function RealtimeAmap({
       window.setTimeout(() => mapInstance.resize?.(), 0);
     } catch (error) {
       console.error("高德地图初始化失败", error);
+      setMapError(error instanceof Error ? error.message : "高德地图初始化失败");
       setMapState("error");
     }
   }, []);
 
   useEffect(() => {
-    if (configHydrated && config.key) {
-      void initMap(config.key, config.securityCode);
+    if (config) {
+      void initMap(config.key, config.serviceHost);
     }
-  }, [configHydrated, config.key, config.securityCode, initMap]);
-
-  const openSettings = useCallback(() => {
-    setDraftKey(config.key);
-    setDraftCode(config.securityCode);
-    setShowSettings(true);
-  }, [config.key, config.securityCode]);
-
-  const saveConfig = useCallback(() => {
-    const key = draftKey.trim();
-    const securityCode = draftCode.trim();
-    if (!key) return;
-
-    localStorage.setItem(STORAGE_KEY_KEY, key);
-    localStorage.setItem(STORAGE_KEY_CODE, securityCode);
-    setConfig({ key, securityCode });
-    setShowSettings(false);
-    void initMap(key, securityCode);
-  }, [draftCode, draftKey, initMap]);
+  }, [config, initMap]);
 
   useEffect(() => {
     if (mapState !== "ready") return;
@@ -464,15 +488,27 @@ export default function RealtimeAmap({
     : "当前 RTK 无效。地图保留最后有效位置和已有轨迹，不继续推算车辆绝对位置。";
 
   return (
-    <>
-      <article className={`panel dashboard-map-panel${expanded ? " visual-panel--expanded" : ""}`}>
+    <article className={`panel dashboard-map-panel${expanded ? " visual-panel--expanded" : ""}`}>
         <div className="map-panel-head">
           <div>
             <h2>RTK 实时地图</h2>
             <p>{mapSubtitle}</p>
           </div>
-          <MapExpandButton expanded={expanded} onClick={onToggleExpanded} />
+          <div className="map-panel-actions">
+            <button className="button button--quiet" type="button" onClick={() => { setSettingsError(null); setSettingsOpen(true); }}>地图设置</button>
+            <MapExpandButton expanded={expanded} onClick={onToggleExpanded} />
+          </div>
         </div>
+
+        {settingsOpen && (
+          <div className="amap-settings" role="dialog" aria-label="高德地图设置">
+            <div><strong>高德地图设置</strong><span>配置保存在当前 RK3588 的 runtime/settings 中，其他浏览器自动共用。安全密钥不会回传到浏览器。</span></div>
+            <label>Web JS API Key<input value={settingsKey} autoComplete="off" onChange={(event) => setSettingsKey(event.target.value)} /></label>
+            <label>安全密钥<input type="password" value={settingsSecurityCode} autoComplete="new-password" placeholder="请输入 securityJsCode" onChange={(event) => setSettingsSecurityCode(event.target.value)} /></label>
+            {settingsError && <span className="amap-settings__error">{settingsError}</span>}
+            <div className="amap-settings__actions"><button className="button button--quiet" type="button" disabled={settingsSaving} onClick={() => setSettingsOpen(false)}>取消</button><button className="button" type="button" disabled={settingsSaving} onClick={() => void saveDeviceConfig()}>{settingsSaving ? "保存中" : "保存"}</button></div>
+          </div>
+        )}
 
         <div className="amap-stage">
           <div ref={containerRef} className="amap-container" />
@@ -480,11 +516,10 @@ export default function RealtimeAmap({
           {mapState === "no_key" && (
             <div className="amap-empty">
               <div>
-                <strong>高德地图尚未配置</strong>
+                <strong>设备端尚未配置高德地图</strong>
                 <span>
-                  填写 Web 端 JS API Key 和 securityJsCode 后显示车辆位置与绝对轨迹。
+                  点击上方“地图设置”配置 Key 和安全密钥，保存后由当前设备统一使用。
                 </span>
-                <button type="button" onClick={openSettings}>地图设置</button>
               </div>
             </div>
           )}
@@ -502,8 +537,7 @@ export default function RealtimeAmap({
             <div className="amap-empty">
               <div>
                 <strong>高德地图加载失败</strong>
-                <span>请检查网络、Key、securityJsCode 和域名白名单。</span>
-                <button type="button" onClick={openSettings}>重新配置</button>
+                <span>{mapError ?? "请检查设备地图配置、网络和域名白名单。"}</span>
               </div>
             </div>
           )}
@@ -518,9 +552,6 @@ export default function RealtimeAmap({
             <span className="amap-chip">
               轨迹 <strong>{trackStateText}</strong>
             </span>
-            <button type="button" className="amap-chip amap-chip--button" onClick={openSettings}>
-              地图设置
-            </button>
           </div>
 
           <div className="amap-map-tip">
@@ -530,69 +561,5 @@ export default function RealtimeAmap({
           </div>
         </div>
       </article>
-
-      {showSettings && (
-        <div
-          className="map-modal-mask"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="map-settings-title"
-          onClick={(event) => {
-            if (event.target === event.currentTarget) setShowSettings(false);
-          }}
-        >
-          <div className="map-modal-panel">
-            <div className="map-modal-head">
-              <div>
-                <h2 id="map-settings-title">地图设置</h2>
-                <p>配置高德 Web 端 JS API Key 和 securityJsCode。</p>
-              </div>
-              <button type="button" aria-label="关闭地图设置" onClick={() => setShowSettings(false)}>
-                ×
-              </button>
-            </div>
-
-            <label>
-              <span>JS API Key（Web 端）</span>
-              <input
-                type="text"
-                value={draftKey}
-                onChange={(event) => setDraftKey(event.target.value)}
-                placeholder="输入高德 Web 端 Key"
-                autoFocus
-              />
-            </label>
-
-            <label>
-              <span>安全密钥（securityJsCode）</span>
-              <input
-                type="text"
-                value={draftCode}
-                onChange={(event) => setDraftCode(event.target.value)}
-                placeholder="输入 securityJsCode"
-              />
-            </label>
-
-            <div className="map-security-note">
-              正式部署应在高德控制台限制允许访问的域名，并通过部署环境提供初始配置。浏览器本地设置仅用于设备端调试。
-            </div>
-
-            <div className="map-modal-actions">
-              <button type="button" className="button button--soft" onClick={() => setShowSettings(false)}>
-                取消
-              </button>
-              <button
-                type="button"
-                className="button button--primary"
-                disabled={!draftKey.trim()}
-                onClick={saveConfig}
-              >
-                保存并加载地图
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </>
   );
 }

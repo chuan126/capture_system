@@ -21,6 +21,8 @@ from backend.measurements.repository import (
 from backend.tasks.models import (
     TaskBatchCreateRequest,
     TaskCreateRequest,
+    TaskDeleteManyRequest,
+    TaskDeleteManyResponse,
     TaskPurgeDataRequest,
     TaskPurgeDataResponse,
     TaskResponse,
@@ -225,6 +227,22 @@ def get_task_measurements(task_id: str, request: Request) -> MeasurementHistoryR
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=str(error),
         ) from error
+    except TaskStorageError as error:
+        raise _storage_failure(error) from error
+
+
+@router.post("/delete-selected", response_model=TaskDeleteManyResponse)
+def delete_selected_tasks(payload: TaskDeleteManyRequest, request: Request) -> TaskDeleteManyResponse:
+    try:
+        records = _repository(request).soft_delete_tasks(payload.task_ids)
+        return TaskDeleteManyResponse(
+            deleted_task_count=len(records),
+            task_ids=[record.task_id for record in records],
+        )
+    except TaskNotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务不存在") from error
+    except TaskDeleteConflictError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
     except TaskStorageError as error:
         raise _storage_failure(error) from error
 

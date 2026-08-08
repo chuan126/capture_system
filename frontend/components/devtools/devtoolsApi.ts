@@ -68,7 +68,7 @@ export type DevOverview = {
 
 export type DevRecordingStatus = {
   active: boolean;
-  profile: "raw_cloud" | "diagnostic" | null;
+  profile: "raw_cloud" | "diagnostic" | "raw_sensor" | "algorithm_debug" | "full_debug" | null;
   recording_id: string | null;
   path: string | null;
   started_at_ns: number | null;
@@ -76,15 +76,17 @@ export type DevRecordingStatus = {
   bytes: number;
   last_error: string | null;
   free_bytes: number;
+  parameter_snapshot_complete: boolean | null;
 };
 
 export type DevRecording = {
   recording_id: string;
-  profile: "raw_cloud" | "diagnostic";
+  profile: "raw_cloud" | "diagnostic" | "raw_sensor" | "algorithm_debug" | "full_debug";
   path: string;
   bytes: number;
   modified_at_ns: number;
   active: boolean;
+  parameter_snapshot_complete: boolean | null;
 };
 
 export type DevParameter = {
@@ -98,9 +100,14 @@ export type DevParameter = {
   maximum: number | null;
   writable: boolean;
   note: string;
+  config_available: boolean;
+  configured_value: number | boolean | string | null;
+  config_detail: string;
   available: boolean;
   value: number | boolean | string | null;
   detail: string;
+  source_config: string;
+  ui_visible: boolean;
 };
 
 const readError = async (response: Response) => {
@@ -148,7 +155,8 @@ export const listDevRecordings = async () => {
   const response = await requestJson<{ recordings: DevRecording[] }>("/api/dev/recordings");
   return response.recordings;
 };
-export const startDevRecording = (profile: "raw-cloud" | "diagnostic", durationSeconds: 5 | 10 | 30 | null) =>
+export type DevRecordingRouteProfile = "raw-cloud" | "diagnostic" | "raw-sensor" | "algorithm-debug" | "full-debug";
+export const startDevRecording = (profile: DevRecordingRouteProfile, durationSeconds: 5 | 10 | 30 | null) =>
   requestJson<DevRecordingStatus>(`/api/dev/recordings/${profile}/start`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

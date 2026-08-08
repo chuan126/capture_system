@@ -354,38 +354,56 @@ class TaskRepository:
         return self._row_to_record(row)
 
     def soft_delete_task(self, task_id: str, *, reason: str = "user_request") -> TaskRecord:
+        return self.soft_delete_tasks([task_id], reason=reason)[0]
+
+    def soft_delete_tasks(
+        self, task_ids: Sequence[str], *, reason: str = "user_request"
+    ) -> list[TaskRecord]:
         self._ensure_initialized()
+        identifiers = list(dict.fromkeys(task_ids))
+        if not identifiers:
+            raise ValueError("至少需要一个任务ID")
         connection = self._connect()
         try:
             connection.execute("BEGIN IMMEDIATE")
-            row = connection.execute(
-                "SELECT tasks.*, operation_batches.batch_code FROM tasks "
-                "JOIN operation_batches ON operation_batches.batch_id=tasks.batch_id "
-                "WHERE task_id = ? AND deleted_at IS NULL",
-                (task_id,),
-            ).fetchone()
-            if row is None:
-                raise TaskNotFoundError(task_id)
-            record = self._row_to_record(row)
-            if record.status in {"running", "paused"} or record.active_slot is not None:
+            placeholders = ",".join("?" for _ in identifiers)
+            rows = connection.execute(
+                f"SELECT tasks.*, operation_batches.batch_code FROM tasks "
+                f"JOIN operation_batches ON operation_batches.batch_id=tasks.batch_id "
+                f"WHERE tasks.task_id IN ({placeholders}) AND tasks.deleted_at IS NULL",
+                identifiers,
+            ).fetchall()
+            row_by_id = {row["task_id"]: row for row in rows}
+            missing = [task_id for task_id in identifiers if task_id not in row_by_id]
+            if missing:
+                raise TaskNotFoundError(missing[0])
+            blocked = [
+                task_id
+                for task_id in identifiers
+                if row_by_id[task_id]["status"] in {"running", "paused"}
+                or row_by_id[task_id]["active_slot"] is not None
+            ]
+            if blocked:
                 raise TaskDeleteConflictError("采集中或已暂停的任务不能删除，请先正常结束任务")
+
             now = _utc_now_text()
             connection.execute(
-                """
+                f"""
                 UPDATE tasks
                 SET deleted_at = ?, delete_reason = ?, updated_at = ?
-                WHERE task_id = ? AND deleted_at IS NULL
+                WHERE task_id IN ({placeholders}) AND deleted_at IS NULL
                 """,
-                (now, reason, now, task_id),
+                [now, reason, now, *identifiers],
             )
-            deleted_row = connection.execute(
-                "SELECT tasks.*, operation_batches.batch_code FROM tasks "
-                "JOIN operation_batches ON operation_batches.batch_id=tasks.batch_id "
-                "WHERE task_id = ?",
-                (task_id,),
-            ).fetchone()
+            deleted_rows = connection.execute(
+                f"SELECT tasks.*, operation_batches.batch_code FROM tasks "
+                f"JOIN operation_batches ON operation_batches.batch_id=tasks.batch_id "
+                f"WHERE tasks.task_id IN ({placeholders})",
+                identifiers,
+            ).fetchall()
+            deleted_by_id = {row["task_id"]: self._row_to_record(row) for row in deleted_rows}
             connection.commit()
-            return self._row_to_record(deleted_row)
+            return [deleted_by_id[task_id] for task_id in identifiers]
         except (TaskNotFoundError, TaskDeleteConflictError):
             connection.rollback()
             raise
@@ -406,7 +424,7 @@ class TaskRepository:
             connection.execute("BEGIN IMMEDIATE")
             placeholders = ",".join("?" for _ in identifiers)
             rows = connection.execute(
-                f"SELECT task_id, status, active_slot FROM tasks WHERE task_id IN ({placeholders}) AND deleted_at IS NULL",
+                f"SELECT task_id, status, active_slot FROM tasks WHERE task_id IN ({placeholders})",
                 identifiers,
             ).fetchall()
             found = {row["task_id"] for row in rows}

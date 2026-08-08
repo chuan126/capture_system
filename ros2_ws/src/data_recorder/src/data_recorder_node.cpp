@@ -133,9 +133,10 @@ public:
   DataRecorderNode()
   : Node("data_recorder_node")
   {
+    const char * configured_data_root = std::getenv("CAPTURE_DATA_ROOT");
     data_root_ = declare_parameter<std::string>(
-      "data_root", (fs::path(std::getenv("HOME") ? std::getenv("HOME") : "/tmp") /
-      ".local/share/capture_system").string());
+      "data_root", configured_data_root && *configured_data_root ? configured_data_root :
+      (fs::current_path() / "runtime").string());
     clearance_topic_ = declare_parameter<std::string>(
       "clearance_topic", "/capture/clearance/result");
     rtk_fix_topic_ = declare_parameter<std::string>("rtk_fix_topic", "/capture/rtk/fix");

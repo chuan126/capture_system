@@ -1,6 +1,6 @@
 data_recorder_node:
   ros__parameters:
-    data_root: "/home/cat/.local/share/capture_system"
+    data_root: "runtime"
     clearance_topic: "/capture/clearance/result"
     rtk_fix_topic: "/capture/rtk/fix"
     rtk_status_topic: "/capture/rtk/status"

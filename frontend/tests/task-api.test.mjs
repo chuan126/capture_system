@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-import { createTaskBatch, deleteTask, listTasks, purgeTaskData, TaskApiError } from "../components/workflow/taskApi.ts";
+import { createTask, createTaskBatch, deleteSelectedTasks, deleteTask, listTasks, TaskApiError } from "../components/workflow/taskApi.ts";
 
 const apiTask = {
   task_id: "5db8d785-6247-4cc5-9376-4a6bb36bca67",
@@ -87,27 +87,27 @@ test("loads persisted time-numbered tasks from the FastAPI HTTP endpoint", async
   }
 });
 
-test("creates tasks without batch controls or any ROS 2 browser interface", async () => {
+test("creates one task per formal frontend request without any ROS 2 browser interface", async () => {
   const originalFetch = globalThis.fetch;
   let capturedInput;
   let capturedInit;
   globalThis.fetch = async (input, init) => {
     capturedInput = input;
     capturedInit = init;
-    return jsonResponse([apiTask], 201);
+    return jsonResponse(apiTask, 201);
   };
 
   try {
-    const tasks = await createTaskBatch(
-      [{ tunnelCode: "T-001", tunnelName: "东山隧道" }],
+    const task = await createTask(
+      { tunnelCode: "T-001", tunnelName: "东山隧道" },
       "request-001",
     );
-    assert.equal(tasks[0].displayId, "20260807_145601");
-    assert.equal(capturedInput, "/api/v1/tasks/batch");
+    assert.equal(task.displayId, "20260807_145601");
+    assert.equal(capturedInput, "/api/v1/tasks");
     assert.equal(capturedInit.method, "POST");
     assert.equal(capturedInit.headers["Idempotency-Key"], "request-001");
     assert.deepEqual(JSON.parse(capturedInit.body), {
-      tasks: [{ tunnel_code: "T-001", tunnel_name: "东山隧道" }],
+      tunnel_code: "T-001", tunnel_name: "东山隧道",
     });
     const source = await readFile(new URL("../components/workflow/taskApi.ts", import.meta.url), "utf8");
     assert.doesNotMatch(source, /batch_mode|rclpy|rclcpp|ros2|create_subscription|create_publisher|ros service|ros action/i);
@@ -116,22 +116,32 @@ test("creates tasks without batch controls or any ROS 2 browser interface", asyn
   }
 });
 
-test("purges selected local task data through FastAPI while preserving task metadata", async () => {
+test("keeps batch creation only as a compatibility API", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => jsonResponse([apiTask], 201);
+  try {
+    const tasks = await createTaskBatch([{ tunnelCode: "T-001", tunnelName: "东山隧道" }], "compat-001");
+    assert.equal(tasks.length, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("deletes selected tasks through one FastAPI transaction endpoint", async () => {
   const originalFetch = globalThis.fetch;
   let capturedInput;
   let capturedInit;
   globalThis.fetch = async (input, init) => {
     capturedInput = input;
     capturedInit = init;
-    return jsonResponse({ removed_task_count: 1, released_bytes: 4096, task_ids: [apiTask.task_id] });
+    return jsonResponse({ deleted_task_count: 1, task_ids: [apiTask.task_id] });
   };
   try {
-    const result = await purgeTaskData([apiTask.task_id]);
-    assert.equal(capturedInput, "/api/v1/tasks/purge-data");
+    const result = await deleteSelectedTasks([apiTask.task_id]);
+    assert.equal(capturedInput, "/api/v1/tasks/delete-selected");
     assert.equal(capturedInit.method, "POST");
     assert.deepEqual(JSON.parse(capturedInit.body), { task_ids: [apiTask.task_id] });
-    assert.equal(result.removedTaskCount, 1);
-    assert.equal(result.releasedBytes, 4096);
+    assert.equal(result.deletedTaskCount, 1);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -142,7 +152,7 @@ test("surfaces backend task errors and does not synthesize a local task", async 
   globalThis.fetch = async () => jsonResponse({ detail: "任务数据库不可用" }, 503);
   try {
     await assert.rejects(
-      () => createTaskBatch([{ tunnelCode: "T-001", tunnelName: "东山隧道" }], "request-002"),
+      () => createTask({ tunnelCode: "T-001", tunnelName: "东山隧道" }, "request-002"),
       (error) => error instanceof TaskApiError && error.status === 503 && error.message === "任务数据库不可用",
     );
   } finally {

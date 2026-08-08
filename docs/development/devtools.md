@@ -1,93 +1,134 @@
 # 开发测试工作台
 
-核对日期：2026-08-07
+核对日期：2026-08-08
 
 ## 1. 适用范围
 
-测试工作台用于 RK3588 / Ubuntu 22.04 开发与现场调试。正式客户版本使用 `customer`
-构建变体，不编译测试工作台，也不注册 `/api/dev/*` 和 `/ws/dev/*`。
-
-开发版本构建：
+测试工作台只用于 RK3588、Ubuntu 22.04 开发和现场诊断。`customer` 构建不编译测试页面，也不注册 `/api/dev/*` 和 `/ws/dev/*`。
 
 ```bash
 bash scripts/build/build.sh all --release --variant development
-```
-
-客户版本构建：
-
-```bash
 bash scripts/build/build.sh all --release --variant customer
 ```
 
-构建脚本将变体写入 `.build-state/runtime.env`。运行脚本读取该文件决定是否注册开发
-后端。customer 静态构建还会扫描输出，发现开发路由字符串或页面标识时直接失败。
+正式采集任务活动期间，开发录制和临时参数修改返回 409，避免开发工具影响正式记录。
 
-## 2. 页面内容
+## 2. 页面结构
 
-测试页面包含概览、激光雷达、运动补偿、RTK、净空、任务与记录、参数七个页签。
-所有数据来自 FastAPI 开发接口；浏览器不直接连接 ROS 2。
+开发页面包含概览、激光雷达、运动补偿、RTK、净空、任务与记录、参数七个页签。浏览器只访问 FastAPI。
 
-概览显示真实 ROS 数据频率、消息年龄和累计数，以及 Linux CPU、内存、温度、运行时间
-和数据盘空间。没有消息时显示等待或超时，不生成模拟状态。
+原始点云网页预览仍会限频和限点，只用于观察。MCAP 原始数据保存不使用浏览器预览数据。
 
-激光雷达页允许切换原始传感器坐标预览和正式补偿后局部 ENU 预览。两者都是浏览器
-预览数据，受限频、限点约束。
+## 3. 开发录制
 
-运动补偿页对照原始点云、高频里程计和补偿点云的频率与数据年龄，用于定位时序中断。
+开发录制固定使用 rosbag2 和 MCAP。FastAPI 只接受预定义 profile，不允许浏览器提交任意 Topic、输出目录或 Shell 参数。录制命令不设置抽样或降频选项，保存 ROS Topic 实际发布的全部消息。
 
-RTK 页显示实时状态并提供一次性快照。快照只用于诊断，不写入任务入口/出口坐标。
+### 3.1 原始传感器记录
 
-净空页显示真实算法结果和质量字段，并显示正式记录器的源帧、50 Hz 样本、重复样本和
-无效样本计数。
-
-任务与记录页显示任务控制 Service 的逐项可用性，并提供固定 5/10/30 秒诊断录制。
-
-参数页只提供白名单参数。净空节点允许临时动态调整指定参数；运动补偿节点当前只读。
-任何临时调整均不修改 YAML。
-
-## 3. 原始点云保存
-
-原始点云保存使用 ROS 2 rosbag2 MCAP，不使用浏览器点云预览作为数据源。固定录制 Topic：
+`raw_sensor` 当前只覆盖项目已经存在的稳定 Topic：
 
 ```text
 /capture/lidar/points_raw
+/capture/imu/data
+/capture/odometry/high_rate_raw
+/capture/odometry/slam
+/capture/lidar/device_online
+/capture/lidar/device_offline
 ```
 
-保存路径：
+`/capture/imu/data` 保存厂商当前提供的 `sensor_msgs/Imu` 原始消息。高频姿态四元数主要保存在 `/capture/odometry/high_rate_raw` 的 `nav_msgs/Odometry.pose.pose.orientation` 中。
+
+本版不新增视觉数据录制，也不新增雷达或 IMU 内部温度字段。等待厂商后续驱动提供稳定来源后再接入。
+
+### 3.2 算法诊断记录
+
+`algorithm_debug` 保存处理链数据：
 
 ```text
-CAPTURE_DATA_ROOT/dev-tests/raw-cloud/<recording_id>/
+/capture/odometry/high_rate
+/capture/lidar/points_compensated_enu
+/capture/clearance/result
+/capture/rtk/fix
+/capture/rtk/status
+/capture/task/status
+/capture/recording/status
+/capture/system/diagnostics
 ```
 
-后端固定执行等价于：
+### 3.3 完整开发记录
 
-```bash
-ros2 bag record --storage mcap --output <受控路径> /capture/lidar/points_raw
+`full_debug` 同时保存 `raw_sensor` 和 `algorithm_debug` 的 Topic，仍然不经过浏览器，不进行降频。
+
+三种新 profile 支持 5、10、30 秒和手动停止的连续录制。同一时间只允许一个开发录制。磁盘可用空间低于 2 GiB 时后台自动停止。
+
+旧 `/recordings/raw-cloud/start` 和 `/recordings/diagnostic/start` 继续保留兼容，但当前开发页面的任务与记录页使用上述三个 profile。
+
+数据目录分别位于：
+
+```text
+CAPTURE_DATA_ROOT/dev-tests/raw-sensor/
+CAPTURE_DATA_ROOT/dev-tests/algorithm-debug/
+CAPTURE_DATA_ROOT/dev-tests/full-debug/
 ```
 
-前端不能传入任意 Topic、路径或 Shell 参数。开发录制与正式任务目录完全分离，不进入
-数据回放和正式报告。
+开发数据不会进入正式任务数据库、历史回放和正式报告。
 
-安装依赖：
+## 4. 核心参数装订
 
-```bash
-sudo apt-get install ros-humble-rosbag2-storage-mcap
+开发参数白名单集中定义在：
+
+```text
+ros2_ws/src/bringup/config/dev_parameter_bindings.yaml
 ```
 
-录制开始前要求至少保留 2 GiB 可用空间，连续录制期间后台每秒复查；低于安全下限时自动停止并记录原因。支持 5、10、30 秒定时录制和手动停止的连续
-原始点云录制。同一时间最多运行一个开发录制。正式采集任务处于活动状态时禁止启动开发录制或临时调参，避免额外磁盘和计算负载影响正式记录。
+装订表只描述参数的逻辑键、ROS 节点、ROS 参数名、显示名称、单位、类型、允许范围、可写性和来源配置文件。正式默认值仍由各节点自己的 YAML 提供，例如：
 
-## 4. 参数边界
+```text
+ros2_ws/src/motion_compensation/config/motion_compensation.yaml
+ros2_ws/src/motion_compensation/config/odometry_timestamp_adapter.yaml
+ros2_ws/src/clearance_engine/config/clearance_engine_small_board_1cm.yaml
+```
 
-动态参数只允许固定白名单并进行类型和范围校验。当前净空节点支持运行时更新：
+因此同一个算法参数不存在两份默认值来源。
 
-- `ransac.distance_threshold_m`
-- `ransac.voxel_size_m`
-- `ransac.max_candidate_planes`
-- `ransac.min_inliers_absolute`
-- `region.grid_size_m`
-- `region.min_occupied_cells`
-- `region.max_residual_p95_m`
+参数页当前只显示八项净空核心参数：`ransac.distance_threshold_m`、`region.grid_size_m`、`region.min_span_cells`、`region.min_occupied_cells`、`region.max_residual_p95_m`、`ransac.min_inliers_absolute`、`ransac.max_candidate_planes`、`ransac.min_remaining_points`。当前正式值中 `ransac.min_remaining_points=100`。`region.min_span_cells` 和 `ransac.min_remaining_points` 尚未实现运行时更新，因此界面只读。参数页同时显示所属正式 YAML 的配置值和 ROS 2 节点实际运行值。节点未启动、ROS 发现失败或单项读取超时时，正式配置值仍可见，运行值显示不可用，不使用 YAML 值冒充节点实际值。单个参数读取失败不会影响其余参数显示。装订表中未显示的运动补偿、里程计和其他算法参数仍参与录制参数快照。临时修改只作用于当前 ROS 节点，不自动改写正式 YAML，节点重启后恢复正式配置。
 
-运动补偿参数当前只读取，不通过测试页修改。测试页不提供任意 ROS 参数编辑、任意 ROS
-Topic 录制、任意 Shell 命令、节点关闭或正式数据库删除。
+## 5. 录制参数快照
+
+每次开发录制启动后，在同一个 rosbag 输出目录保存：
+
+```text
+capture_manifest.json
+parameter_snapshot.yaml
+source_config_sha256.txt
+metadata.yaml                 # rosbag2 自身生成
+*.mcap                        # rosbag2 MCAP 数据
+```
+
+`capture_manifest.json` 记录 profile、固定 Topic 列表和 `topic_downsampling=false`。
+
+`parameter_snapshot.yaml` 保存录制开始时从 ROS 节点实际读取的装订参数。某个参数无法读取时保留 `available=false` 和真实错误信息，不填充默认值或模拟值。
+
+`source_config_sha256.txt` 保存装订表以及相关正式 YAML 的 SHA-256，便于后续确认算法数据对应的配置版本。
+
+## 6. 数据真实性边界
+
+开发测试功能不得生成虚假点云、IMU、里程计、RTK、净空结果或设备状态。Topic 没有发布时，rosbag 中就没有对应消息。参数读取失败时记录失败状态。开发数据不转换为正式任务数据。
+
+## ROS 参数读取与录制启动时序
+
+开发参数由 FastAPI 进程内的常驻 `rclpy` 参数桥读取。参数桥按 ROS 节点批量调用参数 Service，并在后台更新缓存。浏览器 `/api/dev/parameters` 和 MCAP 参数快照均读取该缓存，不再为每个参数启动 `ros2 param get` 子进程。
+
+参数页面同时显示正式 YAML 配置值和最近一次真实 ROS 运行值。ROS 节点不可用时，运行值保持空值并显示真实错误，不能以 YAML 配置值替代运行值。
+
+开发录制启动不等待参数 Service。`ros2 bag record` 创建录制目录后立即进入活动状态，参数快照随后异步写入。前端在启动或停止请求期间进入“处理中”状态并禁止重复点击。录制历史目录只在进入页面、停止录制或删除记录后刷新，不按秒递归扫描历史目录。 激光雷达页的“保存原始点云”同时显示最近的原始点云录制，已停止的录制可以直接删除；正在录制的目录禁止删除。
+
+## 开发数据目录
+
+默认开发录制目录由项目根目录自动确定，不依赖用户名或固定安装路径：
+
+```text
+<project_root>/runtime/dev-tests/
+```
+
+若部署确需独立数据盘，可以通过 `CAPTURE_DATA_ROOT` 显式覆盖。正式任务、报告、开发录制和设备配置必须使用同一 `CAPTURE_DATA_ROOT`。

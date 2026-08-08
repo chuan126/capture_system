@@ -122,9 +122,10 @@ public:
   TaskManagerNode()
   : Node("task_manager_node")
   {
+    const char * configured_data_root = std::getenv("CAPTURE_DATA_ROOT");
     data_root_ = declare_parameter<std::string>(
-      "data_root", (fs::path(std::getenv("HOME") ? std::getenv("HOME") : "/tmp") /
-      ".local/share/capture_system").string());
+      "data_root", configured_data_root && *configured_data_root ? configured_data_root :
+      (fs::current_path() / "runtime").string());
     database_path_ = (fs::path(data_root_) / "capture.db").string();
     recorder_prepare_service_ = declare_parameter<std::string>(
       "recorder_prepare_service", "/capture/recording/prepare");
@@ -192,7 +193,6 @@ private:
     std::string tunnel_name;
     std::string status;
     std::string phase;
-    std::string batch_status;
     std::uint64_t revision{0};
     std::string entry_rtk_status{"not_requested"};
     std::string exit_rtk_status{"not_requested"};
@@ -475,13 +475,6 @@ private:
         execute(database, "ROLLBACK");
         sqlite3_close(database);
         return reject_without_task("task_not_found", "任务不存在");
-      }
-      if (task->batch_status != "active") {
-        auto result = reject_with_task(*task, "batch_not_active", "任务所属作业已经结束，不能开始采集");
-        store_control_request(database, request.command_id, request.task_id, "start", false, result);
-        execute(database, "COMMIT");
-        sqlite3_close(database);
-        return result;
       }
       if (task->revision != request.expected_revision) {
         auto result = reject_with_task(*task, "revision_conflict", "任务状态已经变化，请刷新后重试");
@@ -1033,10 +1026,9 @@ private:
         "tasks.entry_rtk_status, tasks.exit_rtk_status, tasks.has_measurements, "
         "COALESCE(tasks.recording_path,''), COALESCE(tasks.start_requested_at,''), "
         "COALESCE(tasks.started_at,''), COALESCE(tasks.stop_requested_at,''), "
-        "COALESCE(tasks.completed_at,''), tasks.active_slot, operation_batches.status, "
+        "COALESCE(tasks.completed_at,''), tasks.active_slot, "
         "COALESCE(tasks.updated_at,''), COALESCE(tasks.transition_deadline_at,'') "
-        "FROM tasks JOIN operation_batches ON operation_batches.batch_id=tasks.batch_id "
-        "WHERE tasks.task_id=? AND tasks.deleted_at IS NULL",
+        "FROM tasks WHERE tasks.task_id=? AND tasks.deleted_at IS NULL",
         -1, &statement, nullptr), database, "准备读取任务失败");
     bind_text(statement, 1, task_id);
     const int result = sqlite3_step(statement);
@@ -1062,9 +1054,8 @@ private:
     row.stop_requested_ns = parse_iso_ns(column_text(statement, 13));
     row.completed_at_ns = parse_iso_ns(column_text(statement, 14));
     row.active = sqlite3_column_type(statement, 15) != SQLITE_NULL;
-    row.batch_status = column_text(statement, 16);
-    row.updated_at_ns = parse_iso_ns(column_text(statement, 17));
-    row.transition_deadline_ns = parse_iso_ns(column_text(statement, 18));
+    row.updated_at_ns = parse_iso_ns(column_text(statement, 16));
+    row.transition_deadline_ns = parse_iso_ns(column_text(statement, 17));
     sqlite3_finalize(statement);
     return row;
   }

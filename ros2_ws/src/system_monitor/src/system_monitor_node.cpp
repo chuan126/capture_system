@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -117,8 +118,10 @@ public:
       "output_diagnostics_topic", "/capture/system/diagnostics");
     rtk_diagnostic_name_ = declare_parameter<std::string>(
       "rtk_diagnostic_name", "rtk_driver/serial");
+    const char * configured_data_root = std::getenv("CAPTURE_DATA_ROOT");
     storage_path_ = declare_parameter<std::string>(
-      "storage_data_path", "/home/cat/.local/share/capture_system");
+      "storage_data_path", configured_data_root && *configured_data_root ? configured_data_root :
+      (std::filesystem::current_path() / "runtime").string());
     publish_period_ms_ = positive("publish_period_ms", 1000);
     rtk_startup_grace_ms_ = positive("rtk_startup_grace_ms", 5000);
     rtk_timeout_ms_ = positive("rtk_timeout_ms", 3000);

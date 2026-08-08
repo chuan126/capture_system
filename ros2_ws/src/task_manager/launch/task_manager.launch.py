@@ -1,3 +1,5 @@
+import os
+from pathlib import Path
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
@@ -9,7 +11,7 @@ def generate_launch_description() -> LaunchDescription:
     return LaunchDescription([
         DeclareLaunchArgument(
             "data_root",
-            default_value="/home/cat/.local/share/capture_system",
+            default_value=os.getenv("CAPTURE_DATA_ROOT", str(Path.cwd() / "runtime")),
         ),
         Node(
             package="task_manager",

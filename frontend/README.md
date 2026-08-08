@@ -1,6 +1,6 @@
 # 隧道净空测量显控终端前端
 
-核对日期：2026-08-07
+核对日期：2026-08-08
 
 前端使用 Next.js、React 和 Three.js，设备构建输出为静态文件，由 FastAPI 同端口
 托管。客户版导航包含采集首页、数据回放和报告导出。development 构建额外包含“测试”工作台，customer 构建的模块图和静态产物均不包含该工作台。独立任务管理页面已经删除。
@@ -45,7 +45,7 @@ fix 伪造入口或出口结论。
 
 ### 1.4 任务控制卡片
 
-采集首页任务卡片只保留“创建任务”入口。创建窗口一次可录入一条或多条任务，只填写隧道编号和隧道名称。后端为每条任务生成稳定 UUID 和创建时间显示编号，例如 `20260807_145601`；同一秒创建多条任务时追加 `_02`、`_03`。删除历史任务不会改变或重置后续编号。
+采集首页任务卡片只保留“创建任务”入口。创建窗口每次只录入一个任务，只填写隧道编号和隧道名称。点击“保存并继续创建”时，当前任务必须先成功写入后端，页面才清空进入下一项。后端为每条任务生成稳定 UUID 和创建时间显示编号，例如 `20260807_145601`；同一秒连续创建多个任务时追加 `_02`、`_03`。删除历史任务不会改变或重置后续编号。
 
 任务控制通过 FastAPI HTTP 接口连接设备端 `task_manager`。前端不直接创建 ROS 2客户端，也不自行把任务改为采集中、已暂停或已停止。
 
@@ -81,7 +81,7 @@ fix 伪造入口或出口结论。
 
 数据回放通过 `/api/v1/tasks/{task_id}/measurements` 读取每任务独立 SQLite 测量文件。曲线支持拖拽平移、滚轮缩放、按钮缩放、键盘平移和双击复位；无效采样保持断线。没有测量文件时显示空状态。
 
-“删除任务”执行逻辑删除，只把任务从普通列表移除，不保证释放存储空间。“清理所选数据”使用 `/api/v1/tasks/purge-data` 物理删除所选任务目录中的测量数据库和单任务导出文件，同时保留任务索引、时间编号和清理记录。任务可逐项勾选，也可按日期整组选中。活动任务不能清理。
+数据回放只向普通用户提供逻辑删除。任务可逐项勾选、按日期选择，也可以对当前搜索和筛选结果执行“全选”，然后使用“删除所选任务”。采集中和已暂停任务的复选框禁用。批量删除由 `POST /api/v1/tasks/delete-selected` 在一个数据库事务中完成；任何一个任务不满足删除条件时整批不提交。物理清理 `/api/v1/tasks/purge-data` 继续保留为维护接口，但客户数据回放页面不再提供该入口。
 
 ### 2.2 报告导出
 
@@ -97,21 +97,13 @@ TXT 文件名使用任务时间编号，例如 `20260807_145601_T-001_50Hz测量
 
 ## 3. 开发测试工作台
 
-测试工作台只存在于 `development` 构建。浏览器仍然只访问 FastAPI，不直接连接 ROS 2。
-页面包含七个页签：
+测试工作台只存在于 `development` 构建。浏览器仍然只访问 FastAPI，不直接连接 ROS 2。页面包含概览、激光雷达、运动补偿、RTK、净空、任务与记录、参数七个页签。
 
-- 概览：系统资源、各真实数据源的频率、最后更新时间、数据年龄和累计消息数；
-- 激光雷达：原始点云与补偿后点云预览切换，显示原始点数/预览点数和数据年龄，并可保存原始点云 MCAP；
-- 运动补偿：对照原始点云、高频里程计和补偿点云的真实频率、时序状态及当前参数；
-- RTK：显示实时定位与串口状态，可读取一次当前 RTK 快照，不写正式任务；
-- 净空：显示真实算法源帧质量字段、源数据频率、记录器计数及允许临时调整的净空白名单参数；
-- 任务与记录：显示 TaskControl 各 Service 状态，可保存 5/10/30 秒诊断 MCAP，原始点云可连续录制；
-- 参数：读取当前 ROS 参数，只有节点真实支持动态更新的白名单参数可以修改。
+任务与记录页提供三种正式开发录制模式。`raw_sensor` 直接按 ROS 发布频率保存 `/capture/lidar/points_raw`、`/capture/imu/data`、`/capture/odometry/high_rate_raw`、`/capture/odometry/slam` 和雷达上下线事件；`algorithm_debug` 保存时间适配里程计、补偿点云、净空、RTK、任务、记录器和系统诊断；`full_debug` 保存两组合集。当前不录制视觉数据和传感器内部温度。所有录制都由 rosbag2 直接订阅 Topic 写 MCAP，不经过浏览器预览，不设置降频。
 
-原始点云页面中的三维预览仍为限频、限点数据，只用于观察。点击保存原始点云后，后端
-直接保存 `/capture/lidar/points_raw` 的完整 `PointCloud2` 到 MCAP，不把浏览器预览点当作
-原始数据。所有开发录制位于 `CAPTURE_DATA_ROOT/dev-tests/`，不会进入任务列表、历史回放
-或正式报告。
+参数页的核心参数由 `ros2_ws/src/bringup/config/dev_parameter_bindings.yaml` 装订。页面分别显示正式 YAML 配置值和 ROS 2 实际运行值，节点不可用时不会用配置值冒充运行值。当前界面只显示 `ransac.distance_threshold_m`、`region.grid_size_m`、`region.min_span_cells`、`region.min_occupied_cells`、`region.max_residual_p95_m`、`ransac.min_inliers_absolute`、`ransac.max_candidate_planes` 和 `ransac.min_remaining_points` 八项。`region.min_span_cells` 与 `ransac.min_remaining_points` 当前只读，其余已支持的白名单项可临时修改当前 ROS 节点。装订表中的其他实验参数继续用于开发录制参数快照，不在参数页显示。
+
+原始点云页面中的三维预览仍为限频、限点数据，只用于观察。原始数据 MCAP 完全独立保存于 `CAPTURE_DATA_ROOT/dev-tests/`，不会进入任务列表、历史回放或正式报告。
 
 开发构建：
 
@@ -137,22 +129,20 @@ customer 构建完成后脚本会扫描静态输出，发现开发接口字符�
 | `/ws/v1/system-status` | `useSystemStatusSocket` | 四类系统诊断 |
 | `/ws/v1/task-status` | `useTaskStatusSocket` | 设备端任务状态、阶段和RTK端点状态 |
 
-## 5. 高德配置
+## 5. Wi-Fi 连接
 
-页面可在“地图设置”中填写 Web 端 Key 和 `securityJsCode`，配置保存在当前浏览器的
-`localStorage`。构建时也可以提供：
+正式侧栏提供设备 Wi-Fi 入口。打开后通过 FastAPI 请求 RK3588 上的 NetworkManager 扫描可用网络，选择 SSID 后输入密码并连接。浏览器不调用系统命令，也不保存密码。连接成功后侧栏只显示 NetworkManager 实际确认的 SSID 名称。
 
-```bash
-NEXT_PUBLIC_AMAP_KEY=你的Web端Key
-NEXT_PUBLIC_AMAP_SECURITY_CODE=你的securityJsCode
-```
+切换 Wi-Fi 可能导致当前浏览器连接立即中断，尤其是浏览器本身通过该无线接口访问设备时。现场网络配置优先使用有线连接。NetworkManager、无线网卡或设备端权限不可用时页面显示不可用原因，不提供模拟网络。
 
-正式部署应在高德控制台限制允许访问的域名，不应把无限制密钥用于现场设备。
+## 6. 高德配置
 
-## 6. 本地开发和构建
+高德地图由 RK3588 设备端统一保存。采集首页实时地图面板提供“地图设置”，用户输入 Web JS API Key 和 `securityJsCode` 后，FastAPI 将配置保存到 `CAPTURE_DATA_ROOT/settings/device_settings.json`。读取配置接口不会返回安全密钥明文，其他浏览器访问同一 RK3588 时自动使用同一设备配置。`config/network/web.env` 的高德环境变量仅作为首次迁移兼容项。高德控制台仍需为 Web Key 配置实际访问设备所使用的域名或地址。
+
+## 7. 本地开发和构建
 
 ```bash
-cd /home/cat/Project/capture_system/frontend
+cd /path/to/capture_system/frontend
 npm install
 npm run dev
 ```
@@ -167,7 +157,7 @@ bash scripts/build/build.sh web
 脚本会校验 Node.js 版本、按锁文件决定是否需要 `npm ci`，再执行 `npm run build:device`。
 输出目录为 `frontend/out/`。在前端目录内直接执行 `npm run build:device` 仍然可用。
 
-## 7. 测试
+## 8. 测试
 
 完整测试入口：
 

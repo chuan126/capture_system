@@ -107,7 +107,6 @@ test("rendered dashboard includes real-time amap panel", async () => {
   const html = await response.text();
   assert.match(html, /实时地图/);
   assert.match(html, /高德地图/);
-  assert.match(html, /地图设置/);
   assert.match(html, /amap-stage/);
   assert.match(html, /amap-container/);
   assert.match(html, /点云与实时地图/);
@@ -139,11 +138,12 @@ test("RealtimeAmap component contains WGS-84 to GCJ-02 conversion", async () => 
   assert.match(component, /transformLat/);
   assert.match(component, /transformLon/);
   assert.match(component, /MAX_TRACK_POINTS/);
-  assert.match(component, /amap_js_key/);
-  assert.match(component, /amap_security_code/);
-  assert.match(component, /NEXT_PUBLIC_AMAP_KEY/);
-  assert.match(component, /NEXT_PUBLIC_AMAP_SECURITY_CODE/);
+  assert.match(component, /\/api\/v1\/map\/config/);
+  assert.match(component, /serviceHost/);
   assert.match(component, /loadAmapScript/);
+  assert.doesNotMatch(component, /localStorage|NEXT_PUBLIC_AMAP/);
+  assert.match(component, /地图设置/);
+  assert.match(component, /security_js_code/);
 });
 
 test("globals.css includes amap layout and marker styles", async () => {

@@ -24,8 +24,11 @@ if [[ -f "${runtime_config}" ]]; then
   set +a
 fi
 
-data_root="${CAPTURE_DATA_ROOT:-${HOME}/.local/share/capture_system}"
-if ! mkdir -p "${data_root}/tasks" "${data_root}/reports"; then
+data_root="${CAPTURE_DATA_ROOT:-${project_root}/runtime}"
+if [[ "${data_root}" != /* ]]; then
+  data_root="$(realpath -m -- "${project_root}/${data_root}")"
+fi
+if ! mkdir -p "${data_root}/tasks" "${data_root}/reports" "${data_root}/dev-tests" "${data_root}/settings"; then
   echo "Cannot create persistent task data directory: ${data_root}" >&2
   exit 1
 fi
@@ -33,6 +36,7 @@ if [[ ! -w "${data_root}" ]]; then
   echo "Persistent task data directory is not writable: ${data_root}" >&2
   exit 1
 fi
+export CAPTURE_PROJECT_ROOT="${project_root}"
 export CAPTURE_DATA_ROOT="${data_root}"
 
 if [[ -n "${CAPTURE_PDF_FONT_PATH:-}" && ! -r "${CAPTURE_PDF_FONT_PATH}" ]]; then
