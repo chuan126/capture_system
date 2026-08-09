@@ -139,6 +139,9 @@ class TaskControlReadinessResponse(BaseModel):
     can_stop: bool = False
     can_recover: bool = False
     sensor_data_checked: bool = False
+    lidar_online: bool = False
+    rtk_online: bool = False
+    sensor_blockers: list[str] = Field(default_factory=list)
 
 
 class TaskResponse(BaseModel):

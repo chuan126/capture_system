@@ -39,7 +39,10 @@ export type TaskControlReadiness = {
   canResume: boolean;
   canStop: boolean;
   canRecover: boolean;
-  sensorDataChecked: false;
+  sensorDataChecked: boolean;
+  lidarOnline: boolean;
+  rtkOnline: boolean;
+  sensorBlockers: Array<"lidar" | "rtk" | "system_status">;
 };
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
@@ -188,7 +191,13 @@ export const getTaskControlReadiness = async (): Promise<TaskControlReadiness> =
     canResume: payload.can_resume === true,
     canStop: payload.can_stop === true,
     canRecover: payload.can_recover === true,
-    sensorDataChecked: false,
+    sensorDataChecked: payload.sensor_data_checked === true,
+    lidarOnline: payload.lidar_online === true,
+    rtkOnline: payload.rtk_online === true,
+    sensorBlockers: Array.isArray(payload.sensor_blockers)
+      ? payload.sensor_blockers.filter((value): value is "lidar" | "rtk" | "system_status" =>
+        value === "lidar" || value === "rtk" || value === "system_status")
+      : [],
   };
 };
 

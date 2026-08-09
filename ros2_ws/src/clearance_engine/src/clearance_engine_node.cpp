@@ -249,7 +249,8 @@ private:
     if (estimate.valid) {
       output.lidar_to_top_m = estimate.selected.min_height_m;
       output.selected_inlier_count = static_cast<std::uint32_t>(estimate.selected.inlier_count);
-      output.selected_area_m2 = estimate.selected.area_m2;
+      // 兼容字段selected_area_m2表示选中连通区域的水平投影占用网格面积，不是几何平面表面积。
+      output.selected_area_m2 = estimate.selected.occupied_area_m2;
       output.selected_tilt_deg = estimate.selected.tilt_deg;
       output.residual_median_m = estimate.selected.residual_median_m;
       output.residual_p95_m = estimate.selected.residual_p95_m;

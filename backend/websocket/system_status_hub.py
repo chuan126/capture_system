@@ -28,6 +28,10 @@ class SystemStatusHub:
         self._ros_available = False
         self._ros_error: str | None = None
 
+    @property
+    def latest_snapshot(self) -> SystemStatusSnapshot | None:
+        return self._latest
+
     def set_ros_availability(self, available: bool, error: str | None = None) -> None:
         self._ros_available = available
         self._ros_error = error

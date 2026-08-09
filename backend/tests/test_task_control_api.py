@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 
 from backend.main import create_app
 from backend.ros_bridge.task_control_bridge import TaskControlResult
+from backend.protocols.system_status_v1 import DeviceStatus, SystemStatusSnapshot
 
 
 class DummyBridge:
@@ -69,7 +70,7 @@ class FakeTaskControlBridge(DummyBridge):
             status=state,
             operation_phase=phase,
             status_revision=int(kwargs["expected_revision"]) + 1,
-            message="命令已接受，不等待雷达或RTK真实数据检查",
+            message="命令已接受",
             error_code=None,
         )
 
@@ -82,7 +83,28 @@ def make_static_site(directory: Path) -> None:
     )
 
 
-def test_task_control_http_uses_ros_bridge_without_sensor_readiness_gate(tmp_path: Path) -> None:
+def publish_sensor_status(application, *, lidar_online: bool, rtk_online: bool) -> None:
+    application.state.system_status_hub.publish(
+        SystemStatusSnapshot(
+            sequence=1,
+            emitted_at_ns=1,
+            lidar=DeviceStatus(
+                state="ok" if lidar_online else "error",
+                message="雷达原始点云正常" if lidar_online else "雷达原始点云超时",
+                values={"online_publishers": "1", "raw_age_ms": "20" if lidar_online else "5000"},
+            ),
+            rtk=DeviceStatus(
+                state="ok" if rtk_online else "warn",
+                message="串口已连接" if rtk_online else "串口未连接，正在重试",
+                values={"source": "rtk_driver/serial"},
+            ),
+            controller=DeviceStatus(state="ok", message="运行正常", values={}),
+            storage=DeviceStatus(state="ok", message="存储正常", values={"writable": "true"}),
+        )
+    )
+
+
+def test_task_control_requires_lidar_and_rtk_online_before_start(tmp_path: Path) -> None:
     static_dir = tmp_path / "site"
     make_static_site(static_dir)
     created_bridges: list[FakeTaskControlBridge] = []
@@ -108,6 +130,19 @@ def test_task_control_http_uses_ros_bridge_without_sensor_readiness_gate(tmp_pat
             "/api/v1/tasks",
             json={"tunnel_code": "T-301", "tunnel_name": "控制接口测试"},
         ).json()
+        publish_sensor_status(application, lidar_online=False, rtk_online=True)
+        blocked = client.get("/api/v1/task-control/readiness")
+        blocked_start = client.post(
+            f"/api/v1/tasks/{task['task_id']}/start",
+            headers={"Idempotency-Key": "start-command-blocked"},
+            json={
+                "lane": "right",
+                "lidar_mount_height_m": 1.86,
+                "clearance_threshold_m": 4.5,
+                "expected_revision": 0,
+            },
+        )
+        publish_sensor_status(application, lidar_online=True, rtk_online=True)
         readiness = client.get("/api/v1/task-control/readiness")
         response = client.post(
             f"/api/v1/tasks/{task['task_id']}/start",
@@ -120,10 +155,22 @@ def test_task_control_http_uses_ros_bridge_without_sensor_readiness_gate(tmp_pat
             },
         )
 
+    assert blocked.status_code == 200
+    assert blocked.json()["ready"] is False
+    assert blocked.json()["state"] == "sensor_offline"
+    assert blocked.json()["sensor_data_checked"] is True
+    assert blocked.json()["lidar_online"] is False
+    assert blocked.json()["rtk_online"] is True
+    assert blocked.json()["sensor_blockers"] == ["lidar"]
+    assert blocked_start.status_code == 409
+    assert "雷达未上线" in blocked_start.json()["detail"]
     assert readiness.status_code == 200
     assert readiness.json()["ready"] is True
-    assert readiness.json()["sensor_data_checked"] is False
-    assert "不等待雷达或RTK真实数据检查" in readiness.json()["detail"]
+    assert readiness.json()["sensor_data_checked"] is True
+    assert readiness.json()["lidar_online"] is True
+    assert readiness.json()["rtk_online"] is True
+    assert readiness.json()["sensor_blockers"] == []
+    assert "雷达与RTK均已上线" in readiness.json()["detail"]
     assert response.status_code == 202
     assert response.json()["operation_phase"] == "recording"
     bridge = created_bridges[0]
@@ -299,6 +346,7 @@ def test_missing_recover_service_does_not_disable_normal_task_control(tmp_path: 
             "/api/v1/tasks",
             json={"tunnel_code": "T-305", "tunnel_name": "恢复服务降级测试"},
         ).json()
+        publish_sensor_status(application, lidar_online=True, rtk_online=True)
         idle = client.get("/api/v1/task-control/readiness").json()
         with sqlite3.connect(data_root / "capture.db") as connection:
             connection.execute(
@@ -392,6 +440,7 @@ def test_task_start_accepts_zero_mount_height_and_zero_threshold(tmp_path: Path)
             "/api/v1/tasks",
             json={"tunnel_code": "T-ZERO", "tunnel_name": "零参数测试"},
         ).json()
+        publish_sensor_status(application, lidar_online=True, rtk_online=True)
         response = client.post(
             f"/api/v1/tasks/{task['task_id']}/start",
             headers={"Idempotency-Key": "start-zero-001"},

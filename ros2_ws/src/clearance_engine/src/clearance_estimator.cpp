@@ -346,7 +346,7 @@ RegionAnalysis analyzeRegions(
     candidate.coefficients = region_coefficients;
     candidate.inlier_count = component_point_count;
     candidate.occupied_cell_count = component.size();
-    candidate.area_m2 = static_cast<double>(component.size()) *
+    candidate.occupied_area_m2 = static_cast<double>(component.size()) *
       config.region_grid_size_m * config.region_grid_size_m;
     candidate.tilt_deg = region_tilt_deg;
     candidate.residual_median_m = residual_median;

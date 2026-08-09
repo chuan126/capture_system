@@ -204,14 +204,14 @@ function ClearancePanel({ overview }: { overview: DevOverview | null }) {
       <div className="dev-metric-grid dev-metric-grid--4">
         <Metric label="当前算法值" value={snapshot?.lidar_to_top_m == null ? "--" : `${fixed(snapshot.lidar_to_top_m, 3)} m`} detail={snapshot?.valid ? "有效" : snapshot ? snapshot.invalid_reason : "等待数据"} />
         <Metric label="源帧频率" value={`${fixed(source?.rate_hz, 1)} Hz`} detail={source?.age_ms == null ? "--" : `${fixed(source.age_ms, 0)} ms前`} />
-        <Metric label="候选平面" value={source?.candidate_count ?? "--"} detail={`内点 ${source?.selected_inlier_count ?? "--"}`} />
+        <Metric label="合格连通区域" value={source?.candidate_count ?? "--"} detail={`选中区域内点 ${source?.selected_inlier_count ?? "--"}`} />
         <Metric label="处理时间" value={source?.processing_time_ms == null ? "--" : `${fixed(source.processing_time_ms, 2)} ms`} detail={`有效点 ${source?.valid_point_ratio == null ? "--" : `${(Number(source.valid_point_ratio) * 100).toFixed(1)}%`}`} />
-        <Metric label="平面面积" value={source?.selected_area_m2 == null ? "--" : `${fixed(source.selected_area_m2, 3)} m²`} />
+        <Metric label="网格覆盖面积" value={source?.selected_area_m2 == null ? "--" : `${fixed(source.selected_area_m2, 4)} m²`} detail="水平投影占用网格面积" />
         <Metric label="平面倾角" value={source?.selected_tilt_deg == null ? "--" : `${fixed(source.selected_tilt_deg, 2)}°`} />
         <Metric label="残差P95" value={source?.residual_p95_m == null ? "--" : `${fixed(source.residual_p95_m, 4)} m`} />
         <Metric label="50 Hz记录器" value={String(recording?.status ?? "等待")} detail={`总样本 ${recording?.total_samples ?? 0} · 有效 ${recording?.valid_samples ?? 0} · 无效 ${recording?.invalid_samples ?? 0}`} />
       </div>
-      <div className="dev-note">50 Hz记录序列采用最近源帧保持。源帧超过250 ms后记录无效样本，不把最后有效值无限延长。</div>
+      <div className="dev-note">合格连通区域数不等于RANSAC模型数，一个模型可拆分为多个连通区域。网格覆盖面积按占用网格数 × grid_size²计算，不代表几何平面真实表面积。50 Hz记录序列采用最近源帧保持，源帧超过250 ms后记录无效样本。</div>
     </section>
     <ParameterSubset prefix="clearance." />
   </div>;

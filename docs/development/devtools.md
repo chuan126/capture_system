@@ -93,6 +93,9 @@ ros2_ws/src/clearance_engine/config/clearance_engine_small_board_1cm.yaml
 
 参数页当前只显示八项净空核心参数：`ransac.distance_threshold_m`、`region.grid_size_m`、`region.min_span_cells`、`region.min_occupied_cells`、`region.max_residual_p95_m`、`ransac.min_inliers_absolute`、`ransac.max_candidate_planes`、`ransac.min_remaining_points`。当前正式值中 `ransac.min_remaining_points=100`。`region.min_span_cells` 和 `ransac.min_remaining_points` 尚未实现运行时更新，因此界面只读。参数页同时显示所属正式 YAML 的配置值和 ROS 2 节点实际运行值。节点未启动、ROS 发现失败或单项读取超时时，正式配置值仍可见，运行值显示不可用，不使用 YAML 值冒充节点实际值。单个参数读取失败不会影响其余参数显示。装订表中未显示的运动补偿、里程计和其他算法参数仍参与录制参数快照。临时修改只作用于当前 ROS 节点，不自动改写正式 YAML，节点重启后恢复正式配置。
 
+
+净空实时结果中的 `candidate_count` 在界面显示为“合格连通区域”，不再称为“候选平面”；`selected_area_m2` 显示为“网格覆盖面积”，表示占用网格在水平面的投影面积。参数 `ransac.max_candidate_planes` 在界面显示为“最大RANSAC平面数”，它限制 RANSAC 提取循环，不限制连通区域数。`ransac.min_inliers_absolute` 的开发输入下限与算法校验统一为 3。
+
 ## 5. 录制参数快照
 
 每次开发录制启动后，在同一个 rosbag 输出目录保存：

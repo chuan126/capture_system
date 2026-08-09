@@ -1,11 +1,14 @@
 system_monitor_node:
   ros__parameters:
     lidar_device_online_topic: /capture/lidar/device_online
+    lidar_raw_topic: /capture/lidar/points_raw
     raw_diagnostics_topic: /diagnostics
     output_diagnostics_topic: /capture/system/diagnostics
     rtk_diagnostic_name: rtk_driver/serial
     storage_data_path: runtime
     publish_period_ms: 1000
+    lidar_startup_grace_ms: 5000
+    lidar_timeout_ms: 1500
     rtk_startup_grace_ms: 5000
     rtk_timeout_ms: 3000
     memory_warn_percent: 85.0

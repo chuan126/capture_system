@@ -3,8 +3,10 @@ std_msgs/Header header
 
 bool valid
 float64 lidar_to_top_m
+# 通过区域尺寸、倾角和残差检查的连通区域数量。一个RANSAC模型可以产生多个区域。
 uint32 candidate_count
 uint32 selected_inlier_count
+# 兼容字段名。实际表示选中区域在水平网格上的占用投影面积，不是几何平面表面积。
 float64 selected_area_m2
 float64 selected_tilt_deg
 float64 residual_median_m

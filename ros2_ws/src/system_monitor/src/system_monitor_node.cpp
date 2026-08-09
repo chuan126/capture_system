@@ -4,6 +4,7 @@
 #include <diagnostic_msgs/msg/diagnostic_status.hpp>
 #include <diagnostic_msgs/msg/key_value.hpp>
 #include <rclcpp/rclcpp.hpp>
+#include <sensor_msgs/msg/point_cloud2.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -113,6 +114,8 @@ public:
   {
     lidar_device_online_topic_ = declare_parameter<std::string>(
       "lidar_device_online_topic", "/capture/lidar/device_online");
+    lidar_raw_topic_ = declare_parameter<std::string>(
+      "lidar_raw_topic", "/capture/lidar/points_raw");
     raw_diagnostics_topic_ = declare_parameter<std::string>("raw_diagnostics_topic", "/diagnostics");
     output_topic_ = declare_parameter<std::string>(
       "output_diagnostics_topic", "/capture/system/diagnostics");
@@ -123,6 +126,8 @@ public:
       "storage_data_path", configured_data_root && *configured_data_root ? configured_data_root :
       (std::filesystem::current_path() / "runtime").string());
     publish_period_ms_ = positive("publish_period_ms", 1000);
+    lidar_startup_grace_ms_ = positive("lidar_startup_grace_ms", 5000);
+    lidar_timeout_ms_ = positive("lidar_timeout_ms", 1500);
     rtk_startup_grace_ms_ = positive("rtk_startup_grace_ms", 5000);
     rtk_timeout_ms_ = positive("rtk_timeout_ms", 3000);
     memory_warn_percent_ = bounded_percent("memory_warn_percent", 85.0);
@@ -130,7 +135,7 @@ public:
     temperature_warn_celsius_ = declare_parameter<double>("temperature_warn_celsius", 80.0);
     storage_warn_bytes_ = gibibytes("storage_warn_available_gib", 20.0);
     storage_error_bytes_ = gibibytes("storage_error_available_gib", 5.0);
-    if (lidar_device_online_topic_.empty() || raw_diagnostics_topic_.empty() || output_topic_.empty() ||
+    if (lidar_device_online_topic_.empty() || lidar_raw_topic_.empty() || raw_diagnostics_topic_.empty() || output_topic_.empty() ||
       storage_path_.empty() || storage_error_bytes_ > storage_warn_bytes_)
     {
       throw std::invalid_argument("system_monitor参数为空或存储阈值顺序无效");
@@ -138,6 +143,11 @@ public:
 
     publisher_ = create_publisher<diagnostic_msgs::msg::DiagnosticArray>(
       output_topic_, rclcpp::QoS(5).reliable().transient_local());
+    lidar_subscription_ = create_subscription<sensor_msgs::msg::PointCloud2>(
+      lidar_raw_topic_, rclcpp::SensorDataQoS(),
+      [this](sensor_msgs::msg::PointCloud2::ConstSharedPtr) {
+        lidar_monitor_.observe(system_monitor::StreamMonitor::Clock::now());
+      });
     diagnostic_subscription_ = create_subscription<diagnostic_msgs::msg::DiagnosticArray>(
       raw_diagnostics_topic_, 10,
       [this](diagnostic_msgs::msg::DiagnosticArray::ConstSharedPtr message) {
@@ -176,16 +186,22 @@ private:
     return static_cast<std::uint64_t>(result * 1024.0 * 1024.0 * 1024.0);
   }
 
-  DiagnosticStatus lidar_status()
+  DiagnosticStatus lidar_status(const system_monitor::StreamMonitor::Clock::time_point now)
   {
+    const auto health = lidar_monitor_.evaluate(
+      now, std::chrono::milliseconds(lidar_startup_grace_ms_),
+      std::chrono::milliseconds(lidar_timeout_ms_), "等待雷达原始点云", "雷达原始点云正常",
+      "雷达原始点云超时");
     const std::size_t online_publishers = count_publishers(lidar_device_online_topic_);
     DiagnosticStatus status;
     status.name = "system_monitor/lidar";
     status.hardware_id = "ODIN1 Lite";
-    status.level = online_publishers > 0U ? DiagnosticStatus::OK : DiagnosticStatus::WARN;
-    status.message = online_publishers > 0U ? "雷达已接入" : "雷达未接入";
+    status.level = diagnostic_level(health.level);
+    status.message = health.message;
     status.values = {value("device_online_topic", lidar_device_online_topic_),
-      value("online_publishers", std::to_string(online_publishers))};
+      value("online_publishers", std::to_string(online_publishers)),
+      value("raw_topic", lidar_raw_topic_), value("raw_age_ms", number(health.age_ms)),
+      value("raw_frequency_hz", number(health.frequency_hz))};
     return status;
   }
 
@@ -264,22 +280,23 @@ private:
     diagnostic_msgs::msg::DiagnosticArray array;
     array.header.stamp = now();
     const auto steady_now = system_monitor::StreamMonitor::Clock::now();
-    array.status.push_back(lidar_status());
+    array.status.push_back(lidar_status(steady_now));
     array.status.push_back(rtk_status(steady_now));
     array.status.push_back(controller_status());
     array.status.push_back(storage_status());
     publisher_->publish(std::move(array));
   }
 
-  std::string lidar_device_online_topic_, raw_diagnostics_topic_, output_topic_, rtk_diagnostic_name_, storage_path_;
-  int publish_period_ms_{1000}, rtk_startup_grace_ms_{5000}, rtk_timeout_ms_{3000};
+  std::string lidar_device_online_topic_, lidar_raw_topic_, raw_diagnostics_topic_, output_topic_, rtk_diagnostic_name_, storage_path_;
+  int publish_period_ms_{1000}, lidar_startup_grace_ms_{5000}, lidar_timeout_ms_{1500}, rtk_startup_grace_ms_{5000}, rtk_timeout_ms_{3000};
   double memory_warn_percent_{85.0}, cpu_warn_percent_{90.0}, temperature_warn_celsius_{80.0};
   std::uint64_t storage_warn_bytes_{0}, storage_error_bytes_{0};
-  system_monitor::StreamMonitor rtk_monitor_;
+  system_monitor::StreamMonitor lidar_monitor_, rtk_monitor_;
   std::uint8_t rtk_level_{DiagnosticStatus::STALE};
   std::string rtk_message_;
   CpuCounters previous_cpu_;
   rclcpp::Publisher<diagnostic_msgs::msg::DiagnosticArray>::SharedPtr publisher_;
+  rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr lidar_subscription_;
   rclcpp::Subscription<diagnostic_msgs::msg::DiagnosticArray>::SharedPtr diagnostic_subscription_;
   rclcpp::TimerBase::SharedPtr timer_;
 };

@@ -45,7 +45,7 @@ struct PlaneCandidate
   std::array<double, 4> coefficients{};
   std::size_t inlier_count{0};
   std::size_t occupied_cell_count{0};
-  double area_m2{0.0};
+  double occupied_area_m2{0.0};
   double tilt_deg{0.0};
   double residual_median_m{0.0};
   double residual_p95_m{0.0};

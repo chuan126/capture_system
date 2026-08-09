@@ -427,6 +427,12 @@ function Dashboard({
   onNavigate,
   taskRepositoryReady,
   reloadTasks,
+  heightThreshold,
+  setHeightThreshold,
+  mountHeight,
+  setMountHeight,
+  operationLane,
+  setOperationLane,
 }: {
   tasks: CollectionTask[];
   selectedTaskId: string | null;
@@ -434,13 +440,17 @@ function Dashboard({
   onNavigate: (page: PageId) => void;
   taskRepositoryReady: boolean;
   reloadTasks: () => Promise<void>;
+  heightThreshold: string;
+  setHeightThreshold: React.Dispatch<React.SetStateAction<string>>;
+  mountHeight: string;
+  setMountHeight: React.Dispatch<React.SetStateAction<string>>;
+  operationLane: CollectionTaskLane;
+  setOperationLane: React.Dispatch<React.SetStateAction<CollectionTaskLane>>;
 }) {
   const [expandedVisual, setExpandedVisual] = useState<"cloud" | "map" | null>(null);
   const [taskDialogOpen, setTaskDialogOpen] = useState(false);
   const [taskSwitchOpen, setTaskSwitchOpen] = useState(false);
-  const [heightThreshold, setHeightThreshold] = useState("4.50");
-  const [mountHeight, setMountHeight] = useState("1.86");
-  const [operationLane, setOperationLane] = useState<CollectionTaskLane>("右车道");
+  const [latestAbnormalHeightM, setLatestAbnormalHeightM] = useState<number | null>(null);
   const [controlSubmitting, setControlSubmitting] = useState<"start" | "pause" | "resume" | "stop" | "recover" | null>(null);
   const [autoAdvanceTaskId, setAutoAdvanceTaskId] = useState<string | null>(null);
   const [controlError, setControlError] = useState<string | null>(null);
@@ -568,11 +578,16 @@ function Dashboard({
           ? "ok"
           : "unknown";
   const aggregateText = {ok: "系统正常", warn: "系统告警", error: "系统异常", stale: "系统异常", unknown: "检查中"}[aggregateState];
+  const parsedMountHeight = Number(mountHeight);
+  const mountHeightValid = Number.isFinite(parsedMountHeight) && parsedMountHeight >= 0 && parsedMountHeight <= 20;
   const clearanceStreaming = clearance.connection === "connected" && clearance.streamState === "streaming";
   const clearanceValid = clearanceStreaming && clearanceSnapshot?.valid === true &&
     clearanceSnapshot.lidar_to_top_m !== null;
-  const currentHeightText = clearanceValid
-    ? clearanceSnapshot.lidar_to_top_m!.toFixed(3)
+  const displayedClearanceHeightM = clearanceValid && mountHeightValid
+    ? clearanceSnapshot.lidar_to_top_m! + parsedMountHeight
+    : null;
+  const currentHeightText = displayedClearanceHeightM !== null
+    ? displayedClearanceHeightM.toFixed(3)
     : "--";
   const deviceValue = (device: DeviceStatus | undefined, key: string) =>
     monitorUnavailable ? null : device?.values?.[key] ?? null;
@@ -583,12 +598,38 @@ function Dashboard({
   const controllerCpuText = formatPercentValue(systemSnapshot?.controller, "cpu_percent");
   const activeTask = tasks.find((task) => isTaskActive(task));
   const selectedTask = tasks.find((task) => task.taskId === selectedTaskId);
-  const currentTask = activeTask ?? selectedTask ?? tasks.find((task) => task.status === "待执行") ?? null;
-  const pendingTasks = tasks.filter((task) => task.status === "待执行" && task.taskId !== currentTask?.taskId);
+  const selectedPendingTask = selectedTask?.status === "待执行" ? selectedTask : null;
+  const firstPendingTask = tasks.find((task) => task.status === "待执行") ?? null;
+  const currentTask = activeTask ?? selectedPendingTask ?? firstPendingTask ?? selectedTask ?? null;
+  const pendingTasks = tasks
+    .filter((task) => task.status === "待执行" && task.taskId !== currentTask?.taskId)
+    .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
   const parsedHeightThreshold = Number(heightThreshold);
-  const heightThresholdValid = Number.isFinite(parsedHeightThreshold) && parsedHeightThreshold > 0;
-  const parsedMountHeight = Number(mountHeight);
-  const mountHeightValid = Number.isFinite(parsedMountHeight) && parsedMountHeight > 0;
+  const heightThresholdValid = Number.isFinite(parsedHeightThreshold) && parsedHeightThreshold >= 0 && parsedHeightThreshold <= 20;
+
+  useEffect(() => {
+    if (!activeTask) return;
+    if (activeTask.lidarMountHeightM !== null) setMountHeight(String(activeTask.lidarMountHeightM));
+    if (activeTask.clearanceThresholdM !== null) setHeightThreshold(String(activeTask.clearanceThresholdM));
+    if (activeTask.lane !== null) setOperationLane(activeTask.lane);
+  }, [activeTask?.taskId, activeTask?.lidarMountHeightM, activeTask?.clearanceThresholdM, activeTask?.lane, setMountHeight, setHeightThreshold, setOperationLane]);
+
+  useEffect(() => {
+    setLatestAbnormalHeightM(null);
+  }, [currentTask?.taskId]);
+
+  useEffect(() => {
+    if (
+      currentTask?.status !== "采集中" ||
+      currentTask.operationPhase !== "recording" ||
+      displayedClearanceHeightM === null ||
+      !heightThresholdValid
+    ) return;
+    if (displayedClearanceHeightM < parsedHeightThreshold) {
+      setLatestAbnormalHeightM(displayedClearanceHeightM);
+    }
+  }, [currentTask?.taskId, currentTask?.status, currentTask?.operationPhase, displayedClearanceHeightM, heightThresholdValid, parsedHeightThreshold]);
+
   const taskBusy = isTaskControlBusy(currentTask) || controlSubmitting !== null;
   const taskLocked = isTaskActive(currentTask);
   const currentTaskStatus = currentTask?.status ?? "待执行";
@@ -598,9 +639,13 @@ function Dashboard({
     draft: CollectionTaskDraft,
     idempotencyKey: string,
   ) => {
+    const selectedExecutableTask = tasks.find((task) =>
+      task.taskId === selectedTaskId && (task.status === "待执行" || isTaskActive(task))
+    );
+    const preferredTaskId = selectedExecutableTask?.taskId ?? firstPendingTask?.taskId ?? null;
     const created = await createTask(draft, idempotencyKey);
     await reloadTasks();
-    setSelectedTaskId(created.taskId);
+    setSelectedTaskId(preferredTaskId ?? created.taskId);
     return created;
   };
 
@@ -636,6 +681,7 @@ function Dashboard({
       !heightThresholdValid ||
       !mountHeightValid
     ) return;
+    setLatestAbnormalHeightM(null);
     void executeControl("start", () => startTaskControl(currentTask.taskId, {
       lane: operationLane,
       lidarMountHeightM: parsedMountHeight,
@@ -735,9 +781,9 @@ function Dashboard({
                 <span><small>纬度</small>{latitudeText}</span>
               </strong>
             </article>
-            <article className="health-kpi-card health-kpi-card--placeholder">
-              <span>预留指标二</span>
-              <strong>--</strong>
+            <article className={`health-kpi-card health-kpi-card--anomaly${latestAbnormalHeightM !== null ? " health-kpi-card--alert" : ""}`}>
+              <span>异常高度</span>
+              <strong>{latestAbnormalHeightM === null ? "--" : <>{latestAbnormalHeightM.toFixed(3)}<small>m</small></>}</strong>
             </article>
           </div>
         </div>
@@ -902,12 +948,13 @@ function Dashboard({
                     <div>
                       <input
                         type="number"
-                        min="0.01"
+                        min="0"
+                        max="20"
                         step="0.01"
                         value={mountHeight}
                         disabled={taskLocked}
                         aria-invalid={!mountHeightValid}
-                        onChange={(event) => setMountHeight(event.target.value)}
+                        onChange={(event) => { setMountHeight(event.target.value); setLatestAbnormalHeightM(null); }}
                       />
                       <small>m</small>
                     </div>
@@ -931,12 +978,13 @@ function Dashboard({
                     <div>
                       <input
                         type="number"
-                        min="0.01"
+                        min="0"
+                        max="20"
                         step="0.01"
                         value={heightThreshold}
                         disabled={taskLocked}
                         aria-invalid={!heightThresholdValid}
-                        onChange={(event) => setHeightThreshold(event.target.value)}
+                        onChange={(event) => { setHeightThreshold(event.target.value); setLatestAbnormalHeightM(null); }}
                       />
                       <small>m</small>
                     </div>
@@ -1044,7 +1092,7 @@ function Dashboard({
                         ? "请输入有效的雷达安装高度"
                         : !controlAvailable
                           ? controlDetail
-                          : "立即开始采集，不等待传感器真实数据检查"}
+                          : "雷达与RTK均已上线，可以开始采集"}
                   onClick={startTask}
                 >{controlSubmitting === "start" ? "正在开始" : "开始采集"}</button>
               )}
@@ -1114,6 +1162,9 @@ export default function Home() {
   const [activePage, setActivePage] = useState<PageId>("dashboard");
   const [tasks, setTasks] = useState<CollectionTask[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [heightThreshold, setHeightThreshold] = useState("0.00");
+  const [mountHeight, setMountHeight] = useState("0.00");
+  const [operationLane, setOperationLane] = useState<CollectionTaskLane>("右车道");
   const [taskQueryState, setTaskQueryState] = useState<"loading" | "ready" | "error">("loading");
   const [taskQueryError, setTaskQueryError] = useState<string | null>(null);
   const taskStatus = useTaskStatusSocket();
@@ -1126,7 +1177,10 @@ export default function Home() {
       setTasks(persistedTasks);
       setSelectedTaskId((current) => current && persistedTasks.some((task) => task.taskId === current)
         ? current
-        : persistedTasks.find((task) => isTaskActive(task))?.taskId ?? persistedTasks[0]?.taskId ?? null);
+        : persistedTasks.find((task) => isTaskActive(task))?.taskId
+          ?? persistedTasks.find((task) => task.status === "待执行")?.taskId
+          ?? persistedTasks[0]?.taskId
+          ?? null);
       setTaskQueryState("ready");
     } catch (error) {
       setTaskQueryError(error instanceof Error ? error.message : "任务列表读取失败");
@@ -1169,7 +1223,7 @@ export default function Home() {
         {activePage !== "dashboard" && <Header page={activePage} task={selectedTask} />}
         <div className="page-content">
           {taskQueryState !== "ready" && <section className={`task-data-notice task-data-notice--${taskQueryState}`} role={taskQueryState === "error" ? "alert" : "status"}><div><strong>{taskQueryState === "loading" ? "正在读取设备任务记录" : "任务记录读取失败"}</strong><span>{taskQueryState === "loading" ? "任务列表从 FastAPI 持久化接口加载" : taskQueryError ?? "无法读取设备端任务数据库"}</span></div>{taskQueryState === "error" && <button type="button" onClick={() => void loadPersistedData()}>重新读取</button>}</section>}
-          {activePage === "dashboard" && <Dashboard tasks={tasks} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} onNavigate={setActivePage} taskRepositoryReady={taskQueryState === "ready"} reloadTasks={reloadTasks} />}
+          {activePage === "dashboard" && <Dashboard tasks={tasks} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} onNavigate={setActivePage} taskRepositoryReady={taskQueryState === "ready"} reloadTasks={reloadTasks} heightThreshold={heightThreshold} setHeightThreshold={setHeightThreshold} mountHeight={mountHeight} setMountHeight={setMountHeight} operationLane={operationLane} setOperationLane={setOperationLane} />}
           {activePage === "playback" && <PlaybackWorkspace tasks={tasks} selectedTaskId={selectedTaskId} onSelectTask={setSelectedTaskId} onDataChanged={reloadTasks} onNavigate={setActivePage} />}
           {activePage === "report" && <ReportWorkspace tasks={tasks} selectedTaskId={selectedTaskId} onSelectTask={setSelectedTaskId} onNavigate={setActivePage} />}
           {activePage === "devtools" && DEVTOOLS_ENABLED && DevToolsWorkspace && <DevToolsWorkspace />}

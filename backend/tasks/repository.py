@@ -99,6 +99,9 @@ class TaskRecord:
     last_error_code: str | None
     last_error_message: str | None
     warning_code: str | None
+    lane: str | None
+    lidar_mount_height_m: float | None
+    clearance_threshold_m: float | None
     active_session_id: str | None
     active_slot: int | None
     schema_version: int
@@ -110,7 +113,7 @@ class TaskRecord:
         return self.display_id
 
 
-_SCHEMA_VERSION = 6
+_SCHEMA_VERSION = 7
 _LOCAL_TIMEZONE = ZoneInfo("Asia/Singapore")
 _ALLOWED_STATUS = {
     "pending",
@@ -120,6 +123,18 @@ _ALLOWED_STATUS = {
     "interrupted",
     "failed",
 }
+
+_TASK_SELECT_COLUMNS = """
+    tasks.*, operation_batches.batch_code,
+    task_parameters.lane AS parameter_lane,
+    task_parameters.lidar_mount_height_m AS parameter_lidar_mount_height_m,
+    task_parameters.clearance_threshold_m AS parameter_clearance_threshold_m
+"""
+_TASK_JOIN = """
+    FROM tasks
+    JOIN operation_batches ON operation_batches.batch_id = tasks.batch_id
+    LEFT JOIN task_parameters ON task_parameters.task_id = tasks.task_id
+"""
 
 
 class TaskRepository:
@@ -180,6 +195,11 @@ class TaskRepository:
                     ).fetchone()[0]
                     if current_version < 6:
                         self._apply_migration_6(connection)
+                    current_version = connection.execute(
+                        "SELECT COALESCE(MAX(version), 0) FROM schema_migrations"
+                    ).fetchone()[0]
+                    if current_version < 7:
+                        self._apply_migration_7(connection)
                     current_version = connection.execute(
                         "SELECT COALESCE(MAX(version), 0) FROM schema_migrations"
                     ).fetchone()[0]
@@ -260,9 +280,7 @@ class TaskRepository:
                      draft.tunnel_name, now, now, _SCHEMA_VERSION),
                 )
                 row = connection.execute(
-                    "SELECT tasks.*, operation_batches.batch_code FROM tasks "
-                    "JOIN operation_batches ON operation_batches.batch_id=tasks.batch_id "
-                    "WHERE task_id = ?", (task_id,),
+                    f"SELECT {_TASK_SELECT_COLUMNS} {_TASK_JOIN} WHERE tasks.task_id = ?", (task_id,),
                 ).fetchone()
                 created.append(self._row_to_record(row))
 
@@ -323,9 +341,8 @@ class TaskRepository:
             with self._connect() as connection:
                 rows = connection.execute(
                     f"""
-                    SELECT tasks.*, operation_batches.batch_code
-                    FROM tasks
-                    JOIN operation_batches ON operation_batches.batch_id = tasks.batch_id
+                    SELECT {_TASK_SELECT_COLUMNS}
+                    {_TASK_JOIN}
                     {where_clause}
                     ORDER BY tasks.created_at {direction}, tasks.sequence {direction}
                     LIMIT ? OFFSET ?
@@ -342,9 +359,7 @@ class TaskRepository:
         try:
             with self._connect() as connection:
                 row = connection.execute(
-                    f"SELECT tasks.*, operation_batches.batch_code FROM tasks "
-                    f"JOIN operation_batches ON operation_batches.batch_id=tasks.batch_id "
-                    f"WHERE tasks.task_id = ? {deleted_clause}",
+                    f"SELECT {_TASK_SELECT_COLUMNS} {_TASK_JOIN} WHERE tasks.task_id = ? {deleted_clause}",
                     (task_id,),
                 ).fetchone()
         except (OSError, sqlite3.Error) as error:
@@ -368,9 +383,7 @@ class TaskRepository:
             connection.execute("BEGIN IMMEDIATE")
             placeholders = ",".join("?" for _ in identifiers)
             rows = connection.execute(
-                f"SELECT tasks.*, operation_batches.batch_code FROM tasks "
-                f"JOIN operation_batches ON operation_batches.batch_id=tasks.batch_id "
-                f"WHERE tasks.task_id IN ({placeholders}) AND tasks.deleted_at IS NULL",
+                f"SELECT {_TASK_SELECT_COLUMNS} {_TASK_JOIN} WHERE tasks.task_id IN ({placeholders}) AND tasks.deleted_at IS NULL",
                 identifiers,
             ).fetchall()
             row_by_id = {row["task_id"]: row for row in rows}
@@ -396,9 +409,7 @@ class TaskRepository:
                 [now, reason, now, *identifiers],
             )
             deleted_rows = connection.execute(
-                f"SELECT tasks.*, operation_batches.batch_code FROM tasks "
-                f"JOIN operation_batches ON operation_batches.batch_id=tasks.batch_id "
-                f"WHERE tasks.task_id IN ({placeholders})",
+                f"SELECT {_TASK_SELECT_COLUMNS} {_TASK_JOIN} WHERE tasks.task_id IN ({placeholders})",
                 identifiers,
             ).fetchall()
             deleted_by_id = {row["task_id"]: self._row_to_record(row) for row in deleted_rows}
@@ -937,8 +948,8 @@ class TaskRepository:
                 CREATE TABLE IF NOT EXISTS task_parameters (
                     task_id TEXT PRIMARY KEY REFERENCES tasks(task_id),
                     lane TEXT NOT NULL CHECK (lane IN ('left', 'right')),
-                    lidar_mount_height_m REAL NOT NULL CHECK (lidar_mount_height_m > 0),
-                    clearance_threshold_m REAL NOT NULL CHECK (clearance_threshold_m > 0),
+                    lidar_mount_height_m REAL NOT NULL CHECK (lidar_mount_height_m >= 0),
+                    clearance_threshold_m REAL NOT NULL CHECK (clearance_threshold_m >= 0),
                     captured_at TEXT NOT NULL,
                     parameter_schema_version INTEGER NOT NULL DEFAULT 1
                 )
@@ -1148,6 +1159,47 @@ class TaskRepository:
             connection.rollback()
             raise
 
+    def _apply_migration_7(self, connection: sqlite3.Connection) -> None:
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            connection.execute("ALTER TABLE task_parameters RENAME TO task_parameters_v6")
+            connection.execute(
+                """
+                CREATE TABLE task_parameters (
+                    task_id TEXT PRIMARY KEY REFERENCES tasks(task_id),
+                    lane TEXT NOT NULL CHECK (lane IN ('left', 'right')),
+                    lidar_mount_height_m REAL NOT NULL CHECK (lidar_mount_height_m >= 0),
+                    clearance_threshold_m REAL NOT NULL CHECK (clearance_threshold_m >= 0),
+                    captured_at TEXT NOT NULL,
+                    parameter_schema_version INTEGER NOT NULL DEFAULT 1
+                )
+                """
+            )
+            connection.execute(
+                """
+                INSERT INTO task_parameters (
+                    task_id, lane, lidar_mount_height_m, clearance_threshold_m,
+                    captured_at, parameter_schema_version
+                )
+                SELECT task_id, lane, lidar_mount_height_m, clearance_threshold_m,
+                       captured_at, parameter_schema_version
+                FROM task_parameters_v6
+                """
+            )
+            connection.execute("DROP TABLE task_parameters_v6")
+            connection.execute(
+                "UPDATE tasks SET schema_version=? WHERE schema_version<?",
+                (_SCHEMA_VERSION, _SCHEMA_VERSION),
+            )
+            connection.execute(
+                "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
+                (7, _utc_now_text()),
+            )
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+
     def _load_idempotent_response(
         self,
         connection: sqlite3.Connection,
@@ -1188,9 +1240,7 @@ class TaskRepository:
             return []
         placeholders = ",".join("?" for _ in identifiers)
         rows = connection.execute(
-            f"SELECT tasks.*, operation_batches.batch_code FROM tasks "
-            f"JOIN operation_batches ON operation_batches.batch_id=tasks.batch_id "
-            f"WHERE task_id IN ({placeholders})",
+            f"SELECT {_TASK_SELECT_COLUMNS} {_TASK_JOIN} WHERE tasks.task_id IN ({placeholders})",
             identifiers,
         ).fetchall()
         return [self._row_to_record(row) for row in rows]
@@ -1225,6 +1275,17 @@ class TaskRepository:
             last_error_code=row["last_error_code"] if "last_error_code" in keys else None,
             last_error_message=row["last_error_message"] if "last_error_message" in keys else None,
             warning_code=row["warning_code"] if "warning_code" in keys else None,
+            lane=row["parameter_lane"] if "parameter_lane" in keys else None,
+            lidar_mount_height_m=(
+                float(row["parameter_lidar_mount_height_m"])
+                if "parameter_lidar_mount_height_m" in keys and row["parameter_lidar_mount_height_m"] is not None
+                else None
+            ),
+            clearance_threshold_m=(
+                float(row["parameter_clearance_threshold_m"])
+                if "parameter_clearance_threshold_m" in keys and row["parameter_clearance_threshold_m"] is not None
+                else None
+            ),
             active_session_id=row["active_session_id"] if "active_session_id" in keys else None,
             active_slot=row["active_slot"] if "active_slot" in keys else None,
             schema_version=row["schema_version"],

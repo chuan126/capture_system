@@ -21,7 +21,7 @@ tools/                      # 标定、分析、仿真和导出工具根目录
 
 `generate_playback_test_fixture.py` 生成独立的 `CAPTURE_DATA_ROOT` 测试目录。中央 `capture.db`
 使用当前任务 schema，并写入仅供兼容 JOIN 使用的 `operation_batches` 记录；任务具有 UUID、
-`display_id`、`batch_id` 和 `batch_sequence`。每任务 `measurements.db` 使用记录器 schema v2，
+`display_id`、`batch_id` 和 `batch_sequence`。每任务 `measurements.db` 使用记录器 schema v3，
 测试来源固定为 `data_origin=test_fixture`，不会满足正式报告的数据来源条件。
 
 ```bash

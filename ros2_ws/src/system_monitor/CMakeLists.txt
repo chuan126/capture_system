@@ -8,6 +8,7 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(diagnostic_msgs REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(sensor_msgs REQUIRED)
 
 add_library(system_monitor_core src/system_monitor_core.cpp)
 target_include_directories(system_monitor_core PUBLIC
@@ -16,7 +17,7 @@ target_include_directories(system_monitor_core PUBLIC
 
 add_executable(system_monitor_node src/system_monitor_node.cpp)
 target_link_libraries(system_monitor_node system_monitor_core)
-ament_target_dependencies(system_monitor_node diagnostic_msgs rclcpp)
+ament_target_dependencies(system_monitor_node diagnostic_msgs rclcpp sensor_msgs)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   target_compile_options(system_monitor_core PRIVATE -Wall -Wextra -Wpedantic)

@@ -24,7 +24,7 @@ FastAPI 是浏览器访问 RK3588 的唯一 HTTP 和 WebSocket 入口。当前�
 | `/api/v1/tasks/{task_id}` | HTTP DELETE | 任务逻辑删除，运行中和暂停任务拒绝删除 |
 | `/api/v1/tasks/delete-selected` | HTTP POST JSON | 单事务逻辑删除所选任务，活动任务导致整批拒绝 |
 | `/api/v1/tasks/purge-data` | HTTP POST JSON | 维护接口，物理清理所选任务本地数据并保留任务索引，已逻辑删除任务也可按 UUID 清理 |
-| `/api/v1/task-control/readiness` | HTTP JSON | 任务控制桥及各控制 Service 的逐项可用性，不检查传感器真实数据 |
+| `/api/v1/task-control/readiness` | HTTP JSON | 任务控制桥、各控制 Service 及开始采集所需的雷达/RTK上线状态 |
 | `/api/v1/tasks/{task_id}/start` | HTTP POST | 冻结作业参数并调用 ROS 2 开始 Service |
 | `/api/v1/tasks/{task_id}/pause` | HTTP POST | 调用 ROS 2 暂停 Service |
 | `/api/v1/tasks/{task_id}/resume` | HTTP POST | 调用 ROS 2 继续 Service |

@@ -46,6 +46,34 @@ def _bridge(request: Request) -> TaskControlBridge | None:
     return request.app.state.task_control_bridge
 
 
+def _sensor_start_readiness(request: Request) -> tuple[bool, bool, bool, list[str], str]:
+    hub = getattr(request.app.state, "system_status_hub", None)
+    if hub is None:
+        return False, False, False, ["system_status"], "系统状态服务不可用"
+    stream = hub.current_status()
+    snapshot = hub.latest_snapshot
+    if stream.get("state") != "streaming" or snapshot is None:
+        detail = str(stream.get("detail") or "正在等待系统诊断")
+        return False, False, False, ["system_status"], detail
+
+    lidar_online = snapshot.lidar.state == "ok"
+    rtk_online = snapshot.rtk.state == "ok"
+    blockers: list[str] = []
+    if not lidar_online:
+        blockers.append("lidar")
+    if not rtk_online:
+        blockers.append("rtk")
+    if not blockers:
+        return True, True, True, [], "雷达与RTK均已上线"
+
+    names = []
+    if "lidar" in blockers:
+        names.append("雷达")
+    if "rtk" in blockers:
+        names.append("RTK")
+    return False, lidar_online, rtk_online, blockers, "、".join(names) + "未上线"
+
+
 def _command_id(value: str | None) -> str:
     normalized = (value or "").strip()
     if not normalized:
@@ -128,8 +156,9 @@ def task_control_readiness(request: Request) -> TaskControlReadinessResponse:
         )
 
     active_phase = active.operation_phase if active is not None else None
+    sensors_ready, lidar_online, rtk_online, sensor_blockers, sensor_detail = _sensor_start_readiness(request)
 
-    can_start = bool(bridge_available and services["start"] and active is None)
+    can_start = bool(bridge_available and services["start"] and active is None and sensors_ready)
     can_pause = bool(
         bridge_available
         and services["pause"]
@@ -176,12 +205,15 @@ def task_control_readiness(request: Request) -> TaskControlReadinessResponse:
     elif not services["start"]:
         readiness_state = "start_service_unavailable"
         readiness_detail = "任务控制桥已启动，开始服务不可用"
+    elif not sensors_ready:
+        readiness_state = "sensor_offline"
+        readiness_detail = f"{sensor_detail}，等待设备上线后才能开始采集"
     elif missing_services:
         readiness_state = "degraded"
         readiness_detail = f"任务控制可用；{_missing_service_detail(services)}"
     else:
         readiness_state = "ready"
-        readiness_detail = "任务控制可用。开始命令不等待雷达或RTK真实数据检查。"
+        readiness_detail = "任务控制可用，雷达与RTK均已上线"
 
     return TaskControlReadinessResponse(
         ready=can_start,
@@ -197,7 +229,10 @@ def task_control_readiness(request: Request) -> TaskControlReadinessResponse:
         can_resume=can_resume,
         can_stop=can_stop,
         can_recover=can_recover,
-        sensor_data_checked=False,
+        sensor_data_checked=True,
+        lidar_online=lidar_online,
+        rtk_online=rtk_online,
+        sensor_blockers=sensor_blockers,
     )
 
 
@@ -218,6 +253,19 @@ def start_task(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务不存在") from error
     except TaskStorageError as error:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)) from error
+    bridge = _bridge(request)
+    bridge_available, services = _service_availability(bridge)
+    if not bridge_available:
+        detail = (bridge.error if bridge is not None else None) or "任务控制ROS桥未启动"
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=detail)
+    if not services["start"]:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="开始服务不可用")
+    sensors_ready, _lidar_online, _rtk_online, _sensor_blockers, sensor_detail = _sensor_start_readiness(request)
+    if not sensors_ready:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"{sensor_detail}，无法开始采集",
+        )
     return _invoke(
         request,
         "start",

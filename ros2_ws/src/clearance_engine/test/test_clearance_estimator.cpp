@@ -117,6 +117,49 @@ TEST(ClearanceEstimatorTest, FiltersInvalidAndOutsideRoiPoints)
   EXPECT_NEAR(result.selected.min_height_m, 2.0, 0.03);
 }
 
+
+TEST(ClearanceEstimatorTest, OneRansacPlaneCanProduceMultipleConnectedRegions)
+{
+  ClearanceConfig config;
+  config.max_candidate_planes = 1;
+  config.min_inliers_absolute = 20;
+  config.min_region_span_cells = 4;
+  config.min_region_occupied_cells = 12;
+  config.region_grid_size_m = 0.03;
+
+  auto left = makePlane(2.0, 0.0, 0.0, 0.24, 0.03);
+  auto right = makePlane(2.0, 0.0, 0.0, 0.24, 0.03);
+  for (auto & point : left) point.east -= 0.8F;
+  for (auto & point : right) point.east += 0.8F;
+  std::vector<Point3f> points;
+  append(points, left);
+  append(points, right);
+
+  ClearanceEstimator estimator(config);
+  const auto result = estimator.estimate(points);
+
+  ASSERT_TRUE(result.valid) << result.invalid_reason;
+  EXPECT_EQ(config.max_candidate_planes, 1);
+  EXPECT_GE(result.candidates.size(), 2U);
+}
+
+TEST(ClearanceEstimatorTest, OccupiedAreaMatchesGridCoverageDefinition)
+{
+  ClearanceConfig config;
+  config.region_grid_size_m = 0.02;
+  config.min_region_span_cells = 4;
+  config.min_region_occupied_cells = 12;
+  ClearanceEstimator estimator(config);
+  const auto result = estimator.estimate(makePlane(2.0, 0.0, 0.0, 0.3, 0.02));
+
+  ASSERT_TRUE(result.valid) << result.invalid_reason;
+  EXPECT_NEAR(
+    result.selected.occupied_area_m2,
+    static_cast<double>(result.selected.occupied_cell_count) *
+      config.region_grid_size_m * config.region_grid_size_m,
+    1e-12);
+}
+
 TEST(ClearanceEstimatorTest, RejectsInvalidConfiguration)
 {
   ClearanceConfig config;

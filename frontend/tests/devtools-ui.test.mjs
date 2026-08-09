@@ -96,3 +96,16 @@ test("lidar raw-cloud recording history exposes safe deletion", () => {
   assert.match(api, /DELETE/);
   assert.match(api, /\/api\/dev\/recordings\/\$\{encodeURIComponent\(recordingId\)\}/);
 });
+
+
+test("clearance diagnostics use region and grid-coverage semantics", () => {
+  assert.match(workspace, /合格连通区域/);
+  assert.match(workspace, /网格覆盖面积/);
+  assert.match(workspace, /一个模型可拆分为多个连通区域/);
+  const parsed = JSON.parse(bindings).parameters;
+  const maxPlanes = parsed.find((item) => item.parameter === "ransac.max_candidate_planes");
+  const minInliers = parsed.find((item) => item.parameter === "ransac.min_inliers_absolute");
+  assert.equal(maxPlanes.label, "最大RANSAC平面数");
+  assert.match(maxPlanes.note, /不等于合格连通区域数/);
+  assert.equal(minInliers.minimum, 3);
+});

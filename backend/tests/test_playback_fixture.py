@@ -26,7 +26,7 @@ def test_playback_fixture_matches_current_task_and_measurement_schemas(tmp_path:
 
     completed = next(task for task in tasks if task.task_id == TASK_COMPLETED)
     history = MeasurementRepository(data_root / "tasks").load_history(completed)
-    assert history.recording_schema_version == 2
+    assert history.recording_schema_version == 3
     assert history.data_origin == "test_fixture"
     assert history.complete is True
     assert history.statistics.total_samples == 1500
@@ -35,3 +35,7 @@ def test_playback_fixture_matches_current_task_and_measurement_schemas(tmp_path:
         sample_columns = {row[1] for row in connection.execute("PRAGMA table_info(clearance_samples)")}
         assert {"source_sequence", "source_age_ms", "is_repeated", "repeat_index"}.issubset(sample_columns)
         assert connection.execute("SELECT COUNT(*) FROM clearance_source_frames").fetchone()[0] == 1500
+        raw_height, recorded_height = connection.execute(
+            "SELECT lidar_to_top_m, clearance_height_m FROM clearance_samples WHERE valid=1 LIMIT 1"
+        ).fetchone()
+        assert round(recorded_height - raw_height, 6) == 2.30
