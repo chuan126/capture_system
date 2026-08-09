@@ -236,3 +236,96 @@ def test_pdf_summary_generation_and_download(tmp_path: Path) -> None:
     assert download_response.content.startswith(b"%PDF-")
     assert len(download_response.content) > 1000
     assert download_response.headers["content-type"] == "application/pdf"
+
+
+def test_report_exports_accept_nanosecond_iso_timestamps(tmp_path: Path) -> None:
+    assert PDF_FONT.is_file(), "测试环境缺少 PDF 中文字体"
+    static_dir = tmp_path / "site"
+    make_static_site(static_dir)
+    data_root = tmp_path / "runtime"
+
+    with TestClient(
+        create_app(
+            static_dir,
+            data_root=data_root,
+            pdf_font_path=PDF_FONT,
+            start_ros_bridge=False,
+        )
+    ) as client:
+        task = client.post(
+            "/api/v1/tasks",
+            json={"tunnel_code": "NS-001", "tunnel_name": "纳秒时间戳测试隧道"},
+        ).json()
+        attach_measurements(data_root, task)
+        measurement_path = data_root / "tasks" / str(task["task_id"]) / "measurements.db"
+        with sqlite3.connect(measurement_path) as connection:
+            connection.execute(
+                """
+                UPDATE recording_metadata
+                SET started_at = ?, ended_at = ?
+                WHERE id = 1
+                """,
+                (
+                    "2026-08-08T08:16:54.074757037+00:00",
+                    "2026-08-08T08:16:54.134757037+00:00",
+                ),
+            )
+
+        txt_response = client.post(f"/api/v1/tasks/{task['task_id']}/exports/txt")
+        txt_download = client.get(txt_response.json()["download_url"])
+        pdf_response = client.post(
+            "/api/v1/reports/clearance-summary",
+            json={"task_ids": [task["task_id"]]},
+        )
+
+    assert txt_response.status_code == 200
+    assert txt_download.status_code == 200
+    txt = txt_download.content.decode("utf-8-sig")
+    assert "2026-08-08T16:16:54.074+08:00" in txt
+    assert "2026-08-08T16:16:54.134+08:00" in txt
+    assert pdf_response.status_code == 200
+
+
+def test_report_preview_and_pdf_use_task_creation_order(tmp_path: Path) -> None:
+    assert PDF_FONT.is_file(), "测试环境缺少 PDF 中文字体"
+    static_dir = tmp_path / "site"
+    make_static_site(static_dir)
+    data_root = tmp_path / "runtime"
+
+    with TestClient(
+        create_app(
+            static_dir,
+            data_root=data_root,
+            pdf_font_path=PDF_FONT,
+            start_ros_bridge=False,
+        )
+    ) as client:
+        created = []
+        for index in range(3):
+            task = client.post(
+                "/api/v1/tasks",
+                json={"tunnel_code": f"ORDER-{index + 1}", "tunnel_name": f"顺序测试{index + 1}"},
+            ).json()
+            attach_measurements(data_root, task)
+            created.append(task)
+
+        reversed_ids = [task["task_id"] for task in reversed(created)]
+        preview_response = client.post(
+            "/api/v1/reports/clearance-summary/preview",
+            json={"task_ids": reversed_ids},
+        )
+        pdf_response = client.post(
+            "/api/v1/reports/clearance-summary",
+            json={"task_ids": reversed_ids},
+        )
+
+    assert preview_response.status_code == 200
+    preview_ids = [item["task_id"] for item in preview_response.json()["tasks"]]
+    assert preview_ids == [task["task_id"] for task in created]
+    assert pdf_response.status_code == 200
+    report_id = pdf_response.json()["report_id"]
+    manifest = __import__("json").loads(
+        (data_root / "reports" / report_id / "manifest.json").read_text(encoding="utf-8")
+    )
+    assert manifest["task_ids"] == [task["task_id"] for task in created]
+    assert manifest["task_display_ids"] == [task["display_id"] for task in created]

@@ -806,6 +806,10 @@ th { color: #7f8b9e; background: #fafbfd; font-weight: 600; white-space: nowrap;
 .health-kpi-card--primary > strong { color: #185f92; }
 .health-kpi-card--placeholder { border-style: dashed; background: rgba(250,251,253,.76); }
 .health-kpi-card--placeholder > strong { color: #a2adbb; }
+.health-kpi-card--anomaly { background: rgba(250,251,253,.76); }
+.health-kpi-card--anomaly > strong { color: #a2adbb; }
+.health-kpi-card--alert > strong,
+.health-kpi-card--alert > strong small { color: #c53030; }
 .health-kpi-card--coordinate { border-color: #dce7f7; background: linear-gradient(135deg, #fff 0%, #f7faff 100%); }
 .health-kpi-card > .health-kpi-coordinate {
   display: grid;

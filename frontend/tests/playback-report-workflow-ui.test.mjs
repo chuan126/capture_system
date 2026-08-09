@@ -128,6 +128,7 @@ test("report removes task-name fields and aggregates only user-selected tasks", 
   assert.match(report, /隧道入口 RTK/);
   assert.match(report, /隧道出口 RTK/);
   assert.match(report, /checkedTaskIds=\{checked\}/);
+  assert.match(report, /heading="选择导出任务" sortOrder="asc"/);
   assert.match(report, /generateSummaryPdf\(selectedIds\)/);
   assert.doesNotMatch(report, /任务名称|taskName|batchId|selectedBatch/);
 });

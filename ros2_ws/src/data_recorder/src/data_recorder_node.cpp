@@ -382,7 +382,10 @@ private:
       return;
     }
     if (request->task_id.empty() || (request->lane != "left" && request->lane != "right") ||
-      request->lidar_mount_height_m <= 0.0 || request->clearance_threshold_m <= 0.0)
+      !std::isfinite(request->lidar_mount_height_m) ||
+      !std::isfinite(request->clearance_threshold_m) ||
+      request->lidar_mount_height_m < 0.0 || request->lidar_mount_height_m > 20.0 ||
+      request->clearance_threshold_m < 0.0 || request->clearance_threshold_m > 20.0)
     {
       reject_prepare(*response, "invalid_parameters", "任务记录参数无效");
       return;
@@ -669,8 +672,12 @@ private:
       check_sqlite(sqlite3_bind_int64(statement, 3, recorded_ns), database_, "绑定记录时间失败");
       check_sqlite(sqlite3_bind_double(statement, 4, elapsed_ms), database_, "绑定相对时间失败");
       bind_nullable_double(statement, 5, value);
-      // 当前阶段不改变净空定义，前端曲线字段沿用算法直接输出。
-      bind_nullable_double(statement, 6, value);
+      std::optional<double> clearance_height;
+      if (value.has_value()) {
+        clearance_height = *value + lidar_mount_height_m_;
+      }
+      // 保留 lidar_to_top_m 作为算法原始输出，正式净空高度记录安装高度修正后的值。
+      bind_nullable_double(statement, 6, clearance_height);
       check_sqlite(sqlite3_bind_int(statement, 7, valid ? 1 : 0), database_, "绑定有效标志失败");
       bind_nullable_text(statement, 8, invalid_reason);
       bind_nullable_double(statement, 9, quality);
@@ -824,7 +831,7 @@ private:
         "id, schema_version, task_id, data_origin, lane, started_at, ended_at, complete, "
         "nominal_sample_rate_hz, algorithm_version, config_version, software_version, "
         "lidar_mount_height_m, clearance_threshold_m, entry_rtk_status, exit_rtk_status) "
-        "VALUES (1, 2, ?, 'recorded', ?, ?, NULL, 0, ?, ?, ?, ?, ?, ?, 'pending', 'not_requested')",
+        "VALUES (1, 3, ?, 'recorded', ?, ?, NULL, 0, ?, ?, ?, ?, ?, ?, 'pending', 'not_requested')",
         -1, &statement, nullptr),
       database_, "准备任务元数据写入失败");
     bind_text(statement, 1, task_id_);

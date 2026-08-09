@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <ctime>
 #include <functional>
@@ -456,7 +457,10 @@ private:
   {
     if (request.task_id.empty() || request.command_id.empty() ||
       (request.lane != "left" && request.lane != "right") ||
-      request.lidar_mount_height_m <= 0.0 || request.clearance_threshold_m <= 0.0)
+      !std::isfinite(request.lidar_mount_height_m) ||
+      !std::isfinite(request.clearance_threshold_m) ||
+      request.lidar_mount_height_m < 0.0 || request.lidar_mount_height_m > 20.0 ||
+      request.clearance_threshold_m < 0.0 || request.clearance_threshold_m > 20.0)
     {
       return reject_without_task("invalid_parameters", "开始参数无效");
     }

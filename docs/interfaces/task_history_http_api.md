@@ -97,7 +97,7 @@ CAPTURE_DATA_ROOT/
         └── measurements.db
 ```
 
-当前读取格式兼容版本 1 和版本 2。设备端记录器生成版本 2。
+当前读取格式兼容版本 1、2 和 3。设备端记录器生成版本 3。
 
 | 表 | 内容 |
 | --- | --- |
@@ -111,8 +111,8 @@ CAPTURE_DATA_ROOT/
 | `recording_counters` | 样本和写入错误计数 |
 
 `data_origin` 取值为 `recorded` 或 `test_fixture`。前端必须明确显示测试数据，不得将其作为正式
-测量结果。版本 2 的每条 50 Hz 样本包含 `source_sequence`、`source_age_ms`、`is_repeated` 和
-`repeat_index`。没有源帧或源帧超时的记录保持无效和空高度。重复记录不能解释为 50 Hz 独立
+测量结果。版本 2 和版本 3 的每条 50 Hz 样本包含 `source_sequence`、`source_age_ms`、`is_repeated` 和
+`repeat_index`。版本 3 中 `lidar_to_top_m` 保留算法原始输出，`clearance_height_m` 保存 `lidar_to_top_m + 雷达安装高度`。没有源帧或源帧超时的记录保持无效和空高度。重复记录不能解释为 50 Hz 独立
 算法源帧。
 
 ## 7. 当前限制

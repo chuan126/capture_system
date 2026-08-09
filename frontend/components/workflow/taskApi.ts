@@ -10,7 +10,8 @@ type TaskApiResponse = {
   stop_requested_at: string | null; completed_at: string | null; entry_rtk_status: RtkCaptureStatus;
   exit_rtk_status: RtkCaptureStatus; has_measurements: boolean; recording_path: string | null;
   local_data_purged_at: string | null; purged_bytes: number; last_error_code: string | null;
-  last_error_message: string | null; warning_code: string | null; schema_version: number;
+  last_error_message: string | null; warning_code: string | null; lane: "left" | "right" | null;
+  lidar_mount_height_m: number | null; clearance_threshold_m: number | null; schema_version: number;
 };
 
 const operationPhases = new Set<TaskOperationPhase>(["idle","radar_initializing","entry_rtk_capture","recorder_preparing","recording","pausing","paused","resuming","stop_requested","exit_rtk_capture","finalizing","completed","interrupted","failed"]);
@@ -22,6 +23,7 @@ const isObject=(value:unknown):value is Record<string,unknown>=>typeof value==="
 const readString=(value:unknown,field:string)=>{if(typeof value!=="string")throw new TaskApiError(`任务接口字段 ${field} 无效`);return value;};
 const readNullableString=(value:unknown,field:string)=>value===null?null:readString(value,field);
 const readNumber=(value:unknown,field:string)=>{if(typeof value!=="number"||!Number.isFinite(value))throw new TaskApiError(`任务接口字段 ${field} 无效`);return value;};
+const readNullableNumber=(value:unknown,field:string)=>value===null||value===undefined?null:readNumber(value,field);
 
 const parseTask=(value:unknown):CollectionTask=>{
   if(!isObject(value))throw new TaskApiError("任务接口返回了无效对象");
@@ -32,7 +34,10 @@ const parseTask=(value:unknown):CollectionTask=>{
   if(typeof value.has_measurements!=="boolean")throw new TaskApiError("任务接口字段 has_measurements 无效");
   return {
     taskId:readString(value.task_id,"task_id"), displayId:readString(value.display_id,"display_id"), tunnelCode:readString(value.tunnel_code,"tunnel_code"), tunnelName:readString(value.tunnel_name,"tunnel_name"),
-    status:statusLabels[status], operationPhase, statusRevision:readNumber(value.status_revision,"status_revision"), lane:null,
+    status:statusLabels[status], operationPhase, statusRevision:readNumber(value.status_revision,"status_revision"),
+    lane:value.lane === "left" ? "左车道" : value.lane === "right" ? "右车道" : null,
+    lidarMountHeightM:readNullableNumber(value.lidar_mount_height_m,"lidar_mount_height_m"),
+    clearanceThresholdM:readNullableNumber(value.clearance_threshold_m,"clearance_threshold_m"),
     createdAt:readString(value.created_at,"created_at"), updatedAt:readString(value.updated_at,"updated_at"), startRequestedAt:readNullableString(value.start_requested_at,"start_requested_at"), startedAt:readNullableString(value.started_at,"started_at"), stopRequestedAt:readNullableString(value.stop_requested_at,"stop_requested_at"), completedAt:readNullableString(value.completed_at,"completed_at"),
     entryRtkStatus, exitRtkStatus, hasMeasurements:value.has_measurements, recordingPath:readNullableString(value.recording_path,"recording_path"), localDataPurgedAt:readNullableString(value.local_data_purged_at,"local_data_purged_at"), purgedBytes:readNumber(value.purged_bytes,"purged_bytes"), lastErrorCode:readNullableString(value.last_error_code,"last_error_code"), lastErrorMessage:readNullableString(value.last_error_message,"last_error_message"), warningCode:readNullableString(value.warning_code,"warning_code"), schemaVersion:readNumber(value.schema_version,"schema_version"),
   };

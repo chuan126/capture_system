@@ -194,3 +194,37 @@ def test_schema_v2_history_and_txt_preserve_repeated_source_provenance(tmp_path:
     assert "重复序号" in text
     assert "source_timeout" in text
     assert "\t10\t25.000\t是\t1" in text
+
+
+def test_measurement_reader_accepts_v3_mount_adjusted_clearance(tmp_path: Path) -> None:
+    static_dir = tmp_path / "site-v3"
+    make_static_site(static_dir)
+    data_root = tmp_path / "runtime-v3"
+
+    with TestClient(create_app(static_dir, data_root=data_root, start_ros_bridge=False)) as client:
+        task = client.post(
+            "/api/v1/tasks",
+            json={"tunnel_code": "V3-001", "tunnel_name": "安装高度修正测试"},
+        ).json()
+        relative_path = f"{task['task_id']}/measurements.db"
+        path = data_root / "tasks" / relative_path
+        create_v2_recording(path, task["task_id"])
+        with sqlite3.connect(path) as connection:
+            connection.execute("UPDATE recording_metadata SET schema_version=3 WHERE id=1")
+            connection.execute(
+                "UPDATE clearance_samples SET clearance_height_m=lidar_to_top_m+1.86 "
+                "WHERE valid=1 AND lidar_to_top_m IS NOT NULL"
+            )
+        with sqlite3.connect(data_root / "capture.db") as connection:
+            connection.execute(
+                "UPDATE tasks SET status='completed', has_measurements=1, recording_path=? WHERE task_id=?",
+                (relative_path, task["task_id"]),
+            )
+        response = client.get(f"/api/v1/tasks/{task['task_id']}/measurements")
+
+    assert response.status_code == 200
+    history = response.json()
+    assert history["recording_schema_version"] == 3
+    assert history["samples"][0]["lidar_to_top_m"] == 2.90
+    assert history["samples"][0]["height_m"] == 4.76
+    assert history["statistics"]["minimum_height_m"] == 4.74

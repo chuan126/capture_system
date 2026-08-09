@@ -102,6 +102,7 @@ class ReportExportService:
                 continue
             seen.add(task_id)
             assessments.append(self.assess_task(self.task_repository.get_task(task_id)))
+        assessments.sort(key=lambda item: (item.task.global_sequence, item.task.display_id))
         return assessments
 
     def assess_task(self, task: TaskRecord) -> TaskExportAssessment:
@@ -163,7 +164,7 @@ class ReportExportService:
                 temporary.flush()
                 os.fsync(temporary.fileno())
             os.replace(temporary_path, destination)
-        except (OSError, csv.Error, MeasurementStorageError) as error:
+        except (OSError, csv.Error, MeasurementStorageError, ValueError) as error:
             if temporary_path is not None:
                 temporary_path.unlink(missing_ok=True)
             raise ExportStorageError(f"生成 TXT 失败：{error}") from error
@@ -526,6 +527,9 @@ def _format_number(value: float | None, digits: int) -> str:
 
 def _parse_datetime(value: str) -> datetime:
     normalized = value[:-1] + "+00:00" if value.endswith("Z") else value
+    # ROS 2/C++ timestamps can contain nanosecond precision. Python datetime stores
+    # microseconds, so retain the first six fractional digits for report display.
+    normalized = re.sub(r"(\.\d{6})\d+(?=(?:[+-]\d{2}:\d{2})?$)", r"\1", normalized)
     parsed = datetime.fromisoformat(normalized)
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)

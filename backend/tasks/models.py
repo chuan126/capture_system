@@ -102,8 +102,8 @@ class TaskStartRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     lane: TaskLane
-    lidar_mount_height_m: float = Field(gt=0.0, le=20.0)
-    clearance_threshold_m: float = Field(gt=0.0, le=20.0)
+    lidar_mount_height_m: float = Field(ge=0.0, le=20.0)
+    clearance_threshold_m: float = Field(ge=0.0, le=20.0)
     expected_revision: int = Field(ge=0)
 
 
@@ -172,6 +172,9 @@ class TaskResponse(BaseModel):
     last_error_code: str | None
     last_error_message: str | None
     warning_code: str | None
+    lane: TaskLane | None = None
+    lidar_mount_height_m: float | None = None
+    clearance_threshold_m: float | None = None
     schema_version: int
     deleted_at: datetime | None
     delete_reason: str | None

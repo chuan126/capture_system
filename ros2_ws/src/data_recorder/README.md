@@ -13,4 +13,4 @@
 - RTK缺失只标记为 `unconfirmed`，不会阻塞任务
 - 正式文件先写入 `measurements.db.tmp`，正常或异常收尾后重命名为 `measurements.db`
 
-当前 `clearance_height_m` 沿用净空算法直接输出值，本节点不改变净空高度定义。
+记录器保留 `lidar_to_top_m` 作为净空算法原始输出，并将正式字段 `clearance_height_m` 写为 `lidar_to_top_m + lidar_mount_height_m`。算法 Topic 和源帧表不改写。新记录格式为 schema version 3，后端继续兼容历史 version 1 和 version 2。

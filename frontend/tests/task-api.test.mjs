@@ -65,6 +65,8 @@ test("loads persisted time-numbered tasks from the FastAPI HTTP endpoint", async
       operationPhase: "idle",
       statusRevision: 0,
       lane: null,
+      lidarMountHeightM: null,
+      clearanceThresholdM: null,
       createdAt: apiTask.created_at,
       updatedAt: apiTask.updated_at,
       startRequestedAt: null,
@@ -174,6 +176,24 @@ test("deletes tasks through the FastAPI HTTP endpoint", async () => {
     assert.equal(capturedInput, `/api/v1/tasks/${apiTask.task_id}`);
     assert.equal(capturedInit.method, "DELETE");
     assert.doesNotMatch(String(capturedInput), /ros|rclpy|service|action/i);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("parses frozen zero-valued task parameters for active-task restoration", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => jsonResponse([{
+    ...apiTask,
+    lane: "right",
+    lidar_mount_height_m: 0,
+    clearance_threshold_m: 0,
+  }]);
+  try {
+    const [task] = await listTasks();
+    assert.equal(task.lane, "右车道");
+    assert.equal(task.lidarMountHeightM, 0);
+    assert.equal(task.clearanceThresholdM, 0);
   } finally {
     globalThis.fetch = originalFetch;
   }

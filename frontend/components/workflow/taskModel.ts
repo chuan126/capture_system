@@ -25,6 +25,8 @@ export type CollectionTask = {
   operationPhase: TaskOperationPhase;
   statusRevision: number;
   lane: CollectionTaskLane | null;
+  lidarMountHeightM: number | null;
+  clearanceThresholdM: number | null;
   createdAt: string;
   updatedAt: string;
   startRequestedAt: string | null;

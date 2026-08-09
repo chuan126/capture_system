@@ -112,7 +112,7 @@ class MeasurementHistoryRecord:
     samples: list[ClearanceHistorySampleRecord]
 
 
-_SUPPORTED_SCHEMA_VERSIONS = {1, 2}
+_SUPPORTED_SCHEMA_VERSIONS = {1, 2, 3}
 _MAX_HISTORY_SAMPLES = 500_000
 
 

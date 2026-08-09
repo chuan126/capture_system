@@ -17,17 +17,28 @@ test("system overview uses the revised labels and removes diagnostic helper copy
   assert.doesNotMatch(page, /<p>\{systemStatus\.detail\}<\/p>/);
 });
 
-test("system overview contains clearance, current RTK coordinate and one reserved metric", () => {
+test("system overview contains clearance, current RTK coordinate and latest abnormal height", () => {
   assert.match(page, /health-kpi-grid/);
   assert.match(page, />净空高度</);
   assert.match(page, /\{currentHeightText\}<small>m<\/small>/);
+  assert.match(page, /displayedClearanceHeightM = clearanceValid && mountHeightValid/);
+  assert.match(page, /clearanceSnapshot\.lidar_to_top_m! \+ parsedMountHeight/);
   assert.match(page, />当前坐标</);
   assert.match(page, /\{longitudeText\}/);
   assert.match(page, /\{latitudeText\}/);
-  assert.match(page, />预留指标二</);
-  assert.doesNotMatch(page, />预留指标一</);
+  assert.match(page, />异常高度</);
+  assert.doesNotMatch(page, />预留指标二|>预留指标一</);
+  assert.match(page, /latestAbnormalHeightM\.toFixed\(3\)/);
+  assert.match(page, /displayedClearanceHeightM < parsedHeightThreshold/);
+  assert.match(css, /health-kpi-card--alert[\s\S]*#c53030/);
   assert.match(css, /health-kpi-grid[\s\S]*grid-template-columns:\s*repeat\(3/);
   assert.match(css, /health-kpi-card--coordinate/);
+});
+
+test("top clearance summary adds mount height while live source protocol remains raw", () => {
+  assert.match(page, /displayedClearanceHeightM = clearanceValid && mountHeightValid/);
+  assert.match(page, /clearanceSnapshot\.lidar_to_top_m! \+ parsedMountHeight/);
+  assert.match(page, /const heightM = snapshot\.valid && snapshot\.lidar_to_top_m !== null[\s\S]*?\? snapshot\.lidar_to_top_m[\s\S]*?: null/);
 });
 
 test("current coordinate requires a valid streaming RTK fix", () => {
@@ -86,6 +97,9 @@ test("height threshold, mount height and lane are shared task-card settings", ()
   assert.doesNotMatch(taskDialog, />高度阈值/);
   assert.doesNotMatch(taskDialog, />雷达安装高度/);
   assert.doesNotMatch(taskDialog, />作业车道/);
+  assert.match(page, /useState\("0\.00"\)/);
+  assert.match(taskCard, /min="0"/);
+  assert.match(taskCard, /max="20"/);
 });
 
 test("task creation uses creation-time identifiers and only asks for tunnel fields", () => {
@@ -107,6 +121,17 @@ test("task creation uses creation-time identifiers and only asks for tunnel fiel
   assert.match(page, /task\.displayId/);
   assert.doesNotMatch(page, /createTaskId|nextTaskSequence|formatTaskSequence/);
   assert.doesNotMatch(taskDialog, /startingSequence|row\.mountHeight|row\.lane/);
+});
+
+
+test("dashboard defaults task execution to the earliest pending task and preserves manual pending selection", () => {
+  assert.match(page, /const firstPendingTask = tasks\.find\(\(task\) => task\.status === "待执行"\) \?\? null/);
+  assert.match(page, /currentTask = activeTask \?\? selectedPendingTask \?\? firstPendingTask \?\? selectedTask \?\? null/);
+  assert.match(page, /selectedExecutableTask = tasks\.find/);
+  assert.match(page, /preferredTaskId = selectedExecutableTask\?\.taskId \?\? firstPendingTask\?\.taskId \?\? null/);
+  assert.match(page, /setSelectedTaskId\(preferredTaskId \?\? created\.taskId\)/);
+  assert.match(page, /persistedTasks\.find\(\(task\) => task\.status === "待执行"\)\?\.taskId/);
+  assert.match(page, /pendingTasks = tasks[\s\S]*?sort\(\(left, right\) => left\.createdAt\.localeCompare\(right\.createdAt\)\)/);
 });
 
 test("task card follows parameters, current task, pending tasks and controls order", () => {
@@ -152,7 +177,8 @@ test("task actions use a dominant start control and outlined secondary controls"
 });
 
 test("task start validates the shared numeric settings", () => {
-  assert.match(page, /const mountHeightValid/);
+  assert.match(page, /parsedMountHeight >= 0 && parsedMountHeight <= 20/);
+  assert.match(page, /parsedHeightThreshold >= 0 && parsedHeightThreshold <= 20/);
   assert.match(page, /!heightThresholdValid \|\|[\s\S]*!mountHeightValid/);
   assert.match(page, /请输入有效的雷达安装高度/);
   assert.match(page, /startTaskControl\(currentTask\.taskId/);
@@ -160,6 +186,16 @@ test("task start validates the shared numeric settings", () => {
   assert.match(page, /clearanceThresholdM: parsedHeightThreshold/);
   assert.doesNotMatch(page, /status: "采集中", lane: operationLane/);
   assert.doesNotMatch(page, /!captureReady/);
+});
+
+test("abnormal height keeps the latest below-threshold displayed clearance without changing layout", () => {
+  assert.match(page, /const \[latestAbnormalHeightM, setLatestAbnormalHeightM\] = useState<number \| null>\(null\)/);
+  assert.match(page, /currentTask\?\.status !== "采集中"/);
+  assert.match(page, /currentTask\.operationPhase !== "recording"/);
+  assert.match(page, /setLatestAbnormalHeightM\(displayedClearanceHeightM\)/);
+  assert.match(page, /setLatestAbnormalHeightM\(null\)/);
+  assert.match(page, /health-kpi-card--anomaly\$\{latestAbnormalHeightM !== null \? " health-kpi-card--alert"/);
+  assert.match(css, /\.health-kpi-grid[\s\S]*grid-template-columns:\s*repeat\(3/);
 });
 
 test("task card omits progress and measurement sections", () => {

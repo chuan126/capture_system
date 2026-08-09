@@ -383,3 +383,34 @@ def test_purge_task_data_removes_files_but_keeps_task_index(tmp_path: Path) -> N
     assert payload["has_measurements"] is False
     assert payload["recording_path"] is None
     assert payload["local_data_purged_at"] is not None
+
+
+
+def test_task_api_returns_frozen_start_parameters_including_zero(tmp_path: Path) -> None:
+    import sqlite3
+
+    static_dir = tmp_path / "site-params"
+    make_static_site(static_dir)
+    data_root = tmp_path / "runtime-params"
+    with TestClient(create_app(static_dir, data_root=data_root, start_ros_bridge=False)) as client:
+        task = client.post(
+            "/api/v1/tasks",
+            json={"tunnel_code": "T-PARAM", "tunnel_name": "冻结参数测试"},
+        ).json()
+        with sqlite3.connect(data_root / "capture.db") as connection:
+            connection.execute(
+                """
+                INSERT INTO task_parameters (
+                    task_id, lane, lidar_mount_height_m, clearance_threshold_m,
+                    captured_at, parameter_schema_version
+                ) VALUES (?, 'left', 0.0, 0.0, '2026-08-09T00:00:00Z', 1)
+                """,
+                (task["task_id"],),
+            )
+        response = client.get(f"/api/v1/tasks/{task['task_id']}")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["lane"] == "left"
+    assert payload["lidar_mount_height_m"] == 0.0
+    assert payload["clearance_threshold_m"] == 0.0

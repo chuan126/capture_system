@@ -364,3 +364,45 @@ def test_missing_stop_service_only_disables_stop(tmp_path: Path) -> None:
     assert readiness["services"]["pause"] is True
     assert readiness["services"]["stop"] is False
     assert "停止服务不可用" in readiness["detail"]
+
+
+
+def test_task_start_accepts_zero_mount_height_and_zero_threshold(tmp_path: Path) -> None:
+    static_dir = tmp_path / "site-zero"
+    make_static_site(static_dir)
+    created_bridges: list[FakeTaskControlBridge] = []
+
+    def task_bridge_factory(sink):
+        bridge = FakeTaskControlBridge(sink)
+        created_bridges.append(bridge)
+        return bridge
+
+    application = create_app(
+        static_dir,
+        data_root=tmp_path / "runtime-zero",
+        start_ros_bridge=True,
+        bridge_factory=DummyBridge,
+        rtk_bridge_factory=DummyBridge,
+        system_status_bridge_factory=DummyBridge,
+        clearance_bridge_factory=DummyBridge,
+        task_control_bridge_factory=task_bridge_factory,
+    )
+    with TestClient(application) as client:
+        task = client.post(
+            "/api/v1/tasks",
+            json={"tunnel_code": "T-ZERO", "tunnel_name": "零参数测试"},
+        ).json()
+        response = client.post(
+            f"/api/v1/tasks/{task['task_id']}/start",
+            headers={"Idempotency-Key": "start-zero-001"},
+            json={
+                "lane": "right",
+                "lidar_mount_height_m": 0.0,
+                "clearance_threshold_m": 0.0,
+                "expected_revision": 0,
+            },
+        )
+
+    assert response.status_code == 202
+    assert created_bridges[0].calls[-1][1]["lidar_mount_height_m"] == 0.0
+    assert created_bridges[0].calls[-1][1]["clearance_threshold_m"] == 0.0
