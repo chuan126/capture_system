@@ -37,6 +37,29 @@ class RtkSnapshot:
     latitude: float | None = None
     longitude: float | None = None
     altitude: float | None = None
+    localization_stamp_ns: int | None = None
+    localization_valid: bool | None = None
+    localization_mode: int | None = None
+    localization_heading_source: int | None = None
+    localization_latitude: float | None = None
+    localization_longitude: float | None = None
+    localization_altitude: float | None = None
+    localization_heading_deg: float | None = None
+    localization_heading_alignment_valid: bool | None = None
+    localization_delta_yaw_deg: float | None = None
+    localization_scale_calibration_enabled: bool | None = None
+    localization_scale_valid: bool | None = None
+    localization_horizontal_scale: float | None = None
+    localization_vertical_scale: float | None = None
+    localization_scale_baseline_m: float | None = None
+    localization_heading_baseline_m: float | None = None
+    localization_distance_from_anchor_m: float | None = None
+    localization_dr_duration_s: float | None = None
+    localization_rtk_age_s: float | None = None
+    localization_odometry_age_s: float | None = None
+    localization_imu_age_s: float | None = None
+    localization_position_difference_to_rtk_m: float | None = None
+    localization_invalid_reason: str | None = None
 
     def to_message(self) -> dict[str, Any]:
         return {"type": "rtk_snapshot", **asdict(self)}
@@ -69,6 +92,43 @@ def with_fix(snapshot: RtkSnapshot, message: object) -> RtkSnapshot:
         latitude=float(getattr(message, "latitude")),
         longitude=float(getattr(message, "longitude")),
         altitude=float(getattr(message, "altitude")),
+    )
+
+
+def with_localization_status(snapshot: RtkSnapshot, message: object) -> RtkSnapshot:
+    return replace(
+        snapshot,
+        localization_stamp_ns=_stamp_to_nanoseconds(message),
+        localization_valid=bool(getattr(message, "valid")),
+        localization_mode=int(getattr(message, "mode")),
+        localization_heading_source=int(getattr(message, "heading_source")),
+        localization_latitude=float(getattr(message, "latitude")),
+        localization_longitude=float(getattr(message, "longitude")),
+        localization_altitude=float(getattr(message, "altitude")),
+        localization_heading_deg=float(getattr(message, "heading_deg")),
+        localization_heading_alignment_valid=bool(
+            getattr(message, "heading_alignment_valid")
+        ),
+        localization_delta_yaw_deg=float(getattr(message, "delta_yaw_deg")),
+        localization_scale_calibration_enabled=bool(
+            getattr(message, "scale_calibration_enabled")
+        ),
+        localization_scale_valid=bool(getattr(message, "scale_valid")),
+        localization_horizontal_scale=float(getattr(message, "horizontal_scale")),
+        localization_vertical_scale=float(getattr(message, "vertical_scale")),
+        localization_scale_baseline_m=float(getattr(message, "scale_baseline_m")),
+        localization_heading_baseline_m=float(getattr(message, "heading_baseline_m")),
+        localization_distance_from_anchor_m=float(
+            getattr(message, "distance_from_anchor_m")
+        ),
+        localization_dr_duration_s=float(getattr(message, "dr_duration_s")),
+        localization_rtk_age_s=float(getattr(message, "rtk_age_s")),
+        localization_odometry_age_s=float(getattr(message, "odometry_age_s")),
+        localization_imu_age_s=float(getattr(message, "imu_age_s")),
+        localization_position_difference_to_rtk_m=float(
+            getattr(message, "position_difference_to_rtk_m")
+        ),
+        localization_invalid_reason=str(getattr(message, "invalid_reason")),
     )
 
 

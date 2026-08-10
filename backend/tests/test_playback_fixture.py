@@ -26,7 +26,7 @@ def test_playback_fixture_matches_current_task_and_measurement_schemas(tmp_path:
 
     completed = next(task for task in tasks if task.task_id == TASK_COMPLETED)
     history = MeasurementRepository(data_root / "tasks").load_history(completed)
-    assert history.recording_schema_version == 5
+    assert history.recording_schema_version == 6
     assert history.data_origin == "test_fixture"
     assert history.travel_direction == "up"
     assert history.lane_side == "left"
@@ -35,7 +35,13 @@ def test_playback_fixture_matches_current_task_and_measurement_schemas(tmp_path:
 
     with sqlite3.connect(data_root / "tasks" / TASK_COMPLETED / "measurements.db") as connection:
         sample_columns = {row[1] for row in connection.execute("PRAGMA table_info(clearance_samples)")}
+        localization_status_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(localization_status_samples)")
+        }
         assert {"source_sequence", "source_age_ms", "is_repeated", "repeat_index"}.issubset(sample_columns)
+        assert {"mode", "heading_source", "distance_from_anchor_m", "dr_duration_s"}.issubset(
+            localization_status_columns
+        )
         assert connection.execute("SELECT COUNT(*) FROM clearance_source_frames").fetchone()[0] == 1500
         source_columns = {row[1] for row in connection.execute("PRAGMA table_info(clearance_source_frames)")}
         assert {

@@ -4,6 +4,9 @@ data_recorder_node:
     clearance_topic: "/capture/clearance/result"
     rtk_fix_topic: "/capture/rtk/fix"
     rtk_status_topic: "/capture/rtk/status"
+    localization_fix_topic: "/capture/localization/fix"
+    localization_status_topic: "/capture/localization/status"
+    localization_odometry_topic: "/capture/localization/odometry"
     sample_rate_hz: 50.0
     source_timeout_ms: 250.0
     endpoint_rtk_max_age_ms: 2000.0

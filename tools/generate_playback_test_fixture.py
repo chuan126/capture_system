@@ -32,7 +32,7 @@ def iso_utc(epoch_ns: int) -> str:
 
 
 def create_recording_schema(connection: sqlite3.Connection) -> None:
-    """建立与 data_recorder 当前 schema v5 对齐的测试数据库。"""
+    """建立与 data_recorder 当前 schema v6 对齐的测试数据库。"""
     connection.executescript(
         """
         CREATE TABLE recording_metadata (
@@ -95,6 +95,54 @@ def create_recording_schema(connection: sqlite3.Connection) -> None:
             altitude_m REAL,
             fix_type TEXT NOT NULL,
             valid INTEGER NOT NULL CHECK (valid IN (0, 1))
+        );
+        CREATE TABLE localization_fix_samples (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp_ns INTEGER NOT NULL,
+            latitude_deg REAL,
+            longitude_deg REAL,
+            altitude_m REAL,
+            fix_status INTEGER NOT NULL,
+            valid INTEGER NOT NULL CHECK (valid IN (0, 1))
+        );
+        CREATE TABLE localization_status_samples (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp_ns INTEGER NOT NULL,
+            valid INTEGER NOT NULL CHECK (valid IN (0, 1)),
+            mode INTEGER NOT NULL,
+            heading_source INTEGER NOT NULL,
+            latitude_deg REAL NOT NULL,
+            longitude_deg REAL NOT NULL,
+            altitude_m REAL NOT NULL,
+            heading_deg REAL NOT NULL,
+            heading_alignment_valid INTEGER NOT NULL CHECK (heading_alignment_valid IN (0, 1)),
+            delta_yaw_deg REAL NOT NULL,
+            scale_calibration_enabled INTEGER NOT NULL CHECK (scale_calibration_enabled IN (0, 1)),
+            scale_valid INTEGER NOT NULL CHECK (scale_valid IN (0, 1)),
+            horizontal_scale REAL NOT NULL,
+            vertical_scale REAL NOT NULL,
+            scale_baseline_m REAL NOT NULL,
+            heading_baseline_m REAL NOT NULL,
+            distance_from_anchor_m REAL NOT NULL,
+            dr_duration_s REAL NOT NULL,
+            rtk_age_s REAL NOT NULL,
+            odometry_age_s REAL NOT NULL,
+            imu_age_s REAL NOT NULL,
+            position_difference_to_rtk_m REAL NOT NULL,
+            invalid_reason TEXT NOT NULL
+        );
+        CREATE TABLE localization_odometry_samples (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp_ns INTEGER NOT NULL,
+            frame_id TEXT NOT NULL,
+            child_frame_id TEXT NOT NULL,
+            east_m REAL NOT NULL,
+            north_m REAL NOT NULL,
+            up_m REAL NOT NULL,
+            qx REAL NOT NULL,
+            qy REAL NOT NULL,
+            qz REAL NOT NULL,
+            qw REAL NOT NULL
         );
         CREATE TABLE rtk_endpoints (
             role TEXT PRIMARY KEY CHECK (role IN ('entry', 'exit')),
@@ -164,7 +212,7 @@ def create_recording(
                 ended_at, complete, nominal_sample_rate_hz, algorithm_version,
                 config_version, software_version, lidar_mount_height_m,
                 clearance_threshold_m, entry_rtk_status, exit_rtk_status
-            ) VALUES (1, 5, ?, 'test_fixture', ?, 'up', ?, ?, ?, ?, 50.0, ?, ?, ?, ?, ?, 'confirmed', ?)
+            ) VALUES (1, 6, ?, 'test_fixture', ?, 'up', ?, ?, ?, ?, 50.0, ?, ?, ?, ?, ?, 'confirmed', ?)
             """,
             (
                 task_id,
@@ -538,7 +586,7 @@ def generate(output: Path, *, force: bool) -> None:
             assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
             assert connection.execute(
                 "SELECT schema_version FROM recording_metadata WHERE id=1"
-            ).fetchone()[0] == 5
+            ).fetchone()[0] == 6
 
     print(output)
 

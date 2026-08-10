@@ -1,12 +1,13 @@
 # RTK 网页状态协议
 
-核对日期：2026-08-06
+核对日期：2026-08-10
 
 ## 1. 边界
 
-浏览器通过同源 WebSocket `/ws/v1/rtk` 接收 `/capture/rtk/status` 和
-`/capture/rtk/fix` 的最新快照。协议不表达定位质量等级、稳定窗口、入口、出口或
-洞内定位结论。
+浏览器通过同源 WebSocket `/ws/v1/rtk` 接收 `/capture/rtk/status`、
+`/capture/rtk/fix` 和 `/capture/localization/status` 的最新快照。原始RTK字段
+仍只表达解析器和标准NavSatFix直接输出；融合定位字段统一使用 `localization_*`
+前缀，表达当前最佳经纬高、RTK失锁后的ODIN航位推算状态和恢复误差。
 
 每个客户端队列容量为 1，最高发送 5 Hz，新快照覆盖未发送的旧快照。
 
@@ -48,7 +49,30 @@
   "fix_status": 0,
   "latitude": 24.5008,
   "longitude": 118.0829,
-  "altitude": 12.4
+  "altitude": 12.4,
+  "localization_stamp_ns": 1785738332146485635,
+  "localization_valid": true,
+  "localization_mode": 1,
+  "localization_heading_source": 1,
+  "localization_latitude": 24.5008,
+  "localization_longitude": 118.0829,
+  "localization_altitude": 12.4,
+  "localization_heading_deg": 91.2,
+  "localization_heading_alignment_valid": true,
+  "localization_delta_yaw_deg": 12.5,
+  "localization_scale_calibration_enabled": false,
+  "localization_scale_valid": false,
+  "localization_horizontal_scale": 1.0,
+  "localization_vertical_scale": 1.0,
+  "localization_scale_baseline_m": 0.0,
+  "localization_heading_baseline_m": 80.0,
+  "localization_distance_from_anchor_m": 0.0,
+  "localization_dr_duration_s": 0.0,
+  "localization_rtk_age_s": 0.02,
+  "localization_odometry_age_s": 0.01,
+  "localization_imu_age_s": 0.01,
+  "localization_position_difference_to_rtk_m": 0.0,
+  "localization_invalid_reason": "NONE"
 }
 ```
 
@@ -58,11 +82,17 @@
 `serial_connected` 和 `serial_message` 是兼容字段。当前页面的 RTK 连接灯来自
 `/ws/v1/system-status`，不使用这两个字段判断。
 
+`localization_mode` 与 `localization_heading_source` 的数值与
+`interfaces/msg/LocalizationStatus.msg` 常量一致。融合定位无效时，经纬高为0占位，
+必须以 `localization_valid=false` 和 `localization_invalid_reason` 判断，不用0坐标判断。
+年龄字段不可用时为 `-1.0`。
+
 ## 4. 页面表达
 
-- 顶部当前坐标仅在 WebSocket 正常、`fix_status` 有定位且 RMC 不为 `V` 时显示；
-- 地图使用有效 WGS84 坐标并转换为 GCJ-02；
-- RTK 卡片显示卫星数、HDOP/PDOP 和高度；
+- 顶部当前坐标优先显示 `localization_valid=true` 的融合定位经纬度，缺失时回退到原始RTK有效坐标；
+- 地图优先使用融合定位有效WGS84坐标并转换为 GCJ-02；
+- RTK 卡片保留原始RTK卫星数、HDOP/PDOP 和高度；
+- 融合定位卡片显示模式、航向源、DR持续时间、距锚点距离、尺度和恢复误差；
 - 无定位时坐标和高度显示 `--`；
 - 当前页面不显示入口坐标和出口坐标；
 - 页面不计算 RTK 稳定窗口。

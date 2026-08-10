@@ -1005,6 +1005,17 @@ th { color: #7f8b9e; background: #fafbfd; font-weight: 600; white-space: nowrap;
 .rtk-metric-grid > article:nth-child(2) strong {
   font-size: clamp(11px, .72vw, 16px);
 }
+.localization-panel { flex: 0 0 auto; }
+.localization-metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.localization-metric-grid > article {
+  min-height: 66px;
+}
+.localization-metric-grid strong {
+  font-size: clamp(10px, .68vw, 14px);
+  line-height: 1.22;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 .task-operation-head-actions {
   display: flex;
   align-items: center;
@@ -2014,6 +2025,7 @@ table {
   .health-device-card { min-height: 88px; }
   .dashboard-side-stack { grid-template-columns: 1fr; }
   .rtk-metric-grid { grid-template-columns: 1fr; }
+  .localization-metric-grid { grid-template-columns: 1fr; }
   .task-operation-head-actions { flex-wrap: wrap; justify-content: flex-end; }
   .task-parameter-grid { grid-template-columns: 1fr; }
   .task-parameter-grid > label { padding: 0 0 8px; border-right: 0; border-bottom: 1px solid #dfe5ed; }

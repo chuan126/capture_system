@@ -361,17 +361,27 @@ export default function RealtimeAmap({
       | undefined;
     if (!map || !AMap) return;
 
+    const fusedFix =
+      snapshot?.localization_valid === true &&
+      snapshot.localization_latitude !== null &&
+      snapshot.localization_latitude !== undefined &&
+      snapshot.localization_longitude !== null &&
+      snapshot.localization_longitude !== undefined;
+    const latitude = fusedFix ? snapshot.localization_latitude : snapshot?.latitude;
+    const longitude = fusedFix ? snapshot.localization_longitude : snapshot?.longitude;
+    const headingDeg = fusedFix ? snapshot.localization_heading_deg : snapshot?.track_degrees;
+
     if (
       !hasFix ||
-      snapshot?.latitude === null ||
-      snapshot?.latitude === undefined ||
-      snapshot.longitude === null ||
-      snapshot.longitude === undefined
+      latitude === null ||
+      latitude === undefined ||
+      longitude === null ||
+      longitude === undefined
     ) {
       return;
     }
 
-    const gcj = wgs84ToGcj02(snapshot.latitude, snapshot.longitude);
+    const gcj = wgs84ToGcj02(latitude, longitude);
     lastPositionRef.current = gcj;
 
     if (markerRef.current) {
@@ -380,7 +390,7 @@ export default function RealtimeAmap({
         setPosition?: (position: [number, number]) => void;
       };
       marker.setPosition?.(gcj);
-      marker.setAngle?.(snapshot.track_degrees ?? 0);
+      marker.setAngle?.(headingDeg ?? 0);
     } else {
       const markerElement = document.createElement("div");
       markerElement.className = "amap-vehicle-marker";
@@ -397,7 +407,7 @@ export default function RealtimeAmap({
         map.add?.(marker);
         markerRef.current = marker;
         (marker as { setAngle?: (angle: number) => void }).setAngle?.(
-          snapshot.track_degrees ?? 0,
+          headingDeg ?? 0,
         );
       }
     }
@@ -466,12 +476,17 @@ export default function RealtimeAmap({
   }, [expanded, mapState]);
 
   const coordinateText =
-    hasFix && snapshot?.latitude != null && snapshot.longitude != null
-      ? `${snapshot.latitude.toFixed(8)}°, ${snapshot.longitude.toFixed(8)}°`
-      : lastPositionRef.current
-        ? "保留最后有效位置"
-        : "等待有效 RTK 坐标";
-  const positionModeText = hasFix ? "RTK 绝对定位" : "RTK 无效";
+    hasFix && snapshot?.localization_valid === true &&
+      snapshot.localization_latitude != null && snapshot.localization_longitude != null
+      ? `${snapshot.localization_latitude.toFixed(8)}°, ${snapshot.localization_longitude.toFixed(8)}°`
+      : hasFix && snapshot?.latitude != null && snapshot.longitude != null
+        ? `${snapshot.latitude.toFixed(8)}°, ${snapshot.longitude.toFixed(8)}°`
+        : lastPositionRef.current
+          ? "保留最后有效位置"
+          : "等待有效定位坐标";
+  const positionModeText = snapshot?.localization_valid === true
+    ? "融合定位"
+    : hasFix ? "RTK 绝对定位" : "定位无效";
   const trackStateText =
     mapState !== "ready"
       ? "等待地图配置"
@@ -481,11 +496,11 @@ export default function RealtimeAmap({
           : "等待 RTK"
         : "轨迹已暂停";
   const mapSubtitle = hasFix
-    ? "仅在 RTK 有效时绘制绝对轨迹"
+    ? "使用当前有效定位绘制绝对轨迹"
     : "保留最后有效位置，暂停轨迹更新";
   const mapTip = hasFix
-    ? "RTK 原始 WGS84 坐标转换为 GCJ-02 后显示。定位失效时保留最后有效位置，并停止增加轨迹点。"
-    : "当前 RTK 无效。地图保留最后有效位置和已有轨迹，不继续推算车辆绝对位置。";
+    ? "当前有效WGS84坐标转换为GCJ-02后显示。定位失效时保留最后有效位置，并停止增加轨迹点。"
+    : "当前定位无效。地图保留最后有效位置和已有轨迹，不继续推算车辆绝对位置。";
 
   return (
     <article className={`panel dashboard-map-panel${expanded ? " visual-panel--expanded" : ""}`}>

@@ -31,6 +31,9 @@ def test_websocket_sends_latest_rtk_snapshot(tmp_path: Path) -> None:
             latitude=0.0,
             longitude=0.0,
             altitude=0.0,
+            localization_valid=False,
+            localization_mode=0,
+            localization_invalid_reason="NO_VALID_RTK_ANCHOR",
         )
     )
 
@@ -48,6 +51,8 @@ def test_websocket_sends_latest_rtk_snapshot(tmp_path: Path) -> None:
     assert snapshot["serial_connected"] is True
     assert snapshot["gps_state"] == 0
     assert snapshot["fix_status"] == -1
+    assert snapshot["localization_valid"] is False
+    assert snapshot["localization_invalid_reason"] == "NO_VALID_RTK_ANCHOR"
     assert "quality" not in snapshot
 
 

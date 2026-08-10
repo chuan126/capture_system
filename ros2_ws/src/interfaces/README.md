@@ -14,6 +14,7 @@ interfaces/
 ├── README.md
 ├── msg/
 │   ├── ClearanceResult.msg
+│   ├── LocalizationStatus.msg
 │   ├── RtkStatus.msg
 │   ├── TaskStatus.msg
 │   └── RecordingStatus.msg
@@ -33,6 +34,10 @@ QoS由`task_manager`设置为reliable、transient local，使FastAPI重连后可
 浏览器开始请求先由 FastAPI 根据系统诊断检查雷达原始点云和 RTK 上线状态，检查通过后才调用 `StartTask`。入口或出口 RTK 缺失、无效或超时时，Service 返回 `unconfirmed`，已经进入的任务流程继续执行。
 
 `RtkStatus`只承载NMEA解析器直接输出，不包含稳定性或进出洞结论。
+
+`LocalizationStatus`承载融合定位和ODIN航位推算后的业务状态。经纬高字段始终存在；
+RTK从未有效或航位推算不可用时使用0占位，并通过`valid=false`、
+`mode=MODE_INVALID`和`invalid_reason`明确失效原因。
 
 `ClearanceResult`区分本帧有效性、沿Up方向的雷达到顶部距离、候选区域质量和无效
 原因。无效结果不得由消费端用上一有效高度补齐。

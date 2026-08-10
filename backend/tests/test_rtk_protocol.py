@@ -1,6 +1,11 @@
 from types import SimpleNamespace
 
-from backend.protocols.rtk_v1 import RtkSnapshot, with_fix, with_status
+from backend.protocols.rtk_v1 import (
+    RtkSnapshot,
+    with_fix,
+    with_localization_status,
+    with_status,
+)
 
 
 def header(sec: int, nanosec: int) -> SimpleNamespace:
@@ -42,3 +47,42 @@ def test_maps_status_and_fix_without_quality_inference() -> None:
     assert snapshot.latitude == 0.0
     assert "quality" not in snapshot.to_message()
     assert "stable" not in snapshot.to_message()
+
+
+def test_maps_localization_status_as_fused_position_fields() -> None:
+    message = SimpleNamespace(
+        header=header(20, 5),
+        valid=True,
+        mode=2,
+        heading_source=3,
+        latitude=30.1234567,
+        longitude=114.1234567,
+        altitude=40.5,
+        heading_deg=91.2,
+        heading_alignment_valid=True,
+        delta_yaw_deg=12.5,
+        scale_calibration_enabled=False,
+        scale_valid=False,
+        horizontal_scale=1.0,
+        vertical_scale=1.0,
+        scale_baseline_m=0.0,
+        heading_baseline_m=80.0,
+        distance_from_anchor_m=120.0,
+        dr_duration_s=7.5,
+        rtk_age_s=2.0,
+        odometry_age_s=0.02,
+        imu_age_s=0.01,
+        position_difference_to_rtk_m=3.4,
+        invalid_reason="NONE",
+    )
+
+    snapshot = with_localization_status(RtkSnapshot(), message)
+
+    assert snapshot.localization_stamp_ns == 20_000_000_005
+    assert snapshot.localization_valid is True
+    assert snapshot.localization_mode == 2
+    assert snapshot.localization_heading_source == 3
+    assert snapshot.localization_latitude == 30.1234567
+    assert snapshot.localization_longitude == 114.1234567
+    assert snapshot.localization_horizontal_scale == 1.0
+    assert snapshot.localization_invalid_reason == "NONE"

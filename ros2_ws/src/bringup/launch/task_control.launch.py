@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
@@ -8,12 +9,24 @@ from launch_ros.actions import Node
 
 def generate_launch_description() -> LaunchDescription:
     data_root = LaunchConfiguration("data_root")
+    localization_parameters = (
+        Path(get_package_share_directory("localization"))
+        / "config"
+        / "dead_reckoning.yaml"
+    )
     return LaunchDescription(
         [
             DeclareLaunchArgument(
                 "data_root",
                 default_value=os.getenv("CAPTURE_DATA_ROOT", str(Path.cwd() / "runtime")),
                 description="任务索引和每任务测量文件的设备端数据目录",
+            ),
+            Node(
+                package="localization",
+                executable="dead_reckoning_node",
+                name="dead_reckoning_node",
+                output="screen",
+                parameters=[str(localization_parameters)],
             ),
             Node(
                 package="data_recorder",
@@ -26,6 +39,9 @@ def generate_launch_description() -> LaunchDescription:
                         "clearance_topic": "/capture/clearance/result",
                         "rtk_fix_topic": "/capture/rtk/fix",
                         "rtk_status_topic": "/capture/rtk/status",
+                        "localization_fix_topic": "/capture/localization/fix",
+                        "localization_status_topic": "/capture/localization/status",
+                        "localization_odometry_topic": "/capture/localization/odometry",
                         "sample_rate_hz": 50.0,
                         "source_timeout_ms": 250.0,
                         "endpoint_rtk_max_age_ms": 2000.0,

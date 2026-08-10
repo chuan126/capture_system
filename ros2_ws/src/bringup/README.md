@@ -9,7 +9,7 @@ bringup/launch/                    # 当前 Launch 入口
 ├── clearance_preview.launch.py   # 时间适配、逐点补偿和净空算法
 ├── cloud_preview.launch.py       # 局部东北天点云预览节点
 ├── system_status.launch.py       # 四类系统状态监控
-└── task_control.launch.py        # 设备端任务状态机和50 Hz记录器
+└── task_control.launch.py        # 融合定位、设备端任务状态机和50 Hz记录器
 
 bringup/config/
 └── dev_parameter_bindings.yaml   # development 测试页核心参数装订表
@@ -51,9 +51,14 @@ ros2 launch bringup task_control.launch.py \
   data_root:=<project_root>/runtime
 ```
 
-该入口启动 `data_recorder_node` 和 `task_manager_node`。开始与停止流程不会等待
+该入口启动 `dead_reckoning_node`、`data_recorder_node` 和 `task_manager_node`。开始与停止流程不会等待
 雷达或 RTK 真实数据检查。入口和出口 RTK 使用当时最近快照，坐标缺失时只记录
 `unconfirmed`，不会阻塞任务。
+
+`dead_reckoning_node`加载 `localization/config/dead_reckoning.yaml`，发布
+`/capture/localization/fix`、`/capture/localization/status` 和
+`/capture/localization/odometry`。记录器会同时保存原始RTK和融合定位结果，不能用
+DR坐标覆盖原始RTK历史数据。
 
 ## 开发核心参数装订
 

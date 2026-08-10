@@ -17,10 +17,12 @@
 #include <string>
 
 #include "interfaces/msg/clearance_result.hpp"
+#include "interfaces/msg/localization_status.hpp"
 #include "interfaces/msg/recording_status.hpp"
 #include "interfaces/msg/rtk_status.hpp"
 #include "interfaces/srv/prepare_recording.hpp"
 #include "interfaces/srv/recording_command.hpp"
+#include "nav_msgs/msg/odometry.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/nav_sat_fix.hpp"
 
@@ -148,6 +150,12 @@ public:
     rtk_fix_topic_ = declare_parameter<std::string>("rtk_fix_topic", "/capture/rtk/fix");
     rtk_status_topic_ = declare_parameter<std::string>(
       "rtk_status_topic", "/capture/rtk/status");
+    localization_fix_topic_ = declare_parameter<std::string>(
+      "localization_fix_topic", "/capture/localization/fix");
+    localization_status_topic_ = declare_parameter<std::string>(
+      "localization_status_topic", "/capture/localization/status");
+    localization_odometry_topic_ = declare_parameter<std::string>(
+      "localization_odometry_topic", "/capture/localization/odometry");
     sample_rate_hz_ = declare_parameter<double>("sample_rate_hz", 50.0);
     source_timeout_ms_ = declare_parameter<double>("source_timeout_ms", 250.0);
     endpoint_rtk_max_age_ms_ = declare_parameter<double>("endpoint_rtk_max_age_ms", 2000.0);
@@ -181,6 +189,16 @@ public:
     rtk_status_subscription_ = create_subscription<interfaces::msg::RtkStatus>(
       rtk_status_topic_, reliable_qos,
       std::bind(&DataRecorderNode::on_rtk_status, this, std::placeholders::_1));
+    localization_fix_subscription_ = create_subscription<sensor_msgs::msg::NavSatFix>(
+      localization_fix_topic_, reliable_qos,
+      std::bind(&DataRecorderNode::on_localization_fix, this, std::placeholders::_1));
+    localization_status_subscription_ =
+      create_subscription<interfaces::msg::LocalizationStatus>(
+      localization_status_topic_, reliable_qos,
+      std::bind(&DataRecorderNode::on_localization_status, this, std::placeholders::_1));
+    localization_odometry_subscription_ = create_subscription<nav_msgs::msg::Odometry>(
+      localization_odometry_topic_, reliable_qos,
+      std::bind(&DataRecorderNode::on_localization_odometry, this, std::placeholders::_1));
 
     status_publisher_ = create_publisher<interfaces::msg::RecordingStatus>(
       "/capture/recording/status",
@@ -621,6 +639,42 @@ private:
     latest_fix_.fix_type = rtk_fix_type(message->gps_state);
   }
 
+  void on_localization_fix(const sensor_msgs::msg::NavSatFix::SharedPtr message)
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (active_ && database_ != nullptr) {
+      try {
+        insert_localization_fix(*message);
+      } catch (const std::exception & error) {
+        handle_runtime_storage_error(error.what());
+      }
+    }
+  }
+
+  void on_localization_status(const interfaces::msg::LocalizationStatus::SharedPtr message)
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (active_ && database_ != nullptr) {
+      try {
+        insert_localization_status(*message);
+      } catch (const std::exception & error) {
+        handle_runtime_storage_error(error.what());
+      }
+    }
+  }
+
+  void on_localization_odometry(const nav_msgs::msg::Odometry::SharedPtr message)
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (active_ && database_ != nullptr) {
+      try {
+        insert_localization_odometry(*message);
+      } catch (const std::exception & error) {
+        handle_runtime_storage_error(error.what());
+      }
+    }
+  }
+
   void write_periodic_sample()
   {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -798,6 +852,54 @@ private:
         fix_type TEXT NOT NULL,
         valid INTEGER NOT NULL CHECK (valid IN (0, 1))
       );
+      CREATE TABLE localization_fix_samples (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        timestamp_ns INTEGER NOT NULL,
+        latitude_deg REAL,
+        longitude_deg REAL,
+        altitude_m REAL,
+        fix_status INTEGER NOT NULL,
+        valid INTEGER NOT NULL CHECK (valid IN (0, 1))
+      );
+      CREATE TABLE localization_status_samples (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        timestamp_ns INTEGER NOT NULL,
+        valid INTEGER NOT NULL CHECK (valid IN (0, 1)),
+        mode INTEGER NOT NULL,
+        heading_source INTEGER NOT NULL,
+        latitude_deg REAL NOT NULL,
+        longitude_deg REAL NOT NULL,
+        altitude_m REAL NOT NULL,
+        heading_deg REAL NOT NULL,
+        heading_alignment_valid INTEGER NOT NULL CHECK (heading_alignment_valid IN (0, 1)),
+        delta_yaw_deg REAL NOT NULL,
+        scale_calibration_enabled INTEGER NOT NULL CHECK (scale_calibration_enabled IN (0, 1)),
+        scale_valid INTEGER NOT NULL CHECK (scale_valid IN (0, 1)),
+        horizontal_scale REAL NOT NULL,
+        vertical_scale REAL NOT NULL,
+        scale_baseline_m REAL NOT NULL,
+        heading_baseline_m REAL NOT NULL,
+        distance_from_anchor_m REAL NOT NULL,
+        dr_duration_s REAL NOT NULL,
+        rtk_age_s REAL NOT NULL,
+        odometry_age_s REAL NOT NULL,
+        imu_age_s REAL NOT NULL,
+        position_difference_to_rtk_m REAL NOT NULL,
+        invalid_reason TEXT NOT NULL
+      );
+      CREATE TABLE localization_odometry_samples (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        timestamp_ns INTEGER NOT NULL,
+        frame_id TEXT NOT NULL,
+        child_frame_id TEXT NOT NULL,
+        east_m REAL NOT NULL,
+        north_m REAL NOT NULL,
+        up_m REAL NOT NULL,
+        qx REAL NOT NULL,
+        qy REAL NOT NULL,
+        qz REAL NOT NULL,
+        qw REAL NOT NULL
+      );
       CREATE TABLE rtk_endpoints (
         role TEXT PRIMARY KEY CHECK (role IN ('entry', 'exit')),
         timestamp_ns INTEGER NOT NULL,
@@ -853,7 +955,7 @@ private:
         "started_at, ended_at, complete, nominal_sample_rate_hz, algorithm_version, "
         "config_version, software_version, lidar_mount_height_m, clearance_threshold_m, "
         "entry_rtk_status, exit_rtk_status) "
-        "VALUES (1, 5, ?, 'recorded', ?, ?, ?, ?, NULL, 0, ?, ?, ?, ?, ?, ?, 'pending', 'not_requested')",
+        "VALUES (1, 6, ?, 'recorded', ?, ?, ?, ?, NULL, 0, ?, ?, ?, ?, ?, ?, 'pending', 'not_requested')",
         -1, &statement, nullptr),
       database_, "准备任务元数据写入失败");
     bind_text(statement, 1, task_id_);
@@ -934,6 +1036,106 @@ private:
     bind_text(statement, 5, fix.fix_type);
     check_sqlite(sqlite3_bind_int(statement, 6, fix.valid ? 1 : 0), database_, "绑定RTK有效性失败");
     check_sqlite(sqlite3_step(statement), database_, "写入RTK样本失败");
+    sqlite3_finalize(statement);
+  }
+
+  void insert_localization_fix(const sensor_msgs::msg::NavSatFix & fix)
+  {
+    sqlite3_stmt * statement = nullptr;
+    check_sqlite(
+      sqlite3_prepare_v2(
+        database_,
+        "INSERT INTO localization_fix_samples ("
+        "timestamp_ns, latitude_deg, longitude_deg, altitude_m, fix_status, valid) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        -1, &statement, nullptr),
+      database_, "准备融合定位fix写入失败");
+    const auto stamp_ns = rclcpp::Time(fix.header.stamp).nanoseconds();
+    check_sqlite(sqlite3_bind_int64(statement, 1, stamp_ns > 0 ? stamp_ns : system_now_ns()), database_, "绑定融合fix时间失败");
+    if (std::isfinite(fix.latitude) && std::isfinite(fix.longitude)) {
+      check_sqlite(sqlite3_bind_double(statement, 2, fix.latitude), database_, "绑定融合纬度失败");
+      check_sqlite(sqlite3_bind_double(statement, 3, fix.longitude), database_, "绑定融合经度失败");
+    } else {
+      sqlite3_bind_null(statement, 2);
+      sqlite3_bind_null(statement, 3);
+    }
+    bind_nullable_double(
+      statement, 4, std::isfinite(fix.altitude) ? std::optional<double>(fix.altitude) :
+      std::nullopt);
+    check_sqlite(sqlite3_bind_int(statement, 5, fix.status.status), database_, "绑定融合fix状态失败");
+    const bool valid = fix.status.status >= 0 && std::isfinite(fix.latitude) &&
+      std::isfinite(fix.longitude);
+    check_sqlite(sqlite3_bind_int(statement, 6, valid ? 1 : 0), database_, "绑定融合fix有效性失败");
+    check_sqlite(sqlite3_step(statement), database_, "写入融合定位fix失败");
+    sqlite3_finalize(statement);
+  }
+
+  void insert_localization_status(const interfaces::msg::LocalizationStatus & status)
+  {
+    sqlite3_stmt * statement = nullptr;
+    check_sqlite(
+      sqlite3_prepare_v2(
+        database_,
+        "INSERT INTO localization_status_samples ("
+        "timestamp_ns, valid, mode, heading_source, latitude_deg, longitude_deg, altitude_m, "
+        "heading_deg, heading_alignment_valid, delta_yaw_deg, scale_calibration_enabled, "
+        "scale_valid, horizontal_scale, vertical_scale, scale_baseline_m, heading_baseline_m, "
+        "distance_from_anchor_m, dr_duration_s, rtk_age_s, odometry_age_s, imu_age_s, "
+        "position_difference_to_rtk_m, invalid_reason) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        -1, &statement, nullptr),
+      database_, "准备融合定位status写入失败");
+    const auto stamp_ns = rclcpp::Time(status.header.stamp).nanoseconds();
+    check_sqlite(sqlite3_bind_int64(statement, 1, stamp_ns > 0 ? stamp_ns : system_now_ns()), database_, "绑定融合status时间失败");
+    check_sqlite(sqlite3_bind_int(statement, 2, status.valid ? 1 : 0), database_, "绑定融合有效性失败");
+    check_sqlite(sqlite3_bind_int(statement, 3, status.mode), database_, "绑定融合模式失败");
+    check_sqlite(sqlite3_bind_int(statement, 4, status.heading_source), database_, "绑定航向来源失败");
+    check_sqlite(sqlite3_bind_double(statement, 5, status.latitude), database_, "绑定融合status纬度失败");
+    check_sqlite(sqlite3_bind_double(statement, 6, status.longitude), database_, "绑定融合status经度失败");
+    check_sqlite(sqlite3_bind_double(statement, 7, status.altitude), database_, "绑定融合status高度失败");
+    check_sqlite(sqlite3_bind_double(statement, 8, status.heading_deg), database_, "绑定融合航向失败");
+    check_sqlite(sqlite3_bind_int(statement, 9, status.heading_alignment_valid ? 1 : 0), database_, "绑定航向对齐有效性失败");
+    check_sqlite(sqlite3_bind_double(statement, 10, status.delta_yaw_deg), database_, "绑定航向偏差失败");
+    check_sqlite(sqlite3_bind_int(statement, 11, status.scale_calibration_enabled ? 1 : 0), database_, "绑定尺度开关失败");
+    check_sqlite(sqlite3_bind_int(statement, 12, status.scale_valid ? 1 : 0), database_, "绑定尺度有效性失败");
+    check_sqlite(sqlite3_bind_double(statement, 13, status.horizontal_scale), database_, "绑定水平尺度失败");
+    check_sqlite(sqlite3_bind_double(statement, 14, status.vertical_scale), database_, "绑定垂直尺度失败");
+    check_sqlite(sqlite3_bind_double(statement, 15, status.scale_baseline_m), database_, "绑定尺度基线失败");
+    check_sqlite(sqlite3_bind_double(statement, 16, status.heading_baseline_m), database_, "绑定航向基线失败");
+    check_sqlite(sqlite3_bind_double(statement, 17, status.distance_from_anchor_m), database_, "绑定锚点距离失败");
+    check_sqlite(sqlite3_bind_double(statement, 18, status.dr_duration_s), database_, "绑定DR时间失败");
+    check_sqlite(sqlite3_bind_double(statement, 19, status.rtk_age_s), database_, "绑定RTK年龄失败");
+    check_sqlite(sqlite3_bind_double(statement, 20, status.odometry_age_s), database_, "绑定里程计年龄失败");
+    check_sqlite(sqlite3_bind_double(statement, 21, status.imu_age_s), database_, "绑定IMU年龄失败");
+    check_sqlite(sqlite3_bind_double(statement, 22, status.position_difference_to_rtk_m), database_, "绑定恢复误差失败");
+    bind_text(statement, 23, status.invalid_reason);
+    check_sqlite(sqlite3_step(statement), database_, "写入融合定位status失败");
+    sqlite3_finalize(statement);
+  }
+
+  void insert_localization_odometry(const nav_msgs::msg::Odometry & odometry)
+  {
+    sqlite3_stmt * statement = nullptr;
+    check_sqlite(
+      sqlite3_prepare_v2(
+        database_,
+        "INSERT INTO localization_odometry_samples ("
+        "timestamp_ns, frame_id, child_frame_id, east_m, north_m, up_m, qx, qy, qz, qw) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        -1, &statement, nullptr),
+      database_, "准备融合定位odometry写入失败");
+    const auto stamp_ns = rclcpp::Time(odometry.header.stamp).nanoseconds();
+    check_sqlite(sqlite3_bind_int64(statement, 1, stamp_ns > 0 ? stamp_ns : system_now_ns()), database_, "绑定融合odom时间失败");
+    bind_text(statement, 2, odometry.header.frame_id);
+    bind_text(statement, 3, odometry.child_frame_id);
+    check_sqlite(sqlite3_bind_double(statement, 4, odometry.pose.pose.position.x), database_, "绑定融合east失败");
+    check_sqlite(sqlite3_bind_double(statement, 5, odometry.pose.pose.position.y), database_, "绑定融合north失败");
+    check_sqlite(sqlite3_bind_double(statement, 6, odometry.pose.pose.position.z), database_, "绑定融合up失败");
+    check_sqlite(sqlite3_bind_double(statement, 7, odometry.pose.pose.orientation.x), database_, "绑定融合qx失败");
+    check_sqlite(sqlite3_bind_double(statement, 8, odometry.pose.pose.orientation.y), database_, "绑定融合qy失败");
+    check_sqlite(sqlite3_bind_double(statement, 9, odometry.pose.pose.orientation.z), database_, "绑定融合qz失败");
+    check_sqlite(sqlite3_bind_double(statement, 10, odometry.pose.pose.orientation.w), database_, "绑定融合qw失败");
+    check_sqlite(sqlite3_step(statement), database_, "写入融合定位odometry失败");
     sqlite3_finalize(statement);
   }
 
@@ -1330,6 +1532,9 @@ private:
   std::string clearance_topic_;
   std::string rtk_fix_topic_;
   std::string rtk_status_topic_;
+  std::string localization_fix_topic_;
+  std::string localization_status_topic_;
+  std::string localization_odometry_topic_;
   double sample_rate_hz_{50.0};
   double source_timeout_ms_{250.0};
   double endpoint_rtk_max_age_ms_{2000.0};
@@ -1374,6 +1579,9 @@ private:
   rclcpp::Subscription<interfaces::msg::ClearanceResult>::SharedPtr clearance_subscription_;
   rclcpp::Subscription<sensor_msgs::msg::NavSatFix>::SharedPtr rtk_fix_subscription_;
   rclcpp::Subscription<interfaces::msg::RtkStatus>::SharedPtr rtk_status_subscription_;
+  rclcpp::Subscription<sensor_msgs::msg::NavSatFix>::SharedPtr localization_fix_subscription_;
+  rclcpp::Subscription<interfaces::msg::LocalizationStatus>::SharedPtr localization_status_subscription_;
+  rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr localization_odometry_subscription_;
   rclcpp::Publisher<interfaces::msg::RecordingStatus>::SharedPtr status_publisher_;
   rclcpp::Service<interfaces::srv::PrepareRecording>::SharedPtr prepare_service_;
   rclcpp::Service<interfaces::srv::RecordingCommand>::SharedPtr command_service_;

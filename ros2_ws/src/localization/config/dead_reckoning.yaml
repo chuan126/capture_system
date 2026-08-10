@@ -1,0 +1,100 @@
+dead_reckoning_node:
+  ros__parameters:
+    # 输出频率，单位Hz；发布融合fix、odometry和status。
+    output_rate_hz: 10.0
+
+    # RTK fix/status超过该时间未更新即认为不新鲜，单位s。
+    rtk_timeout_s: 1.0
+    # ODIN高频里程计超过该时间未更新即不允许继续DR输出，单位s。
+    odometry_timeout_s: 0.1
+    # IMU角速度超过该时间未更新即不用于短时后备，单位s。
+    imu_timeout_s: 0.1
+
+    # ODIN里程计有限缓存时长，单位s；用于RTK时刻插值。
+    odometry_cache_duration_s: 60.0
+    # ODIN插值两端样本允许的最大时间间隔，单位s。
+    odometry_interpolation_max_gap_s: 0.2
+    # ODIN缓存最大样本数，防止无界内存增长。
+    odometry_cache_max_samples: 5000
+
+    # 允许在RTK航迹角无效时，通过RTK位置长基线估计航向。
+    course_from_position_enabled: true
+    # 航迹角观测最低车速，单位m/s。
+    course_min_speed_mps: 5.0
+    # RTK位置航向估计最小水平基线，单位m；实车可调到50、100或更长。
+    course_min_baseline_m: 30.0
+    # RTK位置航向估计最大水平基线，单位m。
+    course_max_baseline_m: 200.0
+    # RTK位置航向估计窗口最大时长，单位s。
+    course_max_window_s: 30.0
+    # 相邻航向观测允许的最大突跳，单位deg。
+    course_max_jump_deg: 20.0
+    # RTK位置窗口最大样本数。
+    course_max_samples: 300
+
+    # delta_yaw圆周统计最少观测数。
+    heading_alignment_min_samples: 10
+    # delta_yaw观测累计最小运动距离，单位m。
+    heading_alignment_min_distance_m: 50.0
+    # delta_yaw圆周标准差最大允许值，单位deg。
+    heading_alignment_max_std_deg: 5.0
+    # delta_yaw一阶滤波系数；0表示不用历史滤波，1表示完全采用新值。
+    heading_filter_alpha: 0.1
+    # delta_yaw观测缓存最大样本数。
+    heading_alignment_max_samples: 200
+
+    # ODIN水平尺度标定开关；默认关闭，关闭时horizontal_scale固定为1.0。
+    scale_calibration_enabled: false
+    # 尺度拟合允许的最小RTK轨迹基线，单位m。
+    scale_min_baseline_m: 500.0
+    # 尺度拟合建议目标基线，单位m；用于现场判断是否足够稳定。
+    scale_target_baseline_m: 1000.0
+    # 尺度拟合最少同步RTK/ODIN样本数。
+    scale_min_samples: 50
+    # 尺度系数允许下限。
+    scale_min_value: 0.8
+    # 尺度系数允许上限。
+    scale_max_value: 1.2
+    # 二维相似变换拟合RMS残差最大允许值，单位m。
+    scale_max_fit_residual_m: 15.0
+    # 尺度和相似变换航向滤波系数。
+    scale_filter_alpha: 0.1
+    # RTK/ODIN同步拟合样本最大数量，防止无界缓存。
+    calibration_max_samples: 5000
+    # RTK/ODIN同步拟合样本最大窗口，单位s。
+    calibration_max_window_s: 600.0
+
+    # ODIN Z方向尺度，单位无量纲；默认保持RTK高度基准和ODIN Up变化。
+    vertical_scale: 1.0
+
+    # ODIN姿态短时缺失时，是否允许IMU角速度后备。
+    gyro_fallback_enabled: true
+    # IMU陀螺后备最大连续时长，单位s；超过后航向降级。
+    gyro_fallback_max_duration_s: 2.0
+    # IMU三轴陀螺零偏，单位rad/s。
+    gyro_bias_x_rad_s: 0.0
+    gyro_bias_y_rad_s: 0.0
+    gyro_bias_z_rad_s: 0.0
+
+    # RTK恢复策略：immediate为立即回到RTK，smooth为平滑回归。
+    rtk_recovery_mode: smooth
+    # smooth恢复持续时间，单位s。
+    rtk_recovery_duration_s: 3.0
+
+    # DR最大持续时间，单位s；超过后valid=false。
+    max_dead_reckoning_duration_s: 1800.0
+    # DR距最后RTK锚点最大水平距离，单位m；超过后valid=false。
+    max_dead_reckoning_distance_m: 30000.0
+
+    # 输入Topic。
+    rtk_fix_topic: "/capture/rtk/fix"
+    rtk_status_topic: "/capture/rtk/status"
+    odometry_topic: "/capture/odometry/high_rate"
+    imu_topic: "/capture/imu/data"
+
+    # 输出Topic。
+    localization_fix_topic: "/capture/localization/fix"
+    localization_status_topic: "/capture/localization/status"
+    localization_odometry_topic: "/capture/localization/odometry"
+    output_frame_id: "local_enu"
+    output_child_frame_id: "base_link"

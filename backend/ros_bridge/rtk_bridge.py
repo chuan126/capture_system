@@ -8,6 +8,7 @@ from dataclasses import replace
 from backend.protocols.rtk_v1 import (
     RtkSnapshot,
     with_fix,
+    with_localization_status,
     with_status,
 )
 
@@ -20,10 +21,12 @@ class RtkBridge:
         snapshot_sink: Callable[[RtkSnapshot], None],
         status_topic: str = "/capture/rtk/status",
         fix_topic: str = "/capture/rtk/fix",
+        localization_status_topic: str = "/capture/localization/status",
     ) -> None:
         self._snapshot_sink = snapshot_sink
         self._status_topic = status_topic
         self._fix_topic = fix_topic
+        self._localization_status_topic = localization_status_topic
         self._thread: threading.Thread | None = None
         self._started = threading.Event()
         self._stop_requested = threading.Event()
@@ -65,6 +68,7 @@ class RtkBridge:
         executor = None
         try:
             import rclpy
+            from interfaces.msg import LocalizationStatus
             from interfaces.msg import RtkStatus
             from rclpy.context import Context
             from rclpy.executors import SingleThreadedExecutor
@@ -88,6 +92,12 @@ class RtkBridge:
             )
             node.create_subscription(RtkStatus, self._status_topic, self._on_status, qos)
             node.create_subscription(NavSatFix, self._fix_topic, self._on_fix, qos)
+            node.create_subscription(
+                LocalizationStatus,
+                self._localization_status_topic,
+                self._on_localization_status,
+                qos,
+            )
             executor = SingleThreadedExecutor(context=context)
             executor.add_node(node)
             self._executor = executor
@@ -133,4 +143,8 @@ class RtkBridge:
 
     def _on_fix(self, message: object) -> None:
         self._snapshot = with_fix(self._snapshot, message)
+        self._emit()
+
+    def _on_localization_status(self, message: object) -> None:
+        self._snapshot = with_localization_status(self._snapshot, message)
         self._emit()

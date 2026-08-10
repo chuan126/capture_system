@@ -29,6 +29,12 @@ RTK 串口
 → /capture/rtk/fix
 → /capture/rtk/status
 
+ODIN高频里程计 + RTK
+→ localization
+→ /capture/localization/fix
+→ /capture/localization/status
+→ /capture/localization/odometry
+
 系统诊断
 → /capture/system/diagnostics
 
@@ -60,6 +66,7 @@ SLAM 点云作为网页预览输入。
 - 原始点云逐点姿态补偿和扫描内相对平移补偿。
 - 单帧顶部 ROI、多候选近水平面 RANSAC、连通区域复核和最低平面高度输出。
 - RTK 串口接入、NMEA 解析结果发布和网页字段映射。
+- RTK失锁后的ODIN1航位推算、融合定位经纬高输出和状态诊断。
 - 雷达、RTK、RK3588 资源和数据目录容量的统一系统诊断。
 - 局部东北天点云的 5 Hz、最多 10,000 点网页预览。
 - FastAPI 静态页面托管、健康检查、任务元数据 SQLite 持久化、历史测量文件读取和实时 WebSocket。
@@ -82,8 +89,8 @@ SLAM 点云作为网页预览输入。
 - 数据回放页面可以读取任务测量 SQLite 文件并显示完整高度曲线、无效断点、统计结果和 RTK 端点。报告页已经接入正式 TXT 明细和 PDF 汇总生成。正常停止且包含有效样本的正式记录可以导出。
 - 开始和停止均为单击执行，不显示确认弹窗。停止完成后按创建时间自动选中下一项待执行任务，但不会自动开始。
 - 数据回放页面支持单项、多项、按日期和当前筛选结果全选后逻辑删除。采集中和已暂停任务不能删除，批量删除由 FastAPI 单事务处理。物理数据清理接口仍保留给维护使用，但客户回放页面不再显示清理入口。
-- `localization` 目前只包含姿态变换相关实现，尚未实现进出洞稳定窗口、洞内里程和
-  出口约束修正。
+- `localization` 已实现RTK失锁后的实时ODIN航位推算；进出洞语义化稳定窗口和出口
+  后处理约束修正仍需结合实车数据继续验证。
 - 当前没有正式路面模型和车辆通行包络。任务级最低值由回放和报告后端从正式测量数据库计算。
 
 完整状态见 [当前实现状态](docs/当前实现状态.md)。
@@ -186,6 +193,7 @@ capture_system/                 # 工程根目录
 - [系统总体架构](docs/architecture/系统总体架构.md)
 - [ROS 2 架构](docs/architecture/ROS2架构.md)
 - [数据流设计](docs/architecture/数据流设计.md)
+- [ODIN航位推算融合定位](docs/ODIN航位推算融合定位.md)
 - [任务历史与数据清理 HTTP 接口](docs/interfaces/task_history_http_api.md)
 - [采集首页操作说明](docs/user_manual/用户手册说明.md)
 - [文档核对记录](docs/文档核对记录_2026-08-06.md)

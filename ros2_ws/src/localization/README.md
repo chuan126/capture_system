@@ -1,8 +1,9 @@
 # localization
 
-核对日期：2026-08-06
+核对日期：2026-08-10
 
-> 当前状态：只实现姿态矩阵和变换工具，进出洞稳定窗口、洞内里程和轨迹修正尚未实现。
+> 当前状态：已新增RTK失锁后的ODIN1航位推算、融合定位状态输出、WGS84坐标转换、
+> 航向对齐和可选二维相似变换尺度标定。实车参数仍需现场标定。
 
 
 负责 RTK 稳定窗口、入口/出口候选、洞内相对里程、实时轨迹质量和出口约束后的
@@ -16,16 +17,28 @@ localization/                                      # 定位与局部水平姿态
 ├── Attitude/                                      # 用户提供的独立姿态与矩阵算法目录
 │   ├── attitude_matrix.cpp                        # 原四元数、欧拉角和矩阵计算公式
 │   └── attitude_matrix.h                          # 独立算法函数声明和数据顺序约定
-├── CMakeLists.txt                                 # 姿态矩阵核心库和单元测试构建配置
+├── CMakeLists.txt                                 # 姿态矩阵、航位推算核心库、ROS节点和单元测试构建配置
+├── config/                                        # localization正式参数目录
+│   └── dead_reckoning.yaml                        # RTK/ODIN融合定位和DR参数
 ├── package.xml                                    # ROS 2包元数据与测试依赖
 ├── README.md                                      # 模块职责、坐标语义和验证说明
 ├── include/                                       # 可供运动补偿和净空模块复用的头文件目录
 │   └── localization/                              # localization命名空间头文件目录
-│       └── attitude_transform.hpp                 # ROS顺序校验及雷达点转换适配接口
-├── src/                                           # 姿态算法实现目录
-│   └── attitude_transform.cpp                     # 四元数校验、换轴和雷达点转换实现
+│       ├── attitude_transform.hpp                 # ROS顺序校验及雷达点转换适配接口
+│       ├── dead_reckoning.hpp                     # ODIN锚点航位推算和陀螺积分纯数学接口
+│       ├── geodesy.hpp                            # WGS84 LLH/ECEF/ENU坐标转换接口
+│       ├── heading_alignment.hpp                  # RTK航迹、RTK位置航向和delta_yaw圆周统计接口
+│       └── similarity_alignment.hpp               # 二维相似变换尺度和旋转联合估计接口
+├── src/                                           # 算法实现和ROS适配节点目录
+│   ├── attitude_transform.cpp                     # 四元数校验、换轴和雷达点转换实现
+│   ├── dead_reckoning.cpp                         # ODIN相对位移到锚点ENU/LLH的航位推算实现
+│   ├── dead_reckoning_node.cpp                    # 订阅RTK/ODIN/IMU并发布融合定位的ROS 2节点
+│   ├── geodesy.cpp                                # WGS84坐标正反转换实现
+│   ├── heading_alignment.cpp                      # 航向wrap、RTK位置航向窗口和圆周统计实现
+│   └── similarity_alignment.cpp                   # 二维相似变换最小二乘实现
 └── test/                                          # 核心算法单元测试目录
-    └── test_attitude_matrix.cpp                   # 顺序、重力方向、换轴和无效输入测试
+    ├── test_attitude_matrix.cpp                   # 顺序、重力方向、换轴和无效输入测试
+    └── test_dead_reckoning_math.cpp               # WGS84、航向、尺度和DR数学测试
 ```
 
 ## 姿态矩阵转换
@@ -91,3 +104,56 @@ source install/setup.bash
 colcon test --packages-select localization
 colcon test-result --all --verbose
 ```
+
+## 融合定位与航位推算
+
+新增 `dead_reckoning_node` 订阅：
+
+```text
+/capture/rtk/fix
+/capture/rtk/status
+/capture/odometry/high_rate
+/capture/imu/data
+```
+
+发布：
+
+```text
+/capture/localization/fix
+/capture/localization/status
+/capture/localization/odometry
+```
+
+RTK有效时，节点使用RTK经纬高作为绝对位置，使用RTK航迹角或RTK长基线位置轨迹估计
+绝对航向，并与ODIN四元数航向相减得到 `delta_yaw`。`delta_yaw` 使用圆周统计，
+不会把359°和1°平均成180°。RTK `track_degrees=0` 被视为合法正北航迹角。
+
+RTK失锁且满足曾有可靠RTK锚点、ODIN有效、`delta_yaw`已可靠等条件后，节点冻结：
+
+```text
+LLH_anchor
+p_o_anchor
+delta_yaw_anchor
+horizontal_scale_anchor
+vertical_scale_anchor
+```
+
+洞内位置只使用ODIN已经处于水平坐标系的position：
+
+```text
+delta_p_o = p_o(t) - p_o_anchor
+delta_p_enu = Rz(delta_yaw_anchor) * S * delta_p_o
+p_enu(t) = delta_p_enu
+LLH(t) = ENU_to_WGS84(LLH_anchor, p_enu(t))
+```
+
+这里禁止再次将ODIN position乘实时姿态矩阵。实时绝对航向使用：
+
+```text
+psi_absolute = wrap(psi_odin + delta_yaw_anchor)
+```
+
+若 `scale_calibration_enabled=false`，水平尺度固定为1.0，但航向对齐仍继续工作。
+若开启尺度标定，节点用长轨迹RTK/ODIN同步点拟合二维相似变换，同时估计scale、
+`delta_yaw`和平移；只有样本数、基线、残差和尺度范围都满足参数要求时，
+`scale_valid=true`。

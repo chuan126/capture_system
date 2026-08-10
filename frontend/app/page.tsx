@@ -550,7 +550,7 @@ function Dashboard({
   const altitudeText = hasFix ? `${formatMetric(rtkSnapshot?.altitude)} m` : "--";
   const latitudeValue = rtkSnapshot?.latitude;
   const longitudeValue = rtkSnapshot?.longitude;
-  const coordinateAvailable = rtk.connection === "connected" &&
+  const rawCoordinateAvailable = rtk.connection === "connected" &&
     rtk.streamState === "streaming" &&
     hasFix &&
     rmcCharacter !== "V" &&
@@ -558,12 +558,64 @@ function Dashboard({
     Number.isFinite(latitudeValue) &&
     typeof longitudeValue === "number" &&
     Number.isFinite(longitudeValue);
-  const latitudeText = coordinateAvailable && typeof latitudeValue === "number"
-    ? latitudeValue.toFixed(7)
+  const localizationLatitudeValue = rtkSnapshot?.localization_latitude;
+  const localizationLongitudeValue = rtkSnapshot?.localization_longitude;
+  const localizationValid = rtk.connection === "connected" &&
+    rtk.streamState === "streaming" &&
+    rtkSnapshot?.localization_valid === true &&
+    typeof localizationLatitudeValue === "number" &&
+    Number.isFinite(localizationLatitudeValue) &&
+    typeof localizationLongitudeValue === "number" &&
+    Number.isFinite(localizationLongitudeValue);
+  const latitudeText = localizationValid && typeof localizationLatitudeValue === "number"
+    ? localizationLatitudeValue.toFixed(7)
+    : rawCoordinateAvailable && typeof latitudeValue === "number"
+      ? latitudeValue.toFixed(7)
+      : "--";
+  const longitudeText = localizationValid && typeof localizationLongitudeValue === "number"
+    ? localizationLongitudeValue.toFixed(7)
+    : rawCoordinateAvailable && typeof longitudeValue === "number"
+      ? longitudeValue.toFixed(7)
+      : "--";
+  const localizationAltitudeText = localizationValid
+    ? `${formatMetric(rtkSnapshot?.localization_altitude)} m`
     : "--";
-  const longitudeText = coordinateAvailable && typeof longitudeValue === "number"
-    ? longitudeValue.toFixed(7)
+  const localizationModeLabels: Record<number, string> = {
+    0: "无效",
+    1: "RTK",
+    2: "航位推算",
+    3: "RTK恢复",
+  };
+  const localizationHeadingLabels: Record<number, string> = {
+    0: "无效",
+    1: "RTK航迹",
+    2: "RTK轨迹",
+    3: "ODIN姿态",
+    4: "IMU陀螺",
+  };
+  const localizationModeText = typeof rtkSnapshot?.localization_mode === "number"
+    ? localizationModeLabels[rtkSnapshot.localization_mode] ?? `模式 ${rtkSnapshot.localization_mode}`
     : "--";
+  const localizationHeadingSourceText = typeof rtkSnapshot?.localization_heading_source === "number"
+    ? localizationHeadingLabels[rtkSnapshot.localization_heading_source] ?? `来源 ${rtkSnapshot.localization_heading_source}`
+    : "--";
+  const localizationTone = localizationValid
+    ? rtkSnapshot?.localization_mode === 2 ? "warn" : "ok"
+    : "danger";
+  const localizationStatusText = localizationValid
+    ? localizationModeText
+    : rtkSnapshot?.localization_invalid_reason ?? "等待融合定位";
+  const localizationHeadingText = localizationValid
+    ? `${formatMetric(rtkSnapshot?.localization_heading_deg, 1)}°`
+    : "--";
+  const localizationDrText = `${formatMetric(rtkSnapshot?.localization_dr_duration_s, 1)} s`;
+  const localizationAnchorDistanceText = `${formatMetric(rtkSnapshot?.localization_distance_from_anchor_m, 1)} m`;
+  const localizationScaleText = formatMetric(rtkSnapshot?.localization_horizontal_scale, 4);
+  const localizationScaleStateText = rtkSnapshot?.localization_scale_calibration_enabled
+    ? rtkSnapshot.localization_scale_valid ? "已标定" : "未标定"
+    : "关闭";
+  const localizationDeltaYawText = `${formatMetric(rtkSnapshot?.localization_delta_yaw_deg, 2)}°`;
+  const localizationRecoveryErrorText = `${formatMetric(rtkSnapshot?.localization_position_difference_to_rtk_m, 2)} m`;
   const monitorUnavailable = !systemStreamAvailable;
   const lidarConnected = !monitorUnavailable && isDeviceConnected("lidar", systemSnapshot?.lidar);
   const rtkConnected = !monitorUnavailable && isDeviceConnected("rtk", systemSnapshot?.rtk);
@@ -883,7 +935,7 @@ function Dashboard({
 
             <RealtimeAmap
               snapshot={rtkSnapshot}
-              hasFix={hasFix && rmcCharacter !== "V"}
+              hasFix={localizationValid || (hasFix && rmcCharacter !== "V")}
               connectionDetail={rtk.detail}
               expanded={expandedVisual === "map"}
               onToggleExpanded={() => setExpandedVisual((current) => current === "map" ? null : "map")}
@@ -931,6 +983,49 @@ function Dashboard({
               </article>
             </section>
 
+          </article>
+
+          <article className="panel localization-panel">
+            <PanelHead
+              title="融合定位"
+              description="RTK失锁后ODIN航位推算输出"
+              trailing={<StatusPill tone={localizationTone}>{localizationStatusText}</StatusPill>}
+            />
+
+            <section className="rtk-metric-grid localization-metric-grid" aria-label="融合定位指标">
+              <article>
+                <span>经纬度</span>
+                <strong>{longitudeText} / {latitudeText}</strong>
+              </article>
+              <article>
+                <span>高度</span>
+                <strong>{localizationAltitudeText}</strong>
+              </article>
+              <article>
+                <span>航向</span>
+                <strong>{localizationHeadingText}</strong>
+              </article>
+              <article>
+                <span>模式 / 航向源</span>
+                <strong>{localizationModeText} / {localizationHeadingSourceText}</strong>
+              </article>
+              <article>
+                <span>DR时间 / 锚点距</span>
+                <strong>{localizationDrText} / {localizationAnchorDistanceText}</strong>
+              </article>
+              <article>
+                <span>水平尺度 / 状态</span>
+                <strong>{localizationScaleText} / {localizationScaleStateText}</strong>
+              </article>
+              <article>
+                <span>航向偏差</span>
+                <strong>{localizationDeltaYawText}</strong>
+              </article>
+              <article>
+                <span>恢复误差</span>
+                <strong>{localizationRecoveryErrorText}</strong>
+              </article>
+            </section>
           </article>
 
           <article className="panel task-operation-panel">
