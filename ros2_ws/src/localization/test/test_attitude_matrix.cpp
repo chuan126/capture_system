@@ -12,6 +12,47 @@ namespace localization
 namespace
 {
 
+constexpr double kPi = 3.14159265358979323846;
+
+double circularDifference(const double left, const double right)
+{
+  return std::atan2(std::sin(left - right), std::cos(left - right));
+}
+
+void odinQuaternionForVehicleAttitude(
+  const double pitch_rad, const double roll_rad, const double heading_rad,
+  double quaternion_wxyz[4])
+{
+  double vehicle_attitude[3]{pitch_rad, roll_rad, heading_rad};
+  double Cnm[9];
+  a2mat(vehicle_attitude, Cnm);
+
+  const RotationMatrix3d Cmb = transposeRotationMatrix(kDefaultVehicleAttitudeMountRotationBm);
+  double Cmb_mutable[9];
+  for (int index = 0; index < 9; ++index) {
+    Cmb_mutable[index] = Cmb[index];
+  }
+  double Cnb[9];
+  MatMul(Cnm, Cmb_mutable, Cnb, 3, 3, 3);
+  m2qua(Cnb, quaternion_wxyz);
+}
+
+void expectRecoveredVehicleAttitude(
+  const double pitch_rad, const double roll_rad, const double heading_rad)
+{
+  double quaternion_wxyz[4];
+  odinQuaternionForVehicleAttitude(
+    pitch_rad, roll_rad, heading_rad, quaternion_wxyz);
+  VehicleAttitude recovered{};
+  ASSERT_TRUE(
+    vehicleAttitudeFromOdinQuaternion(
+      quaternion_wxyz[1], quaternion_wxyz[2], quaternion_wxyz[3], quaternion_wxyz[0],
+      kDefaultVehicleAttitudeMountRotationBm, recovered));
+  EXPECT_NEAR(recovered.pitch_rad, pitch_rad, 1.0e-10);
+  EXPECT_NEAR(recovered.roll_rad, roll_rad, 1.0e-10);
+  EXPECT_NEAR(circularDifference(recovered.heading_rad, heading_rad), 0.0, 1.0e-10);
+}
+
 TEST(AttitudeMatrixTest, ProvidedQuaternionConversionKeepsIdentity)
 {
   double quaternion[4]{1.0, 0.0, 0.0, 0.0};
@@ -180,6 +221,70 @@ TEST(AttitudeMatrixTest, RejectsNonFinitePoint)
   EXPECT_TRUE(std::isnan(output.east));
   EXPECT_TRUE(std::isnan(output.north));
   EXPECT_TRUE(std::isnan(output.up));
+}
+
+TEST(VehicleAttitudeTest, DefaultCmbAndCbmAreExactInverses)
+{
+  const RotationMatrix3d Cbm = kDefaultVehicleAttitudeMountRotationBm;
+  const RotationMatrix3d Cmb = transposeRotationMatrix(Cbm);
+  EXPECT_TRUE(isProperRotationMatrix(Cbm));
+  EXPECT_TRUE(isProperRotationMatrix(Cmb));
+
+  for (int row = 0; row < 3; ++row) {
+    for (int column = 0; column < 3; ++column) {
+      double value = 0.0;
+      for (int index = 0; index < 3; ++index) {
+        value += Cmb[row * 3 + index] * Cbm[index * 3 + column];
+      }
+      EXPECT_NEAR(value, row == column ? 1.0 : 0.0, 1.0e-12);
+    }
+  }
+}
+
+TEST(VehicleAttitudeTest, RejectsInvalidMountRotations)
+{
+  RotationMatrix3d scaled = kDefaultVehicleAttitudeMountRotationBm;
+  scaled[0] = 2.0;
+  EXPECT_FALSE(isProperRotationMatrix(scaled));
+
+  RotationMatrix3d reflection{
+    -1.0, 0.0, 0.0,
+    0.0, 1.0, 0.0,
+    0.0, 0.0, 1.0};
+  EXPECT_FALSE(isProperRotationMatrix(reflection));
+
+  VehicleAttitude output{};
+  EXPECT_FALSE(vehicleAttitudeFromOdinQuaternion(0.0, 0.0, 0.0, 1.0, scaled, output));
+  EXPECT_TRUE(std::isnan(output.pitch_rad));
+}
+
+TEST(VehicleAttitudeTest, ConvertsHorizontalVehicleAtNinetyDegreeOdinInstallation)
+{
+  expectRecoveredVehicleAttitude(0.0, 0.0, 0.0);
+}
+
+TEST(VehicleAttitudeTest, ConvertsVehiclePitchAndRollSigns)
+{
+  constexpr double five_degrees = 5.0 * kPi / 180.0;
+  expectRecoveredVehicleAttitude(five_degrees, 0.0, 0.0);
+  expectRecoveredVehicleAttitude(-five_degrees, 0.0, 0.0);
+  expectRecoveredVehicleAttitude(0.0, five_degrees, 0.0);
+  expectRecoveredVehicleAttitude(0.0, -five_degrees, 0.0);
+}
+
+TEST(VehicleAttitudeTest, ConvertsVehicleHeadingsAcrossNorthWrap)
+{
+  const double headings_deg[]{0.0, 45.0, 90.0, 180.0, 270.0, 359.0};
+  for (const double heading_deg : headings_deg) {
+    SCOPED_TRACE(heading_deg);
+    expectRecoveredVehicleAttitude(0.0, 0.0, heading_deg * kPi / 180.0);
+  }
+}
+
+TEST(VehicleAttitudeTest, KeepsVehicleEulerStableNearOdinInstallationBoundary)
+{
+  constexpr double five_degrees = 5.0 * kPi / 180.0;
+  expectRecoveredVehicleAttitude(five_degrees, -five_degrees, 359.0 * kPi / 180.0);
 }
 
 }  // namespace

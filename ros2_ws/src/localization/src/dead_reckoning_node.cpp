@@ -2,8 +2,7 @@
 #include "localization/geodesy.hpp"
 #include "localization/heading_alignment.hpp"
 #include "localization/similarity_alignment.hpp"
-
-#include "attitude_matrix.h"
+#include "localization/attitude_transform.hpp"
 
 #include "builtin_interfaces/msg/time.hpp"
 #include "interfaces/msg/localization_status.hpp"
@@ -16,6 +15,7 @@
 #include "sensor_msgs/msg/nav_sat_status.hpp"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -248,6 +248,14 @@ public:
       get_logger(), "vehicle_forward_axis_body = [%.6f, %.6f, %.6f]",
       vehicle_forward_axis_body_.x, vehicle_forward_axis_body_.y,
       vehicle_forward_axis_body_.z);
+    RCLCPP_INFO(
+      get_logger(),
+      "vehicle_attitude_mount_rotation_bm = [%.0f, %.0f, %.0f; %.0f, %.0f, %.0f; %.0f, %.0f, %.0f]",
+      vehicle_attitude_mount_rotation_bm_[0], vehicle_attitude_mount_rotation_bm_[1],
+      vehicle_attitude_mount_rotation_bm_[2], vehicle_attitude_mount_rotation_bm_[3],
+      vehicle_attitude_mount_rotation_bm_[4], vehicle_attitude_mount_rotation_bm_[5],
+      vehicle_attitude_mount_rotation_bm_[6], vehicle_attitude_mount_rotation_bm_[7],
+      vehicle_attitude_mount_rotation_bm_[8]);
   }
 
 private:
@@ -376,6 +384,17 @@ private:
       throw std::invalid_argument("vehicle_forward_axis_body必须包含3个分量");
     }
     vehicle_forward_axis_body_ = Vector3d{forward_axis[0], forward_axis[1], forward_axis[2]};
+    const std::vector<double> attitude_mount_rotation = declare_parameter<std::vector<double>>(
+      "vehicle_attitude_mount_rotation_bm",
+      std::vector<double>(
+        kDefaultVehicleAttitudeMountRotationBm.begin(),
+        kDefaultVehicleAttitudeMountRotationBm.end()));
+    if (attitude_mount_rotation.size() != 9U) {
+      throw std::invalid_argument("vehicle_attitude_mount_rotation_bm必须包含9个分量");
+    }
+    std::copy(
+      attitude_mount_rotation.begin(), attitude_mount_rotation.end(),
+      vehicle_attitude_mount_rotation_bm_.begin());
     heading_projection_min_norm_ = declare_parameter<double>("heading_projection_min_norm", 0.2);
     forward_axis_motion_validation_enabled_ = declare_parameter<bool>(
       "forward_axis_motion_validation_enabled", true);
@@ -463,6 +482,10 @@ private:
     vehicle_forward_axis_body_.x /= forward_norm;
     vehicle_forward_axis_body_.y /= forward_norm;
     vehicle_forward_axis_body_.z /= forward_norm;
+    if (!isProperRotationMatrix(vehicle_attitude_mount_rotation_bm_)) {
+      throw std::invalid_argument(
+              "vehicle_attitude_mount_rotation_bm必须是有限、正交且行列式为+1的旋转矩阵");
+    }
     if (!(heading_projection_min_norm_ > 0.0) || heading_projection_min_norm_ > 1.0 ||
       !std::isfinite(heading_projection_min_norm_))
     {
@@ -1298,20 +1321,16 @@ private:
       enuYawRadToClockwiseCourseDegrees(output.heading_enu_rad) : 0.0;
     const auto latest_odom = odom_buffer_.latest();
     if (latest_odom.has_value()) {
-      Quaterniond raw_orientation = latest_odom->orientation_xyzw;
-      if (normalizeQuaternion(raw_orientation)) {
-        double quaternion_wxyz[4]{
-          raw_orientation.w, raw_orientation.x, raw_orientation.y, raw_orientation.z};
-        double attitude_rad[3]{};
-        q2att(quaternion_wxyz, attitude_rad);
-        if (std::isfinite(attitude_rad[0]) && std::isfinite(attitude_rad[1]) &&
-          std::isfinite(attitude_rad[2]))
-        {
-          message.odin_attitude_valid = true;
-          message.odin_pitch_deg = radiansToDegrees(attitude_rad[0]);
-          message.odin_roll_deg = radiansToDegrees(attitude_rad[1]);
-          message.odin_yaw_deg = radiansToDegrees(attitude_rad[2]);
-        }
+      const auto & orientation = latest_odom->orientation_xyzw;
+      VehicleAttitude attitude{};
+      if (vehicleAttitudeFromOdinQuaternion(
+          orientation.x, orientation.y, orientation.z, orientation.w,
+          vehicle_attitude_mount_rotation_bm_, attitude))
+      {
+        message.vehicle_attitude_valid = true;
+        message.vehicle_pitch_deg = radiansToDegrees(attitude.pitch_rad);
+        message.vehicle_roll_deg = radiansToDegrees(attitude.roll_rad);
+        message.vehicle_heading_deg = radiansToDegrees(attitude.heading_rad);
       }
     }
     message.heading_alignment_valid = heading_alignment_valid_;
@@ -1351,6 +1370,8 @@ private:
   double course_max_jump_rad_{degreesToRadians(20.0)};
 
   Vector3d vehicle_forward_axis_body_{0.0, 0.0, -1.0};
+  RotationMatrix3d vehicle_attitude_mount_rotation_bm_ =
+    kDefaultVehicleAttitudeMountRotationBm;
   double heading_projection_min_norm_{0.2};
   bool forward_axis_motion_validation_enabled_{true};
   double forward_axis_validation_min_speed_mps_{5.0};

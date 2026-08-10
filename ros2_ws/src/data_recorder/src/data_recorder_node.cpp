@@ -28,8 +28,6 @@
 #include "sensor_msgs/msg/nav_sat_fix.hpp"
 #include "sensor_msgs/msg/temperature.hpp"
 
-#include "localization/Attitude/attitude_matrix.h"
-
 namespace fs = std::filesystem;
 using namespace std::chrono_literals;
 
@@ -310,9 +308,15 @@ private:
     double position_x_m{0.0};
     double position_y_m{0.0};
     double position_z_m{0.0};
+  };
+
+  struct LatestVehicleAttitude
+  {
+    bool available{false};
+    std::int64_t received_monotonic_ns{0};
     double pitch_deg{0.0};
     double roll_deg{0.0};
-    double yaw_deg{0.0};
+    double heading_deg{0.0};
   };
 
   struct LatestTemperature
@@ -724,6 +728,16 @@ private:
   void on_localization_status(const interfaces::msg::LocalizationStatus::SharedPtr message)
   {
     std::lock_guard<std::mutex> lock(mutex_);
+    latest_vehicle_attitude_.available = message->vehicle_attitude_valid &&
+      std::isfinite(message->vehicle_pitch_deg) &&
+      std::isfinite(message->vehicle_roll_deg) &&
+      std::isfinite(message->vehicle_heading_deg);
+    if (latest_vehicle_attitude_.available) {
+      latest_vehicle_attitude_.received_monotonic_ns = steady_now_ns();
+      latest_vehicle_attitude_.pitch_deg = message->vehicle_pitch_deg;
+      latest_vehicle_attitude_.roll_deg = message->vehicle_roll_deg;
+      latest_vehicle_attitude_.heading_deg = message->vehicle_heading_deg;
+    }
     if (active_ && database_ != nullptr) {
       try {
         insert_localization_status(*message);
@@ -771,37 +785,15 @@ private:
   {
     std::lock_guard<std::mutex> lock(mutex_);
     const auto & position = message->pose.pose.position;
-    const auto & orientation = message->pose.pose.orientation;
-    if (!std::isfinite(position.x) || !std::isfinite(position.y) || !std::isfinite(position.z) ||
-      !std::isfinite(orientation.x) || !std::isfinite(orientation.y) ||
-      !std::isfinite(orientation.z) || !std::isfinite(orientation.w))
+    if (!std::isfinite(position.x) || !std::isfinite(position.y) || !std::isfinite(position.z))
     {
       return;
     }
-    const double norm = std::sqrt(
-      orientation.x * orientation.x + orientation.y * orientation.y +
-      orientation.z * orientation.z + orientation.w * orientation.w);
-    if (!std::isfinite(norm) || norm <= 1.0e-12) {
-      return;
-    }
-    double quaternion_wxyz[4]{
-      orientation.w / norm, orientation.x / norm, orientation.y / norm, orientation.z / norm};
-    double attitude_rad[3]{};
-    q2att(quaternion_wxyz, attitude_rad);
-    if (!std::isfinite(attitude_rad[0]) || !std::isfinite(attitude_rad[1]) ||
-      !std::isfinite(attitude_rad[2]))
-    {
-      return;
-    }
-    constexpr double radians_to_degrees = 180.0 / 3.14159265358979323846;
     latest_odin_.available = true;
     latest_odin_.received_monotonic_ns = steady_now_ns();
     latest_odin_.position_x_m = position.x;
     latest_odin_.position_y_m = position.y;
     latest_odin_.position_z_m = position.z;
-    latest_odin_.pitch_deg = attitude_rad[0] * radians_to_degrees;
-    latest_odin_.roll_deg = attitude_rad[1] * radians_to_degrees;
-    latest_odin_.yaw_deg = attitude_rad[2] * radians_to_degrees;
   }
 
   void on_radar_temperature(const sensor_msgs::msg::Temperature::SharedPtr message)
@@ -909,6 +901,10 @@ private:
         static_cast<double>(std::max<std::int64_t>(
           0, monotonic_now_ns - latest_odin_.received_monotonic_ns)) / 1'000'000.0 <=
         odometry_snapshot_max_age_ms_;
+      const bool vehicle_attitude_fresh = latest_vehicle_attitude_.available &&
+        static_cast<double>(std::max<std::int64_t>(
+          0, monotonic_now_ns - latest_vehicle_attitude_.received_monotonic_ns)) / 1'000'000.0 <=
+        odometry_snapshot_max_age_ms_;
       const bool temperature_fresh = latest_temperature_.available &&
         static_cast<double>(std::max<std::int64_t>(
           0, monotonic_now_ns - latest_temperature_.received_monotonic_ns)) / 1'000'000.0 <=
@@ -924,8 +920,8 @@ private:
            "source_sequence, source_age_ms, is_repeated, repeat_index, rtk_timestamp_ns, "
            "gyro_x_rad_s, gyro_y_rad_s, gyro_z_rad_s, accel_x_m_s2, accel_y_m_s2, "
            "accel_z_m_s2, imu_sample_count, radar_temperature_c, minimum_point_x_m, "
-           "minimum_point_y_m, minimum_point_z_m, odin_pitch_deg, odin_roll_deg, "
-           "odin_yaw_deg, odin_position_x_m, odin_position_y_m, odin_position_z_m) "
+           "minimum_point_y_m, minimum_point_z_m, vehicle_pitch_deg, vehicle_roll_deg, "
+           "vehicle_heading_deg, odin_position_x_m, odin_position_y_m, odin_position_z_m) "
            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
            "?, ?, ?, ?, ?, ?, ?, ?, ?)",
           -1, &statement, nullptr),
@@ -965,11 +961,14 @@ private:
       bind_nullable_double(statement, 24, minimum_point_y);
       bind_nullable_double(statement, 25, minimum_point_z);
       bind_nullable_double(
-        statement, 26, odin_fresh ? std::optional<double>(latest_odin_.pitch_deg) : std::nullopt);
+        statement, 26, vehicle_attitude_fresh ?
+        std::optional<double>(latest_vehicle_attitude_.pitch_deg) : std::nullopt);
       bind_nullable_double(
-        statement, 27, odin_fresh ? std::optional<double>(latest_odin_.roll_deg) : std::nullopt);
+        statement, 27, vehicle_attitude_fresh ?
+        std::optional<double>(latest_vehicle_attitude_.roll_deg) : std::nullopt);
       bind_nullable_double(
-        statement, 28, odin_fresh ? std::optional<double>(latest_odin_.yaw_deg) : std::nullopt);
+        statement, 28, vehicle_attitude_fresh ?
+        std::optional<double>(latest_vehicle_attitude_.heading_deg) : std::nullopt);
       bind_nullable_double(
         statement, 29, odin_fresh ?
         std::optional<double>(latest_odin_.position_x_m) : std::nullopt);
@@ -1059,9 +1058,9 @@ private:
         minimum_point_x_m REAL,
         minimum_point_y_m REAL,
         minimum_point_z_m REAL,
-        odin_pitch_deg REAL,
-        odin_roll_deg REAL,
-        odin_yaw_deg REAL,
+        vehicle_pitch_deg REAL,
+        vehicle_roll_deg REAL,
+        vehicle_heading_deg REAL,
         odin_position_x_m REAL,
         odin_position_y_m REAL,
         odin_position_z_m REAL
@@ -1111,10 +1110,10 @@ private:
         longitude_deg REAL NOT NULL,
         altitude_m REAL NOT NULL,
         heading_deg REAL NOT NULL,
-        odin_attitude_valid INTEGER NOT NULL CHECK (odin_attitude_valid IN (0, 1)),
-        odin_pitch_deg REAL NOT NULL,
-        odin_roll_deg REAL NOT NULL,
-        odin_yaw_deg REAL NOT NULL,
+        vehicle_attitude_valid INTEGER NOT NULL CHECK (vehicle_attitude_valid IN (0, 1)),
+        vehicle_pitch_deg REAL NOT NULL,
+        vehicle_roll_deg REAL NOT NULL,
+        vehicle_heading_deg REAL NOT NULL,
         heading_alignment_valid INTEGER NOT NULL CHECK (heading_alignment_valid IN (0, 1)),
         delta_yaw_deg REAL NOT NULL,
         scale_calibration_mode INTEGER NOT NULL CHECK (scale_calibration_mode IN (0, 1)),
@@ -1202,7 +1201,7 @@ private:
         "started_at, ended_at, complete, nominal_sample_rate_hz, algorithm_version, "
         "config_version, software_version, lidar_mount_height_m, clearance_threshold_m, "
         "entry_rtk_status, exit_rtk_status) "
-        "VALUES (1, 7, ?, 'recorded', ?, ?, ?, ?, NULL, 0, ?, ?, ?, ?, ?, ?, 'pending', 'not_requested')",
+        "VALUES (1, 8, ?, 'recorded', ?, ?, ?, ?, NULL, 0, ?, ?, ?, ?, ?, ?, 'pending', 'not_requested')",
         -1, &statement, nullptr),
       database_, "准备任务元数据写入失败");
     bind_text(statement, 1, task_id_);
@@ -1325,7 +1324,8 @@ private:
         database_,
         "INSERT INTO localization_status_samples ("
         "timestamp_ns, valid, mode, heading_source, latitude_deg, longitude_deg, altitude_m, "
-        "heading_deg, odin_attitude_valid, odin_pitch_deg, odin_roll_deg, odin_yaw_deg, "
+        "heading_deg, vehicle_attitude_valid, vehicle_pitch_deg, vehicle_roll_deg, "
+        "vehicle_heading_deg, "
         "heading_alignment_valid, delta_yaw_deg, scale_calibration_mode, scale_status, "
         "scale_valid, horizontal_scale, vertical_scale, scale_baseline_m, scale_fit_residual_m, "
         "heading_baseline_m, heading_alignment_reason, "
@@ -1344,10 +1344,10 @@ private:
     check_sqlite(sqlite3_bind_double(statement, 6, status.longitude), database_, "绑定融合status经度失败");
     check_sqlite(sqlite3_bind_double(statement, 7, status.altitude), database_, "绑定融合status高度失败");
     check_sqlite(sqlite3_bind_double(statement, 8, status.heading_deg), database_, "绑定融合航向失败");
-    check_sqlite(sqlite3_bind_int(statement, 9, status.odin_attitude_valid ? 1 : 0), database_, "绑定ODIN姿态有效性失败");
-    check_sqlite(sqlite3_bind_double(statement, 10, status.odin_pitch_deg), database_, "绑定ODIN俯仰失败");
-    check_sqlite(sqlite3_bind_double(statement, 11, status.odin_roll_deg), database_, "绑定ODIN横滚失败");
-    check_sqlite(sqlite3_bind_double(statement, 12, status.odin_yaw_deg), database_, "绑定ODIN欧拉方位失败");
+    check_sqlite(sqlite3_bind_int(statement, 9, status.vehicle_attitude_valid ? 1 : 0), database_, "绑定车辆姿态有效性失败");
+    check_sqlite(sqlite3_bind_double(statement, 10, status.vehicle_pitch_deg), database_, "绑定车辆俯仰失败");
+    check_sqlite(sqlite3_bind_double(statement, 11, status.vehicle_roll_deg), database_, "绑定车辆横滚失败");
+    check_sqlite(sqlite3_bind_double(statement, 12, status.vehicle_heading_deg), database_, "绑定车辆方位失败");
     check_sqlite(sqlite3_bind_int(statement, 13, status.heading_alignment_valid ? 1 : 0), database_, "绑定航向对齐有效性失败");
     check_sqlite(sqlite3_bind_double(statement, 14, status.delta_yaw_deg), database_, "绑定航向偏差失败");
     check_sqlite(sqlite3_bind_int(statement, 15, status.scale_calibration_mode), database_, "绑定尺度模式失败");
@@ -1840,6 +1840,7 @@ private:
   LatestFix latest_fix_;
   ImuAccumulator imu_accumulator_;
   LatestOdin latest_odin_;
+  LatestVehicleAttitude latest_vehicle_attitude_;
   LatestTemperature latest_temperature_;
 
   rclcpp::Subscription<interfaces::msg::ClearanceResult>::SharedPtr clearance_subscription_;

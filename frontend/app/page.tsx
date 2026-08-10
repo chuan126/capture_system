@@ -309,6 +309,7 @@ function LiveClearanceChart({
   detail: string;
 }) {
   const [samples, setSamples] = useState<LiveClearanceSample[]>([]);
+  const [verticalZoom, setVerticalZoom] = useState(1);
 
   useEffect(() => {
     if (!snapshot) return;
@@ -330,8 +331,16 @@ function LiveClearanceChart({
     const valueMin = Math.min(...values);
     const valueMax = Math.max(...values);
     const padding = Math.max((valueMax - valueMin) * 0.2, 0.1);
-    const yMin = Math.max(0, valueMin - padding);
-    const yMax = valueMax + padding;
+    const baseYMin = Math.max(0, valueMin - padding);
+    const baseYMax = valueMax + padding;
+    const center = (baseYMin + baseYMax) / 2;
+    const scaledSpan = Math.max(0.02, (baseYMax - baseYMin) / verticalZoom);
+    let yMin = center - scaledSpan / 2;
+    let yMax = center + scaledSpan / 2;
+    if (yMin < 0) {
+      yMax -= yMin;
+      yMin = 0;
+    }
     const xFor = (index: number) => samples.length <= 1
       ? 50
       : 8 + index / (samples.length - 1) * 90;
@@ -355,7 +364,11 @@ function LiveClearanceChart({
       ? { x: xFor(latestIndex), y: yFor(samples[latestIndex].heightM!) }
       : null;
     return { yMin, yMax, segments, latest };
-  }, [samples]);
+  }, [samples, verticalZoom]);
+
+  const adjustVerticalZoom = (factor: number) => {
+    setVerticalZoom((current) => Math.min(8, Math.max(0.25, current * factor)));
+  };
 
   if (!chart) {
     return <EmptyChart clearanceActive={streaming} />;
@@ -363,6 +376,29 @@ function LiveClearanceChart({
 
   return (
     <div className="chart live-clearance-chart" aria-label="实时净空高度曲线">
+      <div className="live-clearance-chart__tools" role="group" aria-label="实时曲线纵向缩放">
+        <button
+          type="button"
+          disabled={verticalZoom >= 8}
+          title="纵向放大"
+          aria-label="纵向放大实时曲线"
+          onClick={() => adjustVerticalZoom(1.4)}
+        >Y＋</button>
+        <button
+          type="button"
+          disabled={verticalZoom <= 0.25}
+          title="纵向缩小"
+          aria-label="纵向缩小实时曲线"
+          onClick={() => adjustVerticalZoom(1 / 1.4)}
+        >Y－</button>
+        <button
+          type="button"
+          disabled={verticalZoom === 1}
+          title="复位纵向比例"
+          aria-label="复位实时曲线纵向比例"
+          onClick={() => setVerticalZoom(1)}
+        >1:1</button>
+      </div>
       <div className="chart__grid" />
       <div className="chart__axis chart__axis--y">
         <span>{chart.yMax.toFixed(2)}</span>
@@ -572,7 +608,7 @@ function Dashboard({
     ? longitudeValue.toFixed(7)
     : "--";
   const rawAltitudeText = rawCoordinateAvailable
-    ? `${formatMetric(rtkSnapshot?.altitude, 3)} m`
+    ? `${formatMetric(rtkSnapshot?.altitude, 2)} m`
     : "--";
   const localizationLatitudeText = localizationValid && typeof localizationLatitudeValue === "number"
     ? localizationLatitudeValue.toFixed(7)
@@ -589,18 +625,8 @@ function Dashboard({
     2: "航位推算",
     3: "RTK恢复",
   };
-  const localizationHeadingLabels: Record<number, string> = {
-    0: "无效",
-    1: "RTK航迹",
-    2: "RTK轨迹",
-    3: "ODIN姿态",
-    4: "IMU陀螺",
-  };
   const localizationModeText = typeof rtkSnapshot?.localization_mode === "number"
     ? localizationModeLabels[rtkSnapshot.localization_mode] ?? `模式 ${rtkSnapshot.localization_mode}`
-    : "--";
-  const localizationHeadingSourceText = typeof rtkSnapshot?.localization_heading_source === "number"
-    ? localizationHeadingLabels[rtkSnapshot.localization_heading_source] ?? `来源 ${rtkSnapshot.localization_heading_source}`
     : "--";
   const localizationTone = localizationValid
     ? rtkSnapshot?.localization_mode === 2 ? "warn" : "ok"
@@ -608,27 +634,10 @@ function Dashboard({
   const localizationStatusText = localizationValid
     ? localizationModeText
     : rtkSnapshot?.localization_invalid_reason ?? "等待融合定位";
-  const localizationHeadingText = localizationValid
-    ? `${formatMetric(rtkSnapshot?.localization_heading_deg, 1)}°`
-    : "--";
-  const localizationDrText = `${formatMetric(rtkSnapshot?.localization_dr_duration_s, 1)} s`;
-  const localizationAnchorDistanceText = `${formatMetric(rtkSnapshot?.localization_distance_from_anchor_m, 1)} m`;
-  const localizationScaleText = formatMetric(rtkSnapshot?.localization_horizontal_scale, 4);
-  const localizationScaleStateLabels: Record<number, string> = {
-    0: "关闭",
-    1: "采集中",
-    2: "已完成",
-    3: "已拒绝",
-  };
-  const localizationScaleStateText = typeof rtkSnapshot?.localization_scale_status === "number"
-    ? localizationScaleStateLabels[rtkSnapshot.localization_scale_status] ?? `状态 ${rtkSnapshot.localization_scale_status}`
-    : "--";
-  const localizationDeltaYawText = `${formatMetric(rtkSnapshot?.localization_delta_yaw_deg, 2)}°`;
-  const localizationRecoveryErrorText = `${formatMetric(rtkSnapshot?.localization_position_difference_to_rtk_m, 2)} m`;
-  const odinAttitudeValid = rtkSnapshot?.localization_odin_attitude_valid === true;
-  const odinPitchText = odinAttitudeValid ? `${formatMetric(rtkSnapshot?.localization_odin_pitch_deg, 2)}°` : "--";
-  const odinRollText = odinAttitudeValid ? `${formatMetric(rtkSnapshot?.localization_odin_roll_deg, 2)}°` : "--";
-  const odinYawText = odinAttitudeValid ? `${formatMetric(rtkSnapshot?.localization_odin_yaw_deg, 2)}°` : "--";
+  const vehicleAttitudeValid = rtkSnapshot?.localization_vehicle_attitude_valid === true;
+  const vehiclePitchText = vehicleAttitudeValid ? `${formatMetric(rtkSnapshot?.localization_vehicle_pitch_deg, 2)}°` : "--";
+  const vehicleRollText = vehicleAttitudeValid ? `${formatMetric(rtkSnapshot?.localization_vehicle_roll_deg, 2)}°` : "--";
+  const vehicleHeadingText = vehicleAttitudeValid ? `${formatMetric(rtkSnapshot?.localization_vehicle_heading_deg, 2)}°` : "--";
   const monitorUnavailable = !systemStreamAvailable;
   const lidarConnected = !monitorUnavailable && isDeviceConnected("lidar", systemSnapshot?.lidar);
   const rtkConnected = !monitorUnavailable && isDeviceConnected("rtk", systemSnapshot?.rtk);
@@ -978,18 +987,10 @@ function Dashboard({
               <div><span>经度</span><strong>{localizationLongitudeText}</strong></div>
               <div><span>高度</span><strong>{localizationAltitudeText}</strong></div>
             </section>
-            <section className="fusion-attitude-grid" aria-label="ODIN里程计姿态">
-              <div><span>俯仰</span><strong>{odinPitchText}</strong></div>
-              <div><span>横滚</span><strong>{odinRollText}</strong></div>
-              <div><span>方位</span><strong>{odinYawText}</strong></div>
-            </section>
-            <section className="fusion-diagnostics" aria-label="融合定位诊断">
-              <span>车辆航向 <strong>{localizationHeadingText}</strong></span>
-              <span>模式 / 航向源 <strong>{localizationModeText} / {localizationHeadingSourceText}</strong></span>
-              <span>DR时间 / 锚点距 <strong>{localizationDrText} / {localizationAnchorDistanceText}</strong></span>
-              <span>水平尺度 / 状态 <strong>{localizationScaleText} / {localizationScaleStateText}</strong></span>
-              <span>航向偏差 <strong>{localizationDeltaYawText}</strong></span>
-              <span>恢复误差 <strong>{localizationRecoveryErrorText}</strong></span>
+            <section className="fusion-attitude-grid" aria-label="车辆三轴姿态">
+              <div><span>俯仰</span><strong>{vehiclePitchText}</strong></div>
+              <div><span>横滚</span><strong>{vehicleRollText}</strong></div>
+              <div><span>方位</span><strong>{vehicleHeadingText}</strong></div>
             </section>
           </article>
 

@@ -26,7 +26,7 @@ def test_playback_fixture_matches_current_task_and_measurement_schemas(tmp_path:
 
     completed = next(task for task in tasks if task.task_id == TASK_COMPLETED)
     history = MeasurementRepository(data_root / "tasks").load_history(completed)
-    assert history.recording_schema_version == 7
+    assert history.recording_schema_version == 8
     assert history.data_origin == "test_fixture"
     assert history.travel_direction == "up"
     assert history.lane_side == "left"
@@ -41,10 +41,10 @@ def test_playback_fixture_matches_current_task_and_measurement_schemas(tmp_path:
         assert {"source_sequence", "source_age_ms", "is_repeated", "repeat_index"}.issubset(sample_columns)
         assert {
             "rtk_timestamp_ns", "gyro_x_rad_s", "accel_z_m_s2", "imu_sample_count",
-            "radar_temperature_c", "minimum_point_x_m", "odin_pitch_deg", "odin_position_x_m",
+            "radar_temperature_c", "minimum_point_x_m", "vehicle_pitch_deg", "odin_position_x_m",
         }.issubset(sample_columns)
         assert {
-            "mode", "heading_source", "odin_attitude_valid", "scale_calibration_mode",
+            "mode", "heading_source", "vehicle_attitude_valid", "scale_calibration_mode",
             "scale_status", "scale_fit_residual_m", "heading_alignment_reason",
             "distance_from_anchor_m", "dr_duration_s",
         }.issubset(
@@ -70,7 +70,7 @@ def test_playback_fixture_matches_current_task_and_measurement_schemas(tmp_path:
         ).fetchone()
         assert round(recorded_height - raw_height, 6) == 2.30
         telemetry = connection.execute(
-            "SELECT imu_sample_count, radar_temperature_c, odin_pitch_deg "
+            "SELECT imu_sample_count, radar_temperature_c, vehicle_pitch_deg "
             "FROM clearance_samples WHERE valid=1 LIMIT 1"
         ).fetchone()
-        assert telemetry == (8, 42.5, 89.5)
+        assert telemetry == (8, 42.5, 1.5)

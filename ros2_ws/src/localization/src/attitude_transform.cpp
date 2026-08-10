@@ -24,6 +24,12 @@ void setInvalidPoint(EnuPoint3d & point) noexcept
   point = EnuPoint3d{nan, nan, nan};
 }
 
+void setInvalidAttitude(VehicleAttitude & attitude) noexcept
+{
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  attitude = VehicleAttitude{nan, nan, nan};
+}
+
 }  // namespace
 
 bool rosQuaternionToMatrix(
@@ -48,6 +54,80 @@ bool rosQuaternionToMatrix(
   // 本项目已确认q2mat输出R_n<-b，即机体系到导航系的旋转矩阵。
   double qnb[4]{w / norm, x / norm, y / norm, z / norm};
   q2mat(qnb, R_navigation_from_body);
+  return true;
+}
+
+bool isProperRotationMatrix(const RotationMatrix3d & matrix, const double tolerance) noexcept
+{
+  if (!std::isfinite(tolerance) || tolerance <= 0.0) {
+    return false;
+  }
+  for (const double value : matrix) {
+    if (!std::isfinite(value)) {
+      return false;
+    }
+  }
+
+  for (int row = 0; row < 3; ++row) {
+    for (int column = 0; column < 3; ++column) {
+      double dot = 0.0;
+      for (int index = 0; index < 3; ++index) {
+        dot += matrix[index * 3 + row] * matrix[index * 3 + column];
+      }
+      const double expected = row == column ? 1.0 : 0.0;
+      if (std::abs(dot - expected) > tolerance) {
+        return false;
+      }
+    }
+  }
+
+  const double determinant =
+    matrix[0] * (matrix[4] * matrix[8] - matrix[5] * matrix[7]) -
+    matrix[1] * (matrix[3] * matrix[8] - matrix[5] * matrix[6]) +
+    matrix[2] * (matrix[3] * matrix[7] - matrix[4] * matrix[6]);
+  return std::abs(determinant - 1.0) <= tolerance;
+}
+
+RotationMatrix3d transposeRotationMatrix(const RotationMatrix3d & matrix) noexcept
+{
+  return RotationMatrix3d{
+    matrix[0], matrix[3], matrix[6],
+    matrix[1], matrix[4], matrix[7],
+    matrix[2], matrix[5], matrix[8]};
+}
+
+bool vehicleAttitudeFromOdinQuaternion(
+  const double x, const double y, const double z, const double w,
+  const RotationMatrix3d & Cbm, VehicleAttitude & attitude) noexcept
+{
+  if (!isProperRotationMatrix(Cbm)) {
+    setInvalidAttitude(attitude);
+    return false;
+  }
+
+  double Cnb[9];
+  if (!rosQuaternionToMatrix(x, y, z, w, Cnb)) {
+    setInvalidAttitude(attitude);
+    return false;
+  }
+
+  // ODIN publishes C_n<-b. The installed vehicle attitude is exactly C_n<-m=C_n<-b*C_b<-m.
+  double Cnm[9];
+  double Cbm_mutable[9];
+  for (int index = 0; index < 9; ++index) {
+    Cbm_mutable[index] = Cbm[index];
+  }
+  MatMul(Cnb, Cbm_mutable, Cnm, 3, 3, 3);
+  double attitude_rad[3];
+  m2att(Cnm, attitude_rad);
+  if (!std::isfinite(attitude_rad[0]) || !std::isfinite(attitude_rad[1]) ||
+    !std::isfinite(attitude_rad[2]))
+  {
+    setInvalidAttitude(attitude);
+    return false;
+  }
+
+  attitude = VehicleAttitude{attitude_rad[0], attitude_rad[1], attitude_rad[2]};
   return true;
 }
 

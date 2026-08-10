@@ -32,7 +32,7 @@ def iso_utc(epoch_ns: int) -> str:
 
 
 def create_recording_schema(connection: sqlite3.Connection) -> None:
-    """建立与 data_recorder 当前 schema v7 对齐的测试数据库。"""
+    """建立与 data_recorder 当前 schema v8 对齐的测试数据库。"""
     connection.executescript(
         """
         CREATE TABLE recording_metadata (
@@ -81,9 +81,9 @@ def create_recording_schema(connection: sqlite3.Connection) -> None:
             minimum_point_x_m REAL,
             minimum_point_y_m REAL,
             minimum_point_z_m REAL,
-            odin_pitch_deg REAL,
-            odin_roll_deg REAL,
-            odin_yaw_deg REAL,
+            vehicle_pitch_deg REAL,
+            vehicle_roll_deg REAL,
+            vehicle_heading_deg REAL,
             odin_position_x_m REAL,
             odin_position_y_m REAL,
             odin_position_z_m REAL
@@ -133,10 +133,10 @@ def create_recording_schema(connection: sqlite3.Connection) -> None:
             longitude_deg REAL NOT NULL,
             altitude_m REAL NOT NULL,
             heading_deg REAL NOT NULL,
-            odin_attitude_valid INTEGER NOT NULL CHECK (odin_attitude_valid IN (0, 1)),
-            odin_pitch_deg REAL NOT NULL,
-            odin_roll_deg REAL NOT NULL,
-            odin_yaw_deg REAL NOT NULL,
+            vehicle_attitude_valid INTEGER NOT NULL CHECK (vehicle_attitude_valid IN (0, 1)),
+            vehicle_pitch_deg REAL NOT NULL,
+            vehicle_roll_deg REAL NOT NULL,
+            vehicle_heading_deg REAL NOT NULL,
             heading_alignment_valid INTEGER NOT NULL CHECK (heading_alignment_valid IN (0, 1)),
             delta_yaw_deg REAL NOT NULL,
             scale_calibration_mode INTEGER NOT NULL CHECK (scale_calibration_mode IN (0, 1)),
@@ -237,7 +237,7 @@ def create_recording(
                 ended_at, complete, nominal_sample_rate_hz, algorithm_version,
                 config_version, software_version, lidar_mount_height_m,
                 clearance_threshold_m, entry_rtk_status, exit_rtk_status
-            ) VALUES (1, 7, ?, 'test_fixture', ?, 'up', ?, ?, ?, ?, 50.0, ?, ?, ?, ?, ?, 'confirmed', ?)
+            ) VALUES (1, 8, ?, 'test_fixture', ?, 'up', ?, ?, ?, ?, 50.0, ?, ?, ?, ?, ?, 'confirmed', ?)
             """,
             (
                 task_id,
@@ -276,8 +276,8 @@ def create_recording(
                 0.25,
                 -0.15,
                 2.92,
-                89.5,
-                0.2,
+                1.5,
+                -0.2,
                 45.0,
                 index * 0.02,
                 index * 0.01,
@@ -381,7 +381,7 @@ def create_recording(
                 gyro_x_rad_s, gyro_y_rad_s, gyro_z_rad_s,
                 accel_x_m_s2, accel_y_m_s2, accel_z_m_s2, imu_sample_count,
                 radar_temperature_c, minimum_point_x_m, minimum_point_y_m,
-                minimum_point_z_m, odin_pitch_deg, odin_roll_deg, odin_yaw_deg,
+                minimum_point_z_m, vehicle_pitch_deg, vehicle_roll_deg, vehicle_heading_deg,
                 odin_position_x_m, odin_position_y_m, odin_position_z_m
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                       ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -639,7 +639,7 @@ def generate(output: Path, *, force: bool) -> None:
             assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
             assert connection.execute(
                 "SELECT schema_version FROM recording_metadata WHERE id=1"
-            ).fetchone()[0] == 7
+            ).fetchone()[0] == 8
 
     print(output)
 

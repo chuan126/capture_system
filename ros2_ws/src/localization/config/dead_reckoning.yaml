@@ -18,6 +18,9 @@ dead_reckoning_node:
     # 车辆前进方向在ODIN机体系中的单位向量；当前镜头朝天安装时车辆前向对应机体系-Z轴。
     # 若实车直行诊断持续提示方向相反，只修改此YAML为[0.0, 0.0, 1.0]，程序不会自动翻转。
     vehicle_forward_axis_body: [0.0, 0.0, -1.0]
+    # 仅用于界面和TXT车辆姿态：C_b<-m，行主序；不会作用于ODIN位置、DR或点云。
+    # ODIN机体系+X向上、+Y向车左、+Z向车后；车辆体系+X向前、+Y向左、+Z向上。
+    vehicle_attitude_mount_rotation_bm: [0.0, 0.0, 1.0, 0.0, 1.0, 0.0, -1.0, 0.0, 0.0]
     # 车辆前向经ODIN姿态旋转后，其水平投影模长下限；低于该值不参与航向对准。
     heading_projection_min_norm: 0.2
 

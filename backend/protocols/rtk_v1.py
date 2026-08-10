@@ -45,10 +45,10 @@ class RtkSnapshot:
     localization_longitude: float | None = None
     localization_altitude: float | None = None
     localization_heading_deg: float | None = None
-    localization_odin_attitude_valid: bool | None = None
-    localization_odin_pitch_deg: float | None = None
-    localization_odin_roll_deg: float | None = None
-    localization_odin_yaw_deg: float | None = None
+    localization_vehicle_attitude_valid: bool | None = None
+    localization_vehicle_pitch_deg: float | None = None
+    localization_vehicle_roll_deg: float | None = None
+    localization_vehicle_heading_deg: float | None = None
     localization_heading_alignment_valid: bool | None = None
     localization_delta_yaw_deg: float | None = None
     localization_scale_calibration_mode: int | None = None
@@ -113,10 +113,10 @@ def with_localization_status(snapshot: RtkSnapshot, message: object) -> RtkSnaps
         localization_longitude=float(getattr(message, "longitude")),
         localization_altitude=float(getattr(message, "altitude")),
         localization_heading_deg=float(getattr(message, "heading_deg")),
-        localization_odin_attitude_valid=bool(getattr(message, "odin_attitude_valid")),
-        localization_odin_pitch_deg=float(getattr(message, "odin_pitch_deg")),
-        localization_odin_roll_deg=float(getattr(message, "odin_roll_deg")),
-        localization_odin_yaw_deg=float(getattr(message, "odin_yaw_deg")),
+        localization_vehicle_attitude_valid=bool(getattr(message, "vehicle_attitude_valid")),
+        localization_vehicle_pitch_deg=float(getattr(message, "vehicle_pitch_deg")),
+        localization_vehicle_roll_deg=float(getattr(message, "vehicle_roll_deg")),
+        localization_vehicle_heading_deg=float(getattr(message, "vehicle_heading_deg")),
         localization_heading_alignment_valid=bool(
             getattr(message, "heading_alignment_valid")
         ),

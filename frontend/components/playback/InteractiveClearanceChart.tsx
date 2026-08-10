@@ -78,6 +78,7 @@ export default function InteractiveClearanceChart({
   const chartRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<DragState | null>(null);
   const [view, setView] = useState<NormalizedViewWindow>({ start: 0, end: 1 });
+  const [verticalZoom, setVerticalZoom] = useState(1);
   const [hover, setHover] = useState<HoverPoint | null>(null);
   const [dragging, setDragging] = useState(false);
 
@@ -117,8 +118,16 @@ export default function InteractiveClearanceChart({
     rawYMax = 1;
   }
   const ySpan = Math.max(0.1, rawYMax - rawYMin);
-  const yMin = rawYMin - ySpan * 0.12;
-  const yMax = rawYMax + ySpan * 0.12;
+  const baseYMin = Math.max(0, rawYMin - ySpan * 0.12);
+  const baseYMax = rawYMax + ySpan * 0.12;
+  const yCenter = (baseYMin + baseYMax) / 2;
+  const scaledYSpan = Math.max(0.02, (baseYMax - baseYMin) / verticalZoom);
+  let yMin = yCenter - scaledYSpan / 2;
+  let yMax = yCenter + scaledYSpan / 2;
+  if (yMin < 0) {
+    yMax -= yMin;
+    yMin = 0;
+  }
 
   const xToPercent = (timestampMs: number) =>
     ((timestampMs - windowStart) / Math.max(1, windowEnd - windowStart)) * 100;
@@ -157,8 +166,14 @@ export default function InteractiveClearanceChart({
     setView((currentView) => panChartView(currentView, fraction));
   };
 
+  const zoomVertically = (factor: number) => {
+    if (!hasData) return;
+    setVerticalZoom((current) => clampChartValue(current * factor, 0.25, 8));
+  };
+
   const resetView = () => {
     setView({ start: 0, end: 1 });
+    setVerticalZoom(1);
     setHover(null);
   };
 
@@ -214,6 +229,12 @@ export default function InteractiveClearanceChart({
       if (!hasData) return;
       event.preventDefault();
       event.stopPropagation();
+      if (event.shiftKey) {
+        setVerticalZoom((current) =>
+          clampChartValue(current * (event.deltaY > 0 ? 1 / 1.18 : 1.18), 0.25, 8),
+        );
+        return;
+      }
       const rect = chart.getBoundingClientRect();
       const plotWidth = Math.max(1, rect.width - PLOT.left - PLOT.right);
       const anchor = clampChartValue(
@@ -269,27 +290,33 @@ export default function InteractiveClearanceChart({
     if (event.key === "-") zoomAt(1.25);
     if (event.key === "ArrowLeft") panBy(-0.12);
     if (event.key === "ArrowRight") panBy(0.12);
+    if (event.key === "ArrowUp") zoomVertically(1.2);
+    if (event.key === "ArrowDown") zoomVertically(1 / 1.2);
     if (event.key === "0" || event.key === "Home") resetView();
   };
 
   const viewPercent = Math.round((view.end - view.start) * 100);
+  const verticalZoomText = `${verticalZoom.toFixed(2)}x`;
 
   return (
     <div className="interactive-clearance-chart-shell">
       <div className="interactive-clearance-chart-toolbar" aria-label="曲线视图工具">
         <div>
           <strong>完整任务曲线</strong>
-          <span>{hasData ? `当前显示 ${viewPercent}% 时间范围` : "当前没有可显示记录"}</span>
+          <span>{hasData ? `时间 ${viewPercent}% · 纵向 ${verticalZoomText}` : "当前没有可显示记录"}</span>
         </div>
         <div className="interactive-clearance-chart-toolbar__guide">
           <span>拖拽平移</span>
-          <span>滚轮缩放</span>
+          <span>滚轮横向缩放</span>
+          <span>Shift+滚轮纵向缩放</span>
           <span>双击复位</span>
         </div>
         <div className="interactive-clearance-chart-toolbar__actions">
           <button type="button" disabled={!hasData} onClick={() => zoomAt(0.8)} aria-label="放大曲线">＋</button>
           <button type="button" disabled={!hasData} onClick={() => zoomAt(1.25)} aria-label="缩小曲线">－</button>
-          <button type="button" disabled={!hasData || viewPercent === 100} onClick={resetView}>重置视图</button>
+          <button type="button" disabled={!hasData || verticalZoom >= 8} onClick={() => zoomVertically(1.4)} aria-label="纵向放大曲线">Y＋</button>
+          <button type="button" disabled={!hasData || verticalZoom <= 0.25} onClick={() => zoomVertically(1 / 1.4)} aria-label="纵向缩小曲线">Y－</button>
+          <button type="button" disabled={!hasData || (viewPercent === 100 && verticalZoom === 1)} onClick={resetView}>重置视图</button>
         </div>
       </div>
 

@@ -156,7 +156,11 @@ R_n_from_b = Rz(delta_yaw_anchor) * R_o_from_b
 ```
 
 最终车辆航向仍由完整绝对姿态旋转车辆前向轴并投影到ENU水平面得到，不经过Euler角往返。
-`q2att` 只用于状态消息和TXT中的ODIN原始里程计俯仰、横滚、方位显示。
+界面和TXT的车辆三轴姿态使用独立显示链路：先由ODIN四元数得到 `Cnb`，再按
+`Cnm = Cnb * Cbm` 换算车辆矩阵，最后调用 `m2att` 得到俯仰、横滚和方位。
+默认 `Cbm=[0,0,1; 0,1,0; -1,0,0]`，参数名为
+`vehicle_attitude_mount_rotation_bm`。启动时校验其正交性和行列式；该矩阵不进入ODIN位置、
+航位推算、运动补偿、点云或净空计算。`vehicle_forward_axis_body` 仍是独立的航向对齐参数。
 
 DR期间ODIN短时超时后，节点保持最后位置，并用IMU角速度对完整四元数做最多
 `gyro_fallback_max_duration_s`的桥接，航向来源标记为`HEADING_IMU_GYRO`。IMU超时或达到

@@ -35,10 +35,10 @@ test("parses an indoor no-fix RTK snapshot without adding quality fields", () =>
     localization_longitude: 0,
     localization_altitude: 0,
     localization_heading_deg: 0,
-    localization_odin_attitude_valid: true,
-    localization_odin_pitch_deg: 89.5,
-    localization_odin_roll_deg: 0.2,
-    localization_odin_yaw_deg: 45.0,
+    localization_vehicle_attitude_valid: true,
+    localization_vehicle_pitch_deg: 1.5,
+    localization_vehicle_roll_deg: -0.2,
+    localization_vehicle_heading_deg: 45.0,
     localization_heading_alignment_valid: false,
     localization_delta_yaw_deg: 0,
     localization_scale_calibration_mode: 0,
@@ -64,7 +64,7 @@ test("parses an indoor no-fix RTK snapshot without adding quality fields", () =>
   assert.equal(snapshot.gps_state, 0);
   assert.equal(snapshot.fix_status, -1);
   assert.equal(snapshot.localization_valid, false);
-  assert.equal(snapshot.localization_odin_pitch_deg, 89.5);
+  assert.equal(snapshot.localization_vehicle_pitch_deg, 1.5);
   assert.equal(snapshot.localization_scale_status, 0);
   assert.equal(snapshot.localization_invalid_reason, "NO_VALID_RTK_ANCHOR");
   assert.equal("quality" in snapshot, false);
@@ -103,9 +103,9 @@ test("rejects malformed RTK numeric fields", () => {
       localization_longitude: null,
       localization_altitude: null,
       localization_heading_deg: null,
-      localization_odin_pitch_deg: null,
-      localization_odin_roll_deg: null,
-      localization_odin_yaw_deg: null,
+      localization_vehicle_pitch_deg: null,
+      localization_vehicle_roll_deg: null,
+      localization_vehicle_heading_deg: null,
       localization_delta_yaw_deg: null,
       localization_scale_calibration_mode: null,
       localization_scale_status: null,
@@ -121,7 +121,7 @@ test("rejects malformed RTK numeric fields", () => {
       localization_imu_age_s: null,
       localization_position_difference_to_rtk_m: null,
       localization_valid: null,
-      localization_odin_attitude_valid: null,
+      localization_vehicle_attitude_valid: null,
       localization_heading_alignment_valid: null,
       localization_scale_valid: null,
       localization_heading_alignment_reason: null,

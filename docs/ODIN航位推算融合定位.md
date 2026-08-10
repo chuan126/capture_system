@@ -109,6 +109,21 @@ delta_yaw = atan2(sum(w_k * sin(delta_yaw_k)), sum(w_k * cos(delta_yaw_k)))
 
 只有样本数、运动距离和圆周标准差满足参数要求后，`heading_alignment_valid=true`。
 
+## 车辆姿态显示与记录
+
+ODIN机体系定义为 `+X` 向上、`+Y` 向车辆左侧、`+Z` 向车辆后方；车辆体系定义为
+`+X` 向前、`+Y` 向左、`+Z` 向上。默认安装矩阵为：
+
+```text
+Cmb = [ 0  0 -1; 0 1 0; 1 0 0 ]
+Cbm = [ 0  0  1; 0 1 0; -1 0 0 ]
+Cnm = Cnb * Cbm
+```
+
+`vehicle_attitude_mount_rotation_bm` 按行主序配置 `Cbm`。节点启动时检查矩阵有限、正交且
+行列式接近 `+1`，不合法时拒绝启动。`Cnm` 仅经 `m2att` 转成车辆俯仰、横滚和方位，供
+界面与TXT共用；它不作用于DR、ODIN position、ENU、点云、运动补偿或净空计算。
+
 ## 尺度标定
 
 默认 `scale_calibration_mode=0`，不建立尺度拟合轨迹、不执行相似变换拟合，

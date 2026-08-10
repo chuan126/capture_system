@@ -76,7 +76,11 @@ test("interactive clearance chart supports pan, zoom, reset and hover without mo
   assert.match(interactiveChart, /setPointerCapture/);
   assert.match(interactiveChart, /onDoubleClick=\{resetView\}/);
   assert.match(interactiveChart, /拖拽平移/);
-  assert.match(interactiveChart, /滚轮缩放/);
+  assert.match(interactiveChart, /滚轮横向缩放/);
+  assert.match(interactiveChart, /Shift\+滚轮纵向缩放/);
+  assert.match(interactiveChart, /zoomVertically/);
+  assert.match(interactiveChart, /纵向放大曲线/);
+  assert.match(interactiveChart, /纵向缩小曲线/);
   assert.match(interactiveChart, /重置视图/);
   assert.match(interactiveChart, /onKeyDown=\{handleKeyDown\}/);
   assert.match(interactiveChart, /heightM:\s*number \| null/);

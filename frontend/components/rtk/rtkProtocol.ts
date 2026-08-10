@@ -36,10 +36,10 @@ export type RtkSnapshot = {
   localization_longitude: number | null;
   localization_altitude: number | null;
   localization_heading_deg: number | null;
-  localization_odin_attitude_valid: boolean | null;
-  localization_odin_pitch_deg: number | null;
-  localization_odin_roll_deg: number | null;
-  localization_odin_yaw_deg: number | null;
+  localization_vehicle_attitude_valid: boolean | null;
+  localization_vehicle_pitch_deg: number | null;
+  localization_vehicle_roll_deg: number | null;
+  localization_vehicle_heading_deg: number | null;
   localization_heading_alignment_valid: boolean | null;
   localization_delta_yaw_deg: number | null;
   localization_scale_calibration_mode: number | null;
@@ -127,9 +127,9 @@ export function parseRtkText(text: string): RtkTextMessage {
     "localization_longitude",
     "localization_altitude",
     "localization_heading_deg",
-    "localization_odin_pitch_deg",
-    "localization_odin_roll_deg",
-    "localization_odin_yaw_deg",
+    "localization_vehicle_pitch_deg",
+    "localization_vehicle_roll_deg",
+    "localization_vehicle_heading_deg",
     "localization_delta_yaw_deg",
     "localization_scale_calibration_mode",
     "localization_scale_status",
@@ -151,7 +151,7 @@ export function parseRtkText(text: string): RtkTextMessage {
 
   const booleanFields = [
     "localization_valid",
-    "localization_odin_attitude_valid",
+    "localization_vehicle_attitude_valid",
     "localization_heading_alignment_valid",
     "localization_scale_valid",
   ] as const;

@@ -1,8 +1,25 @@
 #ifndef LOCALIZATION__ATTITUDE_TRANSFORM_HPP_
 #define LOCALIZATION__ATTITUDE_TRANSFORM_HPP_
 
+#include <array>
+
 namespace localization
 {
+
+using RotationMatrix3d = std::array<double, 9>;
+
+// C_b<-m: vehicle coordinates (+X forward, +Y left, +Z up) to the installed ODIN body frame.
+inline constexpr RotationMatrix3d kDefaultVehicleAttitudeMountRotationBm{
+  0.0, 0.0, 1.0,
+  0.0, 1.0, 0.0,
+  -1.0, 0.0, 0.0};
+
+struct VehicleAttitude
+{
+  double pitch_rad;
+  double roll_rad;
+  double heading_rad;
+};
 
 struct RadarPoint3d
 {
@@ -21,6 +38,17 @@ struct EnuPoint3d
 // 将ROS的[x, y, z, w]四元数归一化后，生成R_n<-b，即机体系到导航系的旋转矩阵。
 bool rosQuaternionToMatrix(
   double x, double y, double z, double w, double R_navigation_from_body[9]) noexcept;
+
+bool isProperRotationMatrix(
+  const RotationMatrix3d & matrix, double tolerance = 1.0e-6) noexcept;
+
+RotationMatrix3d transposeRotationMatrix(const RotationMatrix3d & matrix) noexcept;
+
+// This mount transform is display/recording only. It must not be used for ODIN position,
+// dead reckoning, point-cloud coordinates, or clearance computation.
+bool vehicleAttitudeFromOdinQuaternion(
+  double x, double y, double z, double w,
+  const RotationMatrix3d & Cbm, VehicleAttitude & attitude) noexcept;
 
 // 以雷达当前放置姿态为零姿态，直接规定当前X=East、Y=North、Z=Up。
 bool initializeLocalEnuReference(

@@ -7,14 +7,13 @@ endif()
 
 find_package(ament_cmake REQUIRED)
 find_package(interfaces REQUIRED)
-find_package(localization REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(SQLite3 REQUIRED)
 
 add_executable(data_recorder_node src/data_recorder_node.cpp)
-ament_target_dependencies(data_recorder_node interfaces localization nav_msgs rclcpp sensor_msgs)
+ament_target_dependencies(data_recorder_node interfaces nav_msgs rclcpp sensor_msgs)
 target_link_libraries(data_recorder_node SQLite::SQLite3)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")

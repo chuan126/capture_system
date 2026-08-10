@@ -56,9 +56,9 @@ class MeasurementExportSampleRecord:
     minimum_point_x_m: float | None
     minimum_point_y_m: float | None
     minimum_point_z_m: float | None
-    odin_pitch_deg: float | None
-    odin_roll_deg: float | None
-    odin_yaw_deg: float | None
+    vehicle_pitch_deg: float | None
+    vehicle_roll_deg: float | None
+    vehicle_heading_deg: float | None
     odin_position_x_m: float | None
     odin_position_y_m: float | None
     odin_position_z_m: float | None
@@ -134,7 +134,7 @@ class MeasurementHistoryRecord:
     samples: list[ClearanceHistorySampleRecord]
 
 
-_SUPPORTED_SCHEMA_VERSIONS = {1, 2, 3, 4, 5, 6, 7}
+_SUPPORTED_SCHEMA_VERSIONS = {1, 2, 3, 4, 5, 6, 7, 8}
 _MAX_HISTORY_SAMPLES = 500_000
 
 
@@ -295,9 +295,9 @@ class MeasurementRepository:
                     {optional_column("minimum_point_x_m")} AS minimum_point_x_m,
                     {optional_column("minimum_point_y_m")} AS minimum_point_y_m,
                     {optional_column("minimum_point_z_m")} AS minimum_point_z_m,
-                    {optional_column("odin_pitch_deg")} AS odin_pitch_deg,
-                    {optional_column("odin_roll_deg")} AS odin_roll_deg,
-                    {optional_column("odin_yaw_deg")} AS odin_yaw_deg,
+                    {optional_column("vehicle_pitch_deg")} AS vehicle_pitch_deg,
+                    {optional_column("vehicle_roll_deg")} AS vehicle_roll_deg,
+                    {optional_column("vehicle_heading_deg")} AS vehicle_heading_deg,
                     {optional_column("odin_position_x_m")} AS odin_position_x_m,
                     {optional_column("odin_position_y_m")} AS odin_position_y_m,
                     {optional_column("odin_position_z_m")} AS odin_position_z_m
@@ -347,9 +347,9 @@ class MeasurementRepository:
                     minimum_point_x_m=_optional_float(row["minimum_point_x_m"]),
                     minimum_point_y_m=_optional_float(row["minimum_point_y_m"]),
                     minimum_point_z_m=_optional_float(row["minimum_point_z_m"]),
-                    odin_pitch_deg=_optional_float(row["odin_pitch_deg"]),
-                    odin_roll_deg=_optional_float(row["odin_roll_deg"]),
-                    odin_yaw_deg=_optional_float(row["odin_yaw_deg"]),
+                    vehicle_pitch_deg=_optional_float(row["vehicle_pitch_deg"]),
+                    vehicle_roll_deg=_optional_float(row["vehicle_roll_deg"]),
+                    vehicle_heading_deg=_optional_float(row["vehicle_heading_deg"]),
                     odin_position_x_m=_optional_float(row["odin_position_x_m"]),
                     odin_position_y_m=_optional_float(row["odin_position_y_m"]),
                     odin_position_z_m=_optional_float(row["odin_position_z_m"]),
