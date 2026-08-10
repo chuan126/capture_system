@@ -512,9 +512,7 @@ private:
   void applyRtkSimulationAnchor(const std::int64_t now_ns)
   {
     const auto latest_odom = odom_buffer_.latest();
-    const bool odom_fresh = latest_odom.has_value() &&
-      ageSeconds(now_ns, latest_odom->stamp_ns) <= odometry_timeout_s_;
-    const std::int64_t simulation_stamp_ns = odom_fresh ? latest_odom->stamp_ns : now_ns;
+    const std::int64_t simulation_stamp_ns = now_ns;
 
     latest_fix_.available = true;
     latest_fix_.stamp_ns = simulation_stamp_ns;
@@ -534,7 +532,7 @@ private:
     if (!rtk_origin_llh_.has_value()) {
       rtk_origin_llh_ = latest_fix_.llh;
     }
-    if (!odom_fresh || simulated_anchor_initialized_) {
+    if (!latest_odom.has_value() || simulated_anchor_initialized_) {
       return;
     }
 
@@ -560,6 +558,9 @@ private:
   {
     OdomSample sample;
     sample.stamp_ns = toNanoseconds(message->header.stamp);
+    if (sample.stamp_ns <= 0) {
+      sample.stamp_ns = now().nanoseconds();
+    }
     sample.position_m = Vector3d{
       message->pose.pose.position.x,
       message->pose.pose.position.y,
@@ -833,7 +834,9 @@ private:
     }
 
     Output output;
-    if (mode_ == InternalMode::kRtkValid && reliable_rtk) {
+    if (simulation_anchor_mode && mode_ != InternalMode::kDeadReckoning) {
+      output = makeSimulatedAnchorOutput(now_ns);
+    } else if (mode_ == InternalMode::kRtkValid && reliable_rtk) {
       output = makeRtkOutput(now_ns);
     } else if (mode_ == InternalMode::kDeadReckoning) {
       output = makeDeadReckoningOutput(now_ns);
@@ -854,9 +857,7 @@ private:
       return false;
     }
     const auto latest_odom = odom_buffer_.latest();
-    if (!latest_odom.has_value() ||
-      ageSeconds(now_ns, latest_odom->stamp_ns) > odometry_timeout_s_)
-    {
+    if (!latest_odom.has_value() || !odometryUsable(now_ns, *latest_odom)) {
       return false;
     }
     return last_reliable_anchor_candidate_.stamp_ns > 0 && latest_odom->stamp_ns > 0;
@@ -907,6 +908,36 @@ private:
     output.heading_enu_rad = 0.0;
     output.invalid_reason = reason;
     output.position_difference_to_rtk_m = last_recovery_position_error_m_;
+    return output;
+  }
+
+  Output makeSimulatedAnchorOutput(const std::int64_t now_ns) const
+  {
+    if (last_dr_result_.has_value() && last_dr_result_->valid) {
+      Output output;
+      output.valid = true;
+      output.mode = interfaces::msg::LocalizationStatus::MODE_DEAD_RECKONING;
+      output.heading_source = interfaces::msg::LocalizationStatus::HEADING_ODIN;
+      output.llh = last_dr_result_->llh;
+      output.enu = last_dr_result_->enu_position_m;
+      output.orientation = last_dr_result_->orientation_xyzw;
+      output.heading_enu_rad = last_dr_result_->heading_enu_rad;
+      output.distance_from_anchor_m = last_dr_result_->distance_from_anchor_m;
+      output.dr_duration_s = dr_start_ns_ > 0 ? ageSeconds(now_ns, dr_start_ns_) : 0.0;
+      output.invalid_reason = "NONE";
+      return output;
+    }
+
+    Output output;
+    output.valid = true;
+    output.mode = interfaces::msg::LocalizationStatus::MODE_RTK;
+    output.heading_source = interfaces::msg::LocalizationStatus::HEADING_RTK_TRACK;
+    output.llh =
+      Llh{kSimulatedRtkLatitudeDeg, kSimulatedRtkLongitudeDeg, kSimulatedRtkAltitudeM};
+    output.enu = Enu{0.0, 0.0, 0.0};
+    output.heading_enu_rad = clockwiseCourseDegreesToEnuYawRad(kSimulatedRtkTrackDeg);
+    output.orientation = yawQuaternion(output.heading_enu_rad);
+    output.invalid_reason = "NONE";
     return output;
   }
 
@@ -964,9 +995,10 @@ private:
       return makeInvalidOutput("NO_VALID_RTK_ANCHOR");
     }
     const auto latest_odom = odom_buffer_.latest();
-    if (!latest_odom.has_value() ||
-      ageSeconds(now_ns, latest_odom->stamp_ns) > odometry_timeout_s_)
-    {
+    if (!latest_odom.has_value() || !odometryUsable(now_ns, *latest_odom)) {
+      if (rtk_simulation_enabled_ == 1) {
+        return makeSimulatedAnchorOutput(now_ns);
+      }
       return makeInvalidOutput("ODOMETRY_TIMEOUT");
     }
     DeadReckoningResult result = propagateDeadReckoning(
@@ -1110,6 +1142,12 @@ private:
     message.position_difference_to_rtk_m = output.position_difference_to_rtk_m;
     message.invalid_reason = output.valid ? "NONE" : output.invalid_reason;
     status_publisher_->publish(message);
+  }
+
+  bool odometryUsable(const std::int64_t now_ns, const OdomSample & odom) const noexcept
+  {
+    return rtk_simulation_enabled_ == 1 ||
+           ageSeconds(now_ns, odom.stamp_ns) <= odometry_timeout_s_;
   }
 
   double output_rate_hz_{10.0};

@@ -185,15 +185,15 @@ gps_state = 4
 
 ```bash
 ros2 param set /dead_reckoning_node rtk_simulation_enabled 1
-# 确认 /capture/localization/status 为 MODE_DEAD_RECKONING，heading_alignment_valid=true
+# 未收到ODIN时先输出模拟坐标；收到ODIN后切到MODE_DEAD_RECKONING
 # 移动雷达，观察 /capture/localization/fix 经纬高随ODIN里程变化
 ros2 param set /dead_reckoning_node rtk_simulation_enabled 0
 # 设回0后取消模拟锚点，节点恢复使用真实RTK输入
 ```
 
-开启模拟时如果ODIN里程计已有新鲜数据，节点会用当前ODIN位置作为 `p_o_anchor`，用当前ODIN姿态和
-模拟航迹角直接建立 `delta_yaw`，随后固定该锚点进行DR输出。若要重新选择室内起点，先设为 `0`，
-再设回 `1`。
+开启模拟后，节点会立即输出模拟坐标，避免上位机空白。如果ODIN里程计已有数据，节点会用当前ODIN位置作为
+`p_o_anchor`，用当前ODIN姿态和模拟航迹角直接建立 `delta_yaw`，随后固定该锚点进行DR输出。模拟模式下允许
+ODIN header时间与ROS当前时间不同步；若要重新选择室内起点，先设为 `0`，再设回 `1`。
 
 ## 目标机构建
 
