@@ -32,14 +32,15 @@ test("renders the tunnel clearance terminal shell", async () => {
   assert.match(html, /<html[^>]*lang="zh-CN"/i);
   assert.match(html, /<title>隧道净空测量显控终端<\/title>/i);
   assert.match(html, /车载隧道净空高度测量/);
-  assert.match(html, /当前坐标/);
-  assert.match(html, /RTK 定位/);
+  assert.match(html, /RTK定位/);
+  assert.match(html, /融合定位/);
+  assert.match(html, /俯仰/);
   assert.match(html, /任务控制/);
   assert.match(html, /创建任务/);
   assert.match(html, /高度阈值/);
   assert.match(html, /雷达安装高度/);
   assert.match(html, /作业车道/);
-  assert.match(html, /选择任务/);
+  assert.match(html, /当前任务/);
   assert.match(html, /待测任务/);
   assert.match(html, /开始采集/);
   assert.match(html, /暂停/);
@@ -58,7 +59,7 @@ test("keeps playback and report pages on real task context without simulated rep
   assert.match(page, /ReportWorkspace/);
   assert.match(playback, /净空高度曲线/);
   assert.match(report, /50 Hz 测量明细/);
-  assert.match(report, /任务汇总报告/);
+  assert.match(report, /隧道净空检测汇总报告/);
   assert.doesNotMatch(`${page}${playback}${report}`, /browser-download-test|report-export-test|模拟数据/);
 });
 

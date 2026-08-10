@@ -34,15 +34,15 @@ delta_p_enu = Rz(delta_yaw_anchor) * S * delta_p_o
 LLH(t) = ENU_to_WGS84(LLH_anchor, delta_p_enu)
 ```
 
-洞内航向公式：
+洞内完整姿态公式：
 
 ```text
-psi_absolute = wrap(psi_odin + delta_yaw_anchor)
 R_n_from_b = Rz(delta_yaw_anchor) * R_o_from_b
 ```
 
-如果需要完整四元数，节点使用四元数乘法组合 `Rz(delta_yaw_anchor)` 与ODIN四元数，
-不会把 `delta_yaw` 直接加到四元数分量。
+节点使用左乘四元数组合 `q_n_from_o ⊗ q_o_from_b`，不会通过
+`quaternion -> Euler -> yaw相加 -> quaternion` 往返。车辆航向由完整姿态旋转
+`vehicle_forward_axis_body` 后的ENU水平投影得到。
 
 ## RTK有效阶段
 
@@ -59,6 +59,11 @@ fix/status超时或fix本身不可用，节点切换为ODIN航位推算输出。
 4. IMU陀螺短时后备
 5. INVALID
 ```
+
+DR过程中ODIN四元数或里程计Topic短时中断时，节点保持最后一个ODIN位置，并使用
+`/capture/imu/data`角速度对完整绝对四元数做最多`gyro_fallback_max_duration_s`的短时积分，
+状态航向来源为`HEADING_IMU_GYRO`。IMU也超时或桥接时限耗尽后定位输出转为无效；加速度计
+不参与航向修正。
 
 RTK航迹角定义为North=0、East=90、顺时针为正；内部统一使用ENU数学角：
 
@@ -78,11 +83,23 @@ psi_enu = wrap(pi / 2 - course_rtk)
 
 ## 航向对齐
 
-每个可靠航向观测与同步插值的ODIN四元数形成：
+当前镜头朝天安装的正式默认值为：
 
 ```text
-delta_yaw_sample = wrap(psi_enu - psi_odin)
+vehicle_forward_axis_body = [0, 0, -1]
 ```
+
+每个可靠航向观测先构造RTK ENU单位向量 `f_n`，并用同步ODIN四元数计算车辆前向
+水平单位向量 `f_o`，再计算：
+
+```text
+dot = f_o.x * f_n.x + f_o.y * f_n.y
+cross = f_o.x * f_n.y - f_o.y * f_n.x
+delta_yaw_sample = atan2(cross, dot)
+```
+
+因此接近90°安装时不依赖Euler yaw奇异位置。前向投影模长低于
+`heading_projection_min_norm` 时拒绝该样本并写入诊断原因。
 
 节点对多个样本做圆周统计：
 
@@ -94,9 +111,10 @@ delta_yaw = atan2(sum(w_k * sin(delta_yaw_k)), sum(w_k * cos(delta_yaw_k)))
 
 ## 尺度标定
 
-默认 `scale_calibration_enabled=false`，水平尺度固定为1.0，`scale_valid=false`，但航向对齐照常运行。
+默认 `scale_calibration_mode=0`，不建立尺度拟合轨迹、不执行相似变换拟合，
+`horizontal_scale=1.0`、`scale_valid=false`、`scale_status=SCALE_DISABLED`，航向对齐和DR照常运行。
 
-开启后，节点使用较长RTK/ODIN同步轨迹拟合二维相似变换：
+仅当 `scale_calibration_mode=1` 时，节点使用较长RTK/ODIN同步轨迹拟合二维相似变换：
 
 ```text
 p_RTK_EN = translation + scale * Rz(delta_yaw) * p_ODIN_xy + error
@@ -237,7 +255,13 @@ heading_alignment_min_samples
 heading_alignment_min_distance_m
 heading_alignment_max_std_deg
 heading_filter_alpha
-scale_calibration_enabled
+vehicle_forward_axis_body
+heading_projection_min_norm
+forward_axis_motion_validation_enabled
+forward_axis_validation_min_speed_mps
+forward_axis_validation_min_distance_m
+forward_axis_validation_min_dot
+scale_calibration_mode
 scale_min_baseline_m
 scale_target_baseline_m
 scale_min_samples

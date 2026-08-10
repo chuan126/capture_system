@@ -7,9 +7,15 @@ data_recorder_node:
     localization_fix_topic: "/capture/localization/fix"
     localization_status_topic: "/capture/localization/status"
     localization_odometry_topic: "/capture/localization/odometry"
+    imu_topic: "/capture/imu/data"
+    odometry_topic: "/capture/odometry/high_rate"
+    # 标准sensor_msgs/Temperature输入；当前厂商驱动未发布时导出列留空。
+    radar_temperature_topic: "/capture/lidar/temperature"
     sample_rate_hz: 50.0
     source_timeout_ms: 250.0
     endpoint_rtk_max_age_ms: 2000.0
+    odometry_snapshot_max_age_ms: 250.0
+    radar_temperature_max_age_ms: 2000.0
     transaction_batch_size: 100
     software_version: "0.2.0"
     algorithm_version: "clearance_engine-current"

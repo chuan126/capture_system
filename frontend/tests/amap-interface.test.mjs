@@ -105,7 +105,7 @@ test("rendered dashboard includes real-time amap panel", async () => {
   assert.equal(response.status, 200);
 
   const html = await response.text();
-  assert.match(html, /实时地图/);
+  assert.match(html, /实时定位地图/);
   assert.match(html, /高德地图/);
   assert.match(html, /amap-stage/);
   assert.match(html, /amap-container/);
@@ -123,7 +123,8 @@ test("page.tsx imports RealtimeAmap from the map component directory", async () 
   assert.match(page, /@\/components\/map\/RealtimeAmap/);
   assert.match(page, /<RealtimeAmap/);
   assert.match(page, /snapshot=\{rtkSnapshot\}/);
-  assert.match(page, /hasFix=\{hasFix && rmcCharacter !== "V"\}/);
+  assert.match(page, /rawRtkValid=\{rawCoordinateAvailable\}/);
+  assert.match(page, /fusionValid=\{localizationValid\}/);
   assert.match(page, /connectionDetail=\{rtk\.detail\}/);
 });
 
@@ -141,6 +142,12 @@ test("RealtimeAmap component contains WGS-84 to GCJ-02 conversion", async () => 
   assert.match(component, /\/api\/v1\/map\/config/);
   assert.match(component, /serviceHost/);
   assert.match(component, /loadAmapScript/);
+  assert.match(component, /const fusedFix = !rawRtkValid && fusionValid/);
+  assert.match(component, /source: TrackSource/);
+  assert.match(component, /buildTrackSegments/);
+  assert.match(component, /segment\.source === "fusion" \? "#f2c94c" : "#176bff"/);
+  assert.match(component, /当前为融合定位结果/);
+  assert.match(component, /浅黄色轨迹由RTK锚点和ODIN航位推算得到/);
   assert.doesNotMatch(component, /localStorage|NEXT_PUBLIC_AMAP/);
   assert.match(component, /地图设置/);
   assert.match(component, /security_js_code/);

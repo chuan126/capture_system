@@ -48,7 +48,8 @@ target_include_directories(localization_dead_reckoning_core
 add_executable(dead_reckoning_node
   src/dead_reckoning_node.cpp
 )
-target_link_libraries(dead_reckoning_node localization_dead_reckoning_core)
+target_include_directories(dead_reckoning_node PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/Attitude)
+target_link_libraries(dead_reckoning_node localization_dead_reckoning_core attitude_matrix)
 ament_target_dependencies(dead_reckoning_node interfaces nav_msgs rcl_interfaces rclcpp sensor_msgs)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")

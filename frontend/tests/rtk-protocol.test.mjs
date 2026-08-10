@@ -35,14 +35,21 @@ test("parses an indoor no-fix RTK snapshot without adding quality fields", () =>
     localization_longitude: 0,
     localization_altitude: 0,
     localization_heading_deg: 0,
+    localization_odin_attitude_valid: true,
+    localization_odin_pitch_deg: 89.5,
+    localization_odin_roll_deg: 0.2,
+    localization_odin_yaw_deg: 45.0,
     localization_heading_alignment_valid: false,
     localization_delta_yaw_deg: 0,
-    localization_scale_calibration_enabled: false,
+    localization_scale_calibration_mode: 0,
+    localization_scale_status: 0,
     localization_scale_valid: false,
     localization_horizontal_scale: 1,
     localization_vertical_scale: 1,
     localization_scale_baseline_m: 0,
+    localization_scale_fit_residual_m: 0,
     localization_heading_baseline_m: 0,
+    localization_heading_alignment_reason: "NOT_INITIALIZED",
     localization_distance_from_anchor_m: 0,
     localization_dr_duration_s: 0,
     localization_rtk_age_s: -1,
@@ -57,6 +64,8 @@ test("parses an indoor no-fix RTK snapshot without adding quality fields", () =>
   assert.equal(snapshot.gps_state, 0);
   assert.equal(snapshot.fix_status, -1);
   assert.equal(snapshot.localization_valid, false);
+  assert.equal(snapshot.localization_odin_pitch_deg, 89.5);
+  assert.equal(snapshot.localization_scale_status, 0);
   assert.equal(snapshot.localization_invalid_reason, "NO_VALID_RTK_ANCHOR");
   assert.equal("quality" in snapshot, false);
   assert.equal("stable" in snapshot, false);
@@ -94,10 +103,16 @@ test("rejects malformed RTK numeric fields", () => {
       localization_longitude: null,
       localization_altitude: null,
       localization_heading_deg: null,
+      localization_odin_pitch_deg: null,
+      localization_odin_roll_deg: null,
+      localization_odin_yaw_deg: null,
       localization_delta_yaw_deg: null,
+      localization_scale_calibration_mode: null,
+      localization_scale_status: null,
       localization_horizontal_scale: null,
       localization_vertical_scale: null,
       localization_scale_baseline_m: null,
+      localization_scale_fit_residual_m: null,
       localization_heading_baseline_m: null,
       localization_distance_from_anchor_m: null,
       localization_dr_duration_s: null,
@@ -106,9 +121,10 @@ test("rejects malformed RTK numeric fields", () => {
       localization_imu_age_s: null,
       localization_position_difference_to_rtk_m: null,
       localization_valid: null,
+      localization_odin_attitude_valid: null,
       localization_heading_alignment_valid: null,
-      localization_scale_calibration_enabled: null,
       localization_scale_valid: null,
+      localization_heading_alignment_reason: null,
       localization_invalid_reason: null,
     })),
     /数值字段无效/,

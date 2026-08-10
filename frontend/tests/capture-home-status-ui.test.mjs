@@ -6,8 +6,13 @@ const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8")
 const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
 const socket = await readFile(new URL("../components/system-status/useSystemStatusSocket.ts", import.meta.url), "utf8");
 
-const taskCard = page.match(/<article className="panel task-operation-panel">([\s\S]*?)<\/article>\n        <\/aside>/)?.[1] ?? "";
-const rtkCard = page.match(/<article className="panel rtk-control-panel">([\s\S]*?)<\/article>\n\n          <article className="panel task-operation-panel">/)?.[1] ?? "";
+const taskCardStart = page.indexOf('<article className="panel task-operation-panel">');
+const taskCardEnd = page.indexOf("</aside>", taskCardStart);
+const taskCard = taskCardStart >= 0 && taskCardEnd > taskCardStart
+  ? page.slice(taskCardStart, taskCardEnd)
+  : "";
+const rtkSummary = page.match(/<article className="health-kpi-card health-kpi-card--rtk">([\s\S]*?)<\/article>/)?.[1] ?? "";
+const localizationCard = page.match(/<article className="panel localization-panel">([\s\S]*?)<\/article>\n\n          <article className="panel task-operation-panel">/)?.[1] ?? "";
 const taskDialog = page.match(/function TaskCreateDialog\([\s\S]*?\nconst navigation:/)?.[0] ?? "";
 
 test("system overview uses the revised labels and removes diagnostic helper copy", () => {
@@ -17,22 +22,24 @@ test("system overview uses the revised labels and removes diagnostic helper copy
   assert.doesNotMatch(page, /<p>\{systemStatus\.detail\}<\/p>/);
 });
 
-test("system overview contains clearance, current RTK coordinate and latest abnormal height", () => {
+test("system overview contains clearance and raw RTK position and removes old summary cards", () => {
   assert.match(page, /health-kpi-grid/);
   assert.match(page, />净空高度</);
   assert.match(page, /\{currentHeightText\}<small>m<\/small>/);
   assert.match(page, /displayedClearanceHeightM = clearanceValid && mountHeightValid/);
   assert.match(page, /clearanceSnapshot\.lidar_to_top_m! \+ parsedMountHeight/);
-  assert.match(page, />当前坐标</);
-  assert.match(page, /\{longitudeText\}/);
-  assert.match(page, /\{latitudeText\}/);
-  assert.match(page, />异常高度</);
+  assert.match(rtkSummary, />RTK定位</);
+  assert.match(rtkSummary, /\{rawLatitudeText\}/);
+  assert.match(rtkSummary, /\{rawLongitudeText\}/);
+  assert.match(rtkSummary, /\{rawAltitudeText\}/);
+  assert.match(rtkSummary, />卫导星数\s*</);
+  assert.match(rtkSummary, />HDOP \/ PDOP\s*</);
+  assert.doesNotMatch(page, />当前坐标|>异常高度</);
   assert.doesNotMatch(page, />预留指标二|>预留指标一</);
-  assert.match(page, /latestAbnormalHeightM\.toFixed\(3\)/);
   assert.match(page, /displayedClearanceHeightM < parsedHeightThreshold/);
   assert.match(css, /health-kpi-card--alert[\s\S]*#c53030/);
   assert.match(css, /health-kpi-grid[\s\S]*grid-template-columns:\s*repeat\(3/);
-  assert.match(css, /health-kpi-card--coordinate/);
+  assert.match(css, /health-kpi-card--rtk[\s\S]*grid-column:\s*span 2/);
 });
 
 test("top clearance summary adds mount height while live source protocol remains raw", () => {
@@ -49,22 +56,27 @@ test("current coordinate requires a valid streaming RTK fix", () => {
   assert.match(page, /longitudeValue\.toFixed\(7\)/);
 });
 
-test("capture sidebar is split into compact RTK and expanded task control cards", () => {
+test("capture sidebar is split into fusion localization and task control cards", () => {
   assert.match(page, /dashboard-side-stack/);
-  assert.match(page, /className="panel rtk-control-panel"/);
+  assert.match(page, /className="panel localization-panel"/);
+  assert.doesNotMatch(page, /className="panel rtk-control-panel"/);
   assert.match(page, /className="panel task-operation-panel"/);
   assert.match(css, /dashboard-side-stack[\s\S]*grid-template-rows:\s*auto minmax\(0, 1fr\)/);
-  assert.match(css, /rtk-control-panel \{ flex:\s*0 0 auto/);
+  assert.match(css, /localization-panel \{ flex:\s*0 0 auto/);
 });
 
-test("RTK card keeps only three equal quality metrics", () => {
-  assert.match(rtkCard, /className="rtk-metric-grid"/);
-  assert.match(rtkCard, />卫星数</);
-  assert.match(rtkCard, />HDOP \/ PDOP</);
-  assert.match(rtkCard, />高度</);
-  assert.doesNotMatch(rtkCard, /入口坐标|出口坐标|rtk-coordinate-stack/);
-  assert.match(css, /rtk-metric-grid[\s\S]*grid-template-columns:\s*repeat\(3/);
-  assert.doesNotMatch(css, /\.rtk-coordinate-stack/);
+test("fusion card shows derived LLH and q2att ODIN attitude", () => {
+  assert.match(localizationCard, /fusion-position-grid/);
+  assert.match(localizationCard, /\{localizationLatitudeText\}/);
+  assert.match(localizationCard, /\{localizationLongitudeText\}/);
+  assert.match(localizationCard, /fusion-attitude-grid/);
+  assert.match(localizationCard, />俯仰</);
+  assert.match(localizationCard, />横滚</);
+  assert.match(localizationCard, />方位</);
+  assert.match(localizationCard, /\{odinPitchText\}/);
+  assert.match(localizationCard, /\{odinRollText\}/);
+  assert.match(localizationCard, /\{odinYawText\}/);
+  assert.match(css, /fusion-attitude-grid[\s\S]*grid-template-columns:\s*repeat\(3/);
 });
 
 test("device cards remain in a two-by-two grid with explicit connection lamps", () => {
@@ -193,13 +205,11 @@ test("task start validates the shared numeric settings", () => {
   assert.doesNotMatch(page, /!captureReady/);
 });
 
-test("abnormal height keeps the latest below-threshold displayed clearance without changing layout", () => {
-  assert.match(page, /const \[latestAbnormalHeightM, setLatestAbnormalHeightM\] = useState<number \| null>\(null\)/);
-  assert.match(page, /currentTask\?\.status !== "采集中"/);
-  assert.match(page, /currentTask\.operationPhase !== "recording"/);
-  assert.match(page, /setLatestAbnormalHeightM\(displayedClearanceHeightM\)/);
-  assert.match(page, /setLatestAbnormalHeightM\(null\)/);
-  assert.match(page, /health-kpi-card--anomaly\$\{latestAbnormalHeightM !== null \? " health-kpi-card--alert"/);
+test("current clearance turns red only when the live value is below threshold", () => {
+  assert.match(page, /const clearanceAbnormal = displayedClearanceHeightM !== null/);
+  assert.match(page, /displayedClearanceHeightM < parsedHeightThreshold/);
+  assert.match(page, /health-kpi-card--primary\$\{clearanceAbnormal \? " health-kpi-card--alert"/);
+  assert.doesNotMatch(page, /latestAbnormalHeightM|health-kpi-card--anomaly/);
   assert.match(css, /\.health-kpi-grid[\s\S]*grid-template-columns:\s*repeat\(3/);
 });
 
@@ -240,7 +250,7 @@ test("capture dashboard keeps notebook text, icons and controls readable", () =>
   assert.match(css, /\.health-device-card__identity b \{[^}]*font-size:\s*12px/i);
   assert.match(css, /\.dashboard-page \.panel-expand-button \{[^}]*width:\s*38px[^}]*height:\s*38px/i);
   assert.match(css, /\.dashboard-clearance-panel \.chart__axis \{[^}]*font-size:\s*10px/i);
-  assert.match(css, /\.rtk-metric-grid span \{[^}]*font-size:\s*11px/i);
+  assert.match(css, /\.fusion-position-grid span,[\s\S]*?font-size:\s*11px/i);
   assert.match(css, /\.task-section-heading h3 \{[^}]*font-size:\s*12px/i);
   assert.match(css, /\.task-parameter-grid input,[\s\S]*?\.task-parameter-grid select \{[^}]*height:\s*40px[^}]*font-size:\s*12px/i);
   assert.match(css, /\.task-operation-actions \.button \{[^}]*min-height:\s*42px[^}]*font-size:\s*11px/i);

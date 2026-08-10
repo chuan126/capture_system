@@ -37,7 +37,8 @@ QoS由`task_manager`设置为reliable、transient local，使FastAPI重连后可
 
 `LocalizationStatus`承载融合定位和ODIN航位推算后的业务状态。经纬高字段始终存在；
 RTK从未有效或航位推算不可用时使用0占位，并通过`valid=false`、
-`mode=MODE_INVALID`和`invalid_reason`明确失效原因。
+`mode=MODE_INVALID`和`invalid_reason`明确失效原因。消息同时提供ODIN原始四元数经
+`q2att([w,x,y,z])`换算的俯仰、横滚、方位显示字段，以及独立的航向对齐和尺度模式状态。
 
 `ClearanceResult`区分本帧有效性、沿Up方向的雷达到顶部距离、候选区域质量和无效
 原因。无效结果不得由消费端用上一有效高度补齐。

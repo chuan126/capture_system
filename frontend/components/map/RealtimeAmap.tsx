@@ -81,19 +81,50 @@ type AmapDeviceConfig = {
   service_host: string | null;
 };
 
+type TrackSource = "rtk" | "fusion";
+
 type TrackPoint = {
   lng: number;
   lat: number;
+  source: TrackSource;
+};
+
+type TrackSegment = {
+  source: TrackSource;
+  path: [number, number][];
 };
 
 type AmapMapLike = {
   add?: (overlay: unknown) => void;
   addControl?: (control: unknown) => void;
   destroy?: () => void;
+  remove?: (overlay: unknown) => void;
   resize?: () => void;
   setCenter?: (center: [number, number]) => void;
   setZoomAndCenter?: (zoom: number, center: [number, number]) => void;
 };
+
+function buildTrackSegments(points: TrackPoint[]): TrackSegment[] {
+  if (points.length < 2) return [];
+
+  const segments: TrackSegment[] = [];
+  let source = points[0].source;
+  let path: [number, number][] = [[points[0].lng, points[0].lat]];
+
+  for (let index = 1; index < points.length; index += 1) {
+    const point = points[index];
+    if (point.source !== source) {
+      if (path.length >= 2) segments.push({ source, path });
+      const previous = points[index - 1];
+      source = point.source;
+      path = [[previous.lng, previous.lat], [point.lng, point.lat]];
+    } else {
+      path.push([point.lng, point.lat]);
+    }
+  }
+  if (path.length >= 2) segments.push({ source, path });
+  return segments;
+}
 
 function loadAmapScript(key: string, serviceHost: string): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -177,7 +208,8 @@ function vehicleMarkerMarkup(): string {
 
 type RealtimeAmapProps = {
   snapshot: RtkSnapshot | null;
-  hasFix: boolean;
+  rawRtkValid: boolean;
+  fusionValid: boolean;
   connectionDetail: string;
   laneLabel?: string;
   expanded?: boolean;
@@ -215,7 +247,8 @@ function MapExpandButton({
 
 export default function RealtimeAmap({
   snapshot,
-  hasFix,
+  rawRtkValid,
+  fusionValid,
   connectionDetail,
   laneLabel = "待任务接入",
   expanded = false,
@@ -236,7 +269,7 @@ export default function RealtimeAmap({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<AmapMapLike | null>(null);
   const markerRef = useRef<unknown>(null);
-  const polylineRef = useRef<unknown>(null);
+  const polylineRefs = useRef<Array<{ source: TrackSource; overlay: unknown }>>([]);
   const trackPointsRef = useRef<TrackPoint[]>([]);
   const lastPositionRef = useRef<[number, number] | null>(null);
 
@@ -311,7 +344,7 @@ export default function RealtimeAmap({
 
       mapRef.current?.destroy?.();
       markerRef.current = null;
-      polylineRef.current = null;
+      polylineRefs.current = [];
       trackPointsRef.current = [];
       setTrackPointCount(0);
 
@@ -361,18 +394,20 @@ export default function RealtimeAmap({
       | undefined;
     if (!map || !AMap) return;
 
-    const fusedFix =
+    const fusedFix = !rawRtkValid && fusionValid &&
       snapshot?.localization_valid === true &&
       snapshot.localization_latitude !== null &&
       snapshot.localization_latitude !== undefined &&
       snapshot.localization_longitude !== null &&
       snapshot.localization_longitude !== undefined;
+    const source: TrackSource = fusedFix ? "fusion" : "rtk";
     const latitude = fusedFix ? snapshot.localization_latitude : snapshot?.latitude;
     const longitude = fusedFix ? snapshot.localization_longitude : snapshot?.longitude;
     const headingDeg = fusedFix ? snapshot.localization_heading_deg : snapshot?.track_degrees;
+    const hasPosition = fusedFix || rawRtkValid;
 
     if (
-      !hasFix ||
+      !hasPosition ||
       latitude === null ||
       latitude === undefined ||
       longitude === null ||
@@ -415,40 +450,51 @@ export default function RealtimeAmap({
     const points = trackPointsRef.current;
     const last = points.at(-1);
     if (!last || last.lng !== gcj[0] || last.lat !== gcj[1]) {
-      points.push({ lng: gcj[0], lat: gcj[1] });
+      points.push({ lng: gcj[0], lat: gcj[1], source });
       if (points.length > MAX_TRACK_POINTS) {
         points.splice(0, points.length - MAX_TRACK_POINTS);
       }
       setTrackPointCount(points.length);
     }
 
-    const path = points.map((point) => [point.lng, point.lat] as [number, number]);
-    if (polylineRef.current) {
-      (polylineRef.current as { setPath?: (value: [number, number][]) => void })
-        .setPath?.(path);
-    } else if (path.length >= 2) {
-      const Polyline = AMap.Polyline as (new (...args: unknown[]) => unknown) | undefined;
-      if (Polyline) {
-        const polyline = new Polyline({
-          path,
-          strokeColor: "#176bff",
-          strokeWeight: 5,
-          strokeOpacity: 0.88,
-          lineJoin: "round",
-          lineCap: "round",
-          zIndex: 90,
-        });
-        map.add?.(polyline);
-        polylineRef.current = polyline;
-      }
+    const segments = buildTrackSegments(points);
+    const Polyline = AMap.Polyline as (new (...args: unknown[]) => unknown) | undefined;
+    const overlays = polylineRefs.current;
+    while (overlays.length > segments.length) {
+      const removed = overlays.pop();
+      if (removed) map.remove?.(removed.overlay);
     }
+    segments.forEach((segment, index) => {
+      const existing = overlays[index];
+      if (existing?.source === segment.source) {
+        (existing.overlay as { setPath?: (value: [number, number][]) => void })
+          .setPath?.(segment.path);
+        return;
+      }
+      if (existing) {
+        map.remove?.(existing.overlay);
+        overlays.splice(index, 1);
+      }
+      if (!Polyline) return;
+      const polyline = new Polyline({
+        path: segment.path,
+        strokeColor: segment.source === "fusion" ? "#f2c94c" : "#176bff",
+        strokeWeight: 5,
+        strokeOpacity: segment.source === "fusion" ? 0.94 : 0.88,
+        lineJoin: "round",
+        lineCap: "round",
+        zIndex: 90,
+      });
+      map.add?.(polyline);
+      overlays.splice(index, 0, { source: segment.source, overlay: polyline });
+    });
 
     if (points.length === 1) {
       map.setZoomAndCenter?.(17, gcj);
     } else {
       map.setCenter?.(gcj);
     }
-  }, [hasFix, mapState, snapshot]);
+  }, [fusionValid, mapState, rawRtkValid, snapshot]);
 
   useEffect(() => {
     const resize = () => mapRef.current?.resize?.();
@@ -475,38 +521,44 @@ export default function RealtimeAmap({
     };
   }, [expanded, mapState]);
 
+  const usingFusion = !rawRtkValid && fusionValid && snapshot?.localization_valid === true;
+  const hasPosition = rawRtkValid || usingFusion;
   const coordinateText =
-    hasFix && snapshot?.localization_valid === true &&
+    usingFusion &&
       snapshot.localization_latitude != null && snapshot.localization_longitude != null
       ? `${snapshot.localization_latitude.toFixed(8)}°, ${snapshot.localization_longitude.toFixed(8)}°`
-      : hasFix && snapshot?.latitude != null && snapshot.longitude != null
+      : rawRtkValid && snapshot?.latitude != null && snapshot.longitude != null
         ? `${snapshot.latitude.toFixed(8)}°, ${snapshot.longitude.toFixed(8)}°`
         : lastPositionRef.current
           ? "保留最后有效位置"
           : "等待有效定位坐标";
-  const positionModeText = snapshot?.localization_valid === true
-    ? "融合定位"
-    : hasFix ? "RTK 绝对定位" : "定位无效";
+  const positionModeText = usingFusion
+    ? "当前为融合定位结果"
+    : rawRtkValid ? "当前为RTK定位结果" : "定位无效";
   const trackStateText =
     mapState !== "ready"
       ? "等待地图配置"
-      : hasFix
+      : hasPosition
         ? trackPointCount > 0
           ? `实时绘制 · ${trackPointCount} 点`
-          : "等待 RTK"
+          : "等待定位"
         : "轨迹已暂停";
-  const mapSubtitle = hasFix
-    ? "使用当前有效定位绘制绝对轨迹"
+  const mapSubtitle = usingFusion
+    ? "RTK失锁，使用融合定位继续绘制轨迹"
+    : rawRtkValid
+      ? "使用RTK坐标绘制绝对轨迹"
     : "保留最后有效位置，暂停轨迹更新";
-  const mapTip = hasFix
-    ? "当前有效WGS84坐标转换为GCJ-02后显示。定位失效时保留最后有效位置，并停止增加轨迹点。"
-    : "当前定位无效。地图保留最后有效位置和已有轨迹，不继续推算车辆绝对位置。";
+  const mapTip = usingFusion
+    ? "当前为融合定位结果，浅黄色轨迹由RTK锚点和ODIN航位推算得到。"
+    : rawRtkValid
+      ? "当前为RTK定位结果，蓝色轨迹由有效RTK坐标绘制。"
+      : "当前没有有效RTK或融合定位结果，地图保留最后位置和已有轨迹。";
 
   return (
     <article className={`panel dashboard-map-panel${expanded ? " visual-panel--expanded" : ""}`}>
         <div className="map-panel-head">
           <div>
-            <h2>RTK 实时地图</h2>
+            <h2>实时定位地图</h2>
             <p>{mapSubtitle}</p>
           </div>
           <div className="map-panel-actions">

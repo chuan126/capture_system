@@ -58,14 +58,21 @@
   "localization_longitude": 118.0829,
   "localization_altitude": 12.4,
   "localization_heading_deg": 91.2,
+  "localization_odin_attitude_valid": true,
+  "localization_odin_pitch_deg": 89.5,
+  "localization_odin_roll_deg": 0.2,
+  "localization_odin_yaw_deg": 45.0,
   "localization_heading_alignment_valid": true,
   "localization_delta_yaw_deg": 12.5,
-  "localization_scale_calibration_enabled": false,
+  "localization_scale_calibration_mode": 0,
+  "localization_scale_status": 0,
   "localization_scale_valid": false,
   "localization_horizontal_scale": 1.0,
   "localization_vertical_scale": 1.0,
   "localization_scale_baseline_m": 0.0,
+  "localization_scale_fit_residual_m": 0.0,
   "localization_heading_baseline_m": 80.0,
+  "localization_heading_alignment_reason": "NONE",
   "localization_distance_from_anchor_m": 0.0,
   "localization_dr_duration_s": 0.0,
   "localization_rtk_age_s": 0.02,
@@ -89,10 +96,11 @@
 
 ## 4. 页面表达
 
-- 顶部当前坐标优先显示 `localization_valid=true` 的融合定位经纬度，缺失时回退到原始RTK有效坐标；
-- 地图优先使用融合定位有效WGS84坐标并转换为 GCJ-02；
-- RTK 卡片保留原始RTK卫星数、HDOP/PDOP 和高度；
-- 融合定位卡片显示模式、航向源、DR持续时间、距锚点距离、尺度和恢复误差；
+- 顶部RTK定位栏只显示原始RTK纬度、经度、高度、卫导星数和HDOP/PDOP；
+- 融合定位栏显示推算纬度、经度、高度，以及ODIN原始四元数经 `q2att` 得到的俯仰、横滚、方位；
+- 地图在原始RTK有效时绘制蓝色RTK轨迹，原始RTK无效且融合结果有效时改用浅黄色融合轨迹；
+- 地图使用融合结果时消息栏明确显示“当前为融合定位结果”；
+- 融合定位栏以次要信息显示模式、航向源、DR持续时间、距锚点距离、尺度和恢复误差；
 - 无定位时坐标和高度显示 `--`；
 - 当前页面不显示入口坐标和出口坐标；
 - 页面不计算 RTK 稳定窗口。

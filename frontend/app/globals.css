@@ -786,7 +786,7 @@ th { color: #7f8b9e; background: #fafbfd; font-weight: 600; white-space: nowrap;
   overflow: hidden;
   color: #26364d;
   font: 800 clamp(29px, 1.9vw, 42px)/1 Arial, sans-serif;
-  letter-spacing: -.9px;
+  letter-spacing: 0;
   text-align: center;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -804,38 +804,61 @@ th { color: #7f8b9e; background: #fafbfd; font-weight: 600; white-space: nowrap;
   border-radius: 50%;
 }
 .health-kpi-card--primary > strong { color: #185f92; }
-.health-kpi-card--placeholder { border-style: dashed; background: rgba(250,251,253,.76); }
-.health-kpi-card--placeholder > strong { color: #a2adbb; }
-.health-kpi-card--anomaly { background: rgba(250,251,253,.76); }
-.health-kpi-card--anomaly > strong { color: #a2adbb; }
 .health-kpi-card--alert > strong,
 .health-kpi-card--alert > strong small { color: #c53030; }
-.health-kpi-card--coordinate { border-color: #dce7f7; background: linear-gradient(135deg, #fff 0%, #f7faff 100%); }
-.health-kpi-card > .health-kpi-coordinate {
-  display: grid;
-  align-self: center;
-  justify-self: stretch;
-  gap: 7px;
-  overflow: visible;
-  font-size: clamp(13px, .82vw, 18px);
-  letter-spacing: -.2px;
-  text-align: left;
-  white-space: normal;
+.health-kpi-card--rtk {
+  grid-column: span 2;
+  grid-template-rows: auto minmax(0, 1fr);
+  border-color: #dce7f7;
+  background: linear-gradient(135deg, #fff 0%, #f7faff 100%);
 }
-.health-kpi-coordinate > span {
-  display: grid;
-  grid-template-columns: 34px minmax(0, 1fr);
-  align-items: baseline;
-  gap: 6px;
+.health-kpi-rtk-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   min-width: 0;
-  font-family: Arial, sans-serif;
 }
-.health-kpi-coordinate > span > small {
-  margin: 0;
-  color: #7d8a9d;
-  font: 700 9px/1 "Microsoft YaHei", sans-serif;
+.health-kpi-rtk-head > span { color: #5f6f84; font-size: clamp(12px, .72vw, 15px); font-weight: 700; }
+.health-kpi-rtk-head .status-pill { max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.health-kpi-rtk-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+}
+.health-kpi-rtk-coordinate {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-self: center;
+  gap: 14px;
+  min-width: 0;
+}
+.health-kpi-rtk-coordinate > span {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.health-kpi-rtk-coordinate small,
+.health-kpi-rtk-quality > span { color: #7d8a9d; font-size: 9px; font-weight: 700; }
+.health-kpi-rtk-coordinate strong {
+  overflow: hidden;
+  color: #26364d;
+  font: 800 clamp(12px, .76vw, 17px)/1.2 Arial, sans-serif;
   letter-spacing: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
+.health-kpi-rtk-quality {
+  display: grid;
+  gap: 7px;
+  min-width: 122px;
+  padding-left: 15px;
+  border-left: 1px solid #dce5f0;
+}
+.health-kpi-rtk-quality > span { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.health-kpi-rtk-quality strong { color: #34445b; font: 800 12px/1.2 Arial, sans-serif; letter-spacing: 0; white-space: nowrap; }
 .health-device-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -966,55 +989,61 @@ th { color: #7f8b9e; background: #fafbfd; font-weight: 600; white-space: nowrap;
   border-bottom: 1px solid var(--line-soft);
 }
 .dashboard-side-stack .panel-head .status-pill { flex: 0 0 auto; padding: 5px 7px; font-size: 8px; }
-.rtk-control-panel { flex: 0 0 auto; }
-.rtk-control-panel > .panel-head { margin-bottom: 8px !important; padding-bottom: 8px !important; }
-.rtk-metric-grid {
+.fusion-position-grid,
+.fusion-attitude-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-  margin-bottom: 0;
-}
-.rtk-metric-grid > article {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  align-items: stretch;
-  gap: 7px;
+  gap: 10px;
   min-width: 0;
-  min-height: 72px;
-  padding: 10px 9px;
-  border: 1px solid #d9e5f6;
-  border-radius: 10px;
-  background: linear-gradient(135deg, #f5f9ff, #fbfdff);
 }
-.rtk-metric-grid span {
+.fusion-position-grid > div,
+.fusion-attitude-grid > div {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+.fusion-position-grid span,
+.fusion-attitude-grid span,
+.fusion-diagnostics > span {
   color: var(--muted);
   font-size: 9px;
-  font-weight: 650;
+  font-weight: 700;
 }
-.rtk-metric-grid strong {
-  align-self: center;
-  justify-self: center;
+.fusion-position-grid strong,
+.fusion-attitude-grid strong {
   max-width: 100%;
   overflow: hidden;
   color: #26364d;
-  font: 800 clamp(14px, .9vw, 20px)/1.12 Arial, sans-serif;
-  text-align: center;
+  font: 800 clamp(11px, .68vw, 15px)/1.2 Arial, sans-serif;
+  letter-spacing: 0;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.rtk-metric-grid > article:nth-child(2) strong {
-  font-size: clamp(11px, .72vw, 16px);
+.fusion-position-grid {
+  padding-bottom: 11px;
+  border-bottom: 1px solid var(--line-soft);
 }
 .localization-panel { flex: 0 0 auto; }
-.localization-metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.localization-metric-grid > article {
-  min-height: 66px;
+.fusion-attitude-grid {
+  margin-top: 11px;
+  padding-bottom: 11px;
+  border-bottom: 1px solid var(--line-soft);
 }
-.localization-metric-grid strong {
-  font-size: clamp(10px, .68vw, 14px);
-  line-height: 1.22;
-  white-space: normal;
-  overflow-wrap: anywhere;
+.fusion-attitude-grid strong { color: #185f92; font-size: clamp(14px, .9vw, 19px); }
+.fusion-diagnostics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px 12px;
+  margin-top: 11px;
+}
+.fusion-diagnostics > span { display: grid; gap: 3px; min-width: 0; }
+.fusion-diagnostics strong {
+  overflow: hidden;
+  color: #34445b;
+  font-size: 10px;
+  letter-spacing: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .task-operation-head-actions {
   display: flex;
@@ -1786,9 +1815,10 @@ table {
   .health-kpi-card > span { font-size: clamp(13px, .78vw, 16px); }
   .health-kpi-card > strong { font-size: clamp(31px, 2vw, 44px); }
   .health-kpi-card > strong small { font-size: clamp(13px, .72vw, 16px); }
-  .health-kpi-card > .health-kpi-coordinate { gap: 8px; font-size: clamp(15px, .9vw, 19px); }
-  .health-kpi-coordinate > span { grid-template-columns: 38px minmax(0, 1fr); gap: 7px; }
-  .health-kpi-coordinate > span > small { font-size: 11px; }
+  .health-kpi-rtk-coordinate { gap: 18px; }
+  .health-kpi-rtk-coordinate small,
+  .health-kpi-rtk-quality > span { font-size: 11px; }
+  .health-kpi-rtk-coordinate strong { font-size: clamp(14px, .82vw, 18px); }
 
   .health-device-grid { gap: 11px; }
   .health-device-card {
@@ -1864,12 +1894,10 @@ table {
 
   .dashboard-side-stack > .panel > .panel-head { margin-bottom: 12px; padding-bottom: 12px; }
   .dashboard-side-stack .panel-head .status-pill { padding: 6px 9px; font-size: 10px; }
-  .rtk-control-panel > .panel-head { margin-bottom: 10px !important; padding-bottom: 10px !important; }
-  .rtk-metric-grid { gap: 10px; }
-  .rtk-metric-grid > article { gap: 8px; min-height: 82px; padding: 11px 10px; }
-  .rtk-metric-grid span { font-size: 11px; }
-  .rtk-metric-grid strong { font-size: clamp(16px, 1vw, 22px); }
-  .rtk-metric-grid > article:nth-child(2) strong { font-size: clamp(13px, .8vw, 18px); }
+  .fusion-position-grid span,
+  .fusion-attitude-grid span,
+  .fusion-diagnostics > span { font-size: 11px; }
+  .fusion-diagnostics strong { font-size: 11px; }
 
   .task-operation-head-actions button { min-height: 36px; padding: 8px 13px; font-size: 11px; }
   .task-operation-body { gap: 11px; }
@@ -2021,11 +2049,17 @@ table {
   .health-overview { grid-template-columns: 1fr; }
   .health-kpi-grid { grid-template-columns: 1fr; }
   .health-kpi-card { min-height: 92px; }
+  .health-kpi-card--rtk { grid-column: auto; }
+  .health-kpi-rtk-body { grid-template-columns: 1fr; gap: 10px; }
+  .health-kpi-rtk-coordinate { grid-template-columns: 1fr; gap: 7px; }
+  .health-kpi-rtk-coordinate > span { grid-template-columns: 42px minmax(0, 1fr); align-items: baseline; }
+  .health-kpi-rtk-quality { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 9px 0 0; border-top: 1px solid #dce5f0; border-left: 0; }
   .health-device-grid { grid-template-columns: 1fr; }
   .health-device-card { min-height: 88px; }
   .dashboard-side-stack { grid-template-columns: 1fr; }
-  .rtk-metric-grid { grid-template-columns: 1fr; }
-  .localization-metric-grid { grid-template-columns: 1fr; }
+  .fusion-position-grid,
+  .fusion-attitude-grid,
+  .fusion-diagnostics { grid-template-columns: 1fr; }
   .task-operation-head-actions { flex-wrap: wrap; justify-content: flex-end; }
   .task-parameter-grid { grid-template-columns: 1fr; }
   .task-parameter-grid > label { padding: 0 0 8px; border-right: 0; border-bottom: 1px solid #dfe5ed; }

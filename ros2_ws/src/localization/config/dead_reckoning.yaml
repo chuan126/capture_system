@@ -13,7 +13,22 @@ dead_reckoning_node:
     # 室内测试用RTK模拟锚点开关；0关闭，1用固定RTK坐标建立锚点并输出ODIN推算坐标：
     # 北纬24°34′26″、东经118°5′22″、高度20m、航迹角北偏东45°。
     # 可运行时切换：ros2 param set /dead_reckoning_node rtk_simulation_enabled 1
-    rtk_simulation_enabled: 1
+    rtk_simulation_enabled: 0
+
+    # 车辆前进方向在ODIN机体系中的单位向量；当前镜头朝天安装时车辆前向对应机体系-Z轴。
+    # 若实车直行诊断持续提示方向相反，只修改此YAML为[0.0, 0.0, 1.0]，程序不会自动翻转。
+    vehicle_forward_axis_body: [0.0, 0.0, -1.0]
+    # 车辆前向经ODIN姿态旋转后，其水平投影模长下限；低于该值不参与航向对准。
+    heading_projection_min_norm: 0.2
+
+    # 稳定直行时检查车辆前向轴与ODIN水平位移方向；仅告警，不自动修改配置。
+    forward_axis_motion_validation_enabled: true
+    # 前向轴运动诊断最低RTK速度，单位m/s。
+    forward_axis_validation_min_speed_mps: 5.0
+    # 每次前向轴运动诊断所需最小ODIN水平位移，单位m。
+    forward_axis_validation_min_distance_m: 20.0
+    # 前向投影与位移方向点积下限，范围[-1,1]。
+    forward_axis_validation_min_dot: 0.8
 
     # ODIN里程计有限缓存时长，单位s；用于RTK时刻插值。
     odometry_cache_duration_s: 60.0
@@ -48,8 +63,8 @@ dead_reckoning_node:
     # delta_yaw观测缓存最大样本数。
     heading_alignment_max_samples: 200
 
-    # ODIN水平尺度标定开关；默认关闭，关闭时horizontal_scale固定为1.0。
-    scale_calibration_enabled: false
+    # ODIN水平尺度标定模式：0关闭且固定使用1.0；1启用长轨迹自动标定。
+    scale_calibration_mode: 0
     # 尺度拟合允许的最小RTK轨迹基线，单位m。
     scale_min_baseline_m: 500.0
     # 尺度拟合建议目标基线，单位m；用于现场判断是否足够稳定。

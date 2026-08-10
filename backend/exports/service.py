@@ -276,44 +276,33 @@ class ReportExportService:
         entry_rtk = _format_rtk(summary.entry_rtk)
         exit_rtk = _format_rtk(summary.exit_rtk)
         writer.writerow(["隧道净空检测 50 Hz 测量明细"])
-        writer.writerow(["任务编号", task.display_id])
-        writer.writerow(["隧道编号", task.tunnel_code])
-        writer.writerow(["隧道名称", task.tunnel_name])
-        writer.writerow(["检测车道", _lane_text(summary.lane, summary.travel_direction, summary.lane_side)])
-        writer.writerow(["记录开始时间", _format_iso_text(summary.started_at)])
-        writer.writerow(["记录结束时间", _format_iso_text(summary.ended_at)])
-        writer.writerow(["最低有效高度 m", _format_number(summary.statistics.minimum_height_m, 3)])
-        writer.writerow(["入口 RTK", entry_rtk])
-        writer.writerow(["出口 RTK", exit_rtk])
-        writer.writerow(["总样本数", summary.statistics.total_samples])
-        writer.writerow(["有效样本数", summary.statistics.valid_samples])
-        writer.writerow(["无效样本数", summary.statistics.invalid_samples])
-        writer.writerow(["标称采样频率 Hz", _format_number(summary.statistics.nominal_sample_rate_hz, 3)])
-        writer.writerow(["实际平均频率 Hz", _format_number(summary.statistics.actual_average_sample_rate_hz, 3)])
-        writer.writerow(["算法版本", summary.algorithm_version or ""])
-        writer.writerow(["配置版本", summary.config_version or ""])
-        writer.writerow(["软件版本", summary.software_version or ""])
-        writer.writerow(["文件生成时间", _format_iso_text(generated_at)])
         writer.writerow([])
         writer.writerow(
             [
                 "采样序号",
-                "数据源时间",
-                "记录时间",
-                "相对时间 ms",
+                "记录时间（RTK时间）",
                 "隧道编号",
                 "检测车道",
                 "实时高度 m",
                 "最低高度 m",
-                "数据有效",
-                "无效原因",
-                "质量分数",
-                "源帧序号",
-                "源帧年龄 ms",
-                "重复记录",
-                "重复序号",
                 "隧道入口 RTK",
                 "隧道出口 RTK",
+                "陀螺X rad/s",
+                "陀螺Y rad/s",
+                "陀螺Z rad/s",
+                "加速度计X m/s2",
+                "加速度计Y m/s2",
+                "加速度计Z m/s2",
+                "雷达温度 °C",
+                "最低点云X m",
+                "最低点云Y m",
+                "最低点云Z m",
+                "俯仰 deg",
+                "横滚 deg",
+                "方位 deg",
+                "里程计位置x m",
+                "里程计位置y m",
+                "里程计位置z m",
             ]
         )
         minimum_height = _format_number(summary.statistics.minimum_height_m, 3)
@@ -321,22 +310,34 @@ class ReportExportService:
             writer.writerow(
                 [
                     sample.sample_index,
-                    _format_timestamp_ms(sample.source_timestamp_ms),
-                    _format_timestamp_ms(sample.recorded_timestamp_ms),
-                    f"{sample.elapsed_ms:.3f}",
+                    _format_timestamp_ms(sample.rtk_timestamp_ms)
+                    if sample.rtk_timestamp_ms is not None
+                    else (
+                        _format_timestamp_ms(sample.source_timestamp_ms)
+                        if summary.recording_schema_version < 7 else ""
+                    ),
                     task.tunnel_code,
                     _lane_text(summary.lane, summary.travel_direction, summary.lane_side),
                     _format_number(sample.height_m if sample.valid else None, 3),
                     minimum_height,
-                    "是" if sample.valid and sample.height_m is not None else "否",
-                    sample.invalid_reason or "",
-                    _format_number(sample.quality_score, 4),
-                    "" if sample.source_sequence is None else sample.source_sequence,
-                    _format_number(sample.source_age_ms, 3),
-                    "" if sample.is_repeated is None else ("是" if sample.is_repeated else "否"),
-                    "" if sample.repeat_index is None else sample.repeat_index,
                     entry_rtk,
                     exit_rtk,
+                    _format_number(sample.gyro_x_rad_s, 6),
+                    _format_number(sample.gyro_y_rad_s, 6),
+                    _format_number(sample.gyro_z_rad_s, 6),
+                    _format_number(sample.accel_x_m_s2, 6),
+                    _format_number(sample.accel_y_m_s2, 6),
+                    _format_number(sample.accel_z_m_s2, 6),
+                    _format_number(sample.radar_temperature_c, 2),
+                    _format_number(sample.minimum_point_x_m, 4),
+                    _format_number(sample.minimum_point_y_m, 4),
+                    _format_number(sample.minimum_point_z_m, 4),
+                    _format_number(sample.odin_pitch_deg, 4),
+                    _format_number(sample.odin_roll_deg, 4),
+                    _format_number(sample.odin_yaw_deg, 4),
+                    _format_number(sample.odin_position_x_m, 4),
+                    _format_number(sample.odin_position_y_m, 4),
+                    _format_number(sample.odin_position_z_m, 4),
                 ]
             )
 

@@ -458,7 +458,6 @@ function Dashboard({
   const [expandedVisual, setExpandedVisual] = useState<"cloud" | "map" | null>(null);
   const [taskDialogOpen, setTaskDialogOpen] = useState(false);
   const [taskSwitchOpen, setTaskSwitchOpen] = useState(false);
-  const [latestAbnormalHeightM, setLatestAbnormalHeightM] = useState<number | null>(null);
   const [controlSubmitting, setControlSubmitting] = useState<"start" | "pause" | "resume" | "stop" | "recover" | null>(null);
   const [autoAdvanceTaskId, setAutoAdvanceTaskId] = useState<string | null>(null);
   const [controlError, setControlError] = useState<string | null>(null);
@@ -547,7 +546,6 @@ function Dashboard({
     value === null || value === undefined ? "--" : value.toFixed(digits);
   const hasFix = rtkSnapshot?.fix_status !== null &&
     rtkSnapshot?.fix_status !== undefined && rtkSnapshot.fix_status !== -1;
-  const altitudeText = hasFix ? `${formatMetric(rtkSnapshot?.altitude)} m` : "--";
   const latitudeValue = rtkSnapshot?.latitude;
   const longitudeValue = rtkSnapshot?.longitude;
   const rawCoordinateAvailable = rtk.connection === "connected" &&
@@ -567,16 +565,21 @@ function Dashboard({
     Number.isFinite(localizationLatitudeValue) &&
     typeof localizationLongitudeValue === "number" &&
     Number.isFinite(localizationLongitudeValue);
-  const latitudeText = localizationValid && typeof localizationLatitudeValue === "number"
+  const rawLatitudeText = rawCoordinateAvailable && typeof latitudeValue === "number"
+    ? latitudeValue.toFixed(7)
+    : "--";
+  const rawLongitudeText = rawCoordinateAvailable && typeof longitudeValue === "number"
+    ? longitudeValue.toFixed(7)
+    : "--";
+  const rawAltitudeText = rawCoordinateAvailable
+    ? `${formatMetric(rtkSnapshot?.altitude, 3)} m`
+    : "--";
+  const localizationLatitudeText = localizationValid && typeof localizationLatitudeValue === "number"
     ? localizationLatitudeValue.toFixed(7)
-    : rawCoordinateAvailable && typeof latitudeValue === "number"
-      ? latitudeValue.toFixed(7)
-      : "--";
-  const longitudeText = localizationValid && typeof localizationLongitudeValue === "number"
+    : "--";
+  const localizationLongitudeText = localizationValid && typeof localizationLongitudeValue === "number"
     ? localizationLongitudeValue.toFixed(7)
-    : rawCoordinateAvailable && typeof longitudeValue === "number"
-      ? longitudeValue.toFixed(7)
-      : "--";
+    : "--";
   const localizationAltitudeText = localizationValid
     ? `${formatMetric(rtkSnapshot?.localization_altitude)} m`
     : "--";
@@ -611,11 +614,21 @@ function Dashboard({
   const localizationDrText = `${formatMetric(rtkSnapshot?.localization_dr_duration_s, 1)} s`;
   const localizationAnchorDistanceText = `${formatMetric(rtkSnapshot?.localization_distance_from_anchor_m, 1)} m`;
   const localizationScaleText = formatMetric(rtkSnapshot?.localization_horizontal_scale, 4);
-  const localizationScaleStateText = rtkSnapshot?.localization_scale_calibration_enabled
-    ? rtkSnapshot.localization_scale_valid ? "已标定" : "未标定"
-    : "关闭";
+  const localizationScaleStateLabels: Record<number, string> = {
+    0: "关闭",
+    1: "采集中",
+    2: "已完成",
+    3: "已拒绝",
+  };
+  const localizationScaleStateText = typeof rtkSnapshot?.localization_scale_status === "number"
+    ? localizationScaleStateLabels[rtkSnapshot.localization_scale_status] ?? `状态 ${rtkSnapshot.localization_scale_status}`
+    : "--";
   const localizationDeltaYawText = `${formatMetric(rtkSnapshot?.localization_delta_yaw_deg, 2)}°`;
   const localizationRecoveryErrorText = `${formatMetric(rtkSnapshot?.localization_position_difference_to_rtk_m, 2)} m`;
+  const odinAttitudeValid = rtkSnapshot?.localization_odin_attitude_valid === true;
+  const odinPitchText = odinAttitudeValid ? `${formatMetric(rtkSnapshot?.localization_odin_pitch_deg, 2)}°` : "--";
+  const odinRollText = odinAttitudeValid ? `${formatMetric(rtkSnapshot?.localization_odin_roll_deg, 2)}°` : "--";
+  const odinYawText = odinAttitudeValid ? `${formatMetric(rtkSnapshot?.localization_odin_yaw_deg, 2)}°` : "--";
   const monitorUnavailable = !systemStreamAvailable;
   const lidarConnected = !monitorUnavailable && isDeviceConnected("lidar", systemSnapshot?.lidar);
   const rtkConnected = !monitorUnavailable && isDeviceConnected("rtk", systemSnapshot?.rtk);
@@ -666,6 +679,8 @@ function Dashboard({
     .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
   const parsedHeightThreshold = Number(heightThreshold);
   const heightThresholdValid = Number.isFinite(parsedHeightThreshold) && parsedHeightThreshold >= 0 && parsedHeightThreshold <= 20;
+  const clearanceAbnormal = displayedClearanceHeightM !== null &&
+    heightThresholdValid && displayedClearanceHeightM < parsedHeightThreshold;
 
   useEffect(() => {
     if (!currentTask) return;
@@ -675,22 +690,6 @@ function Dashboard({
       setOperationLane(currentTask.lane as CollectionTaskLane);
     }
   }, [currentTask?.taskId, currentTask?.lidarMountHeightM, currentTask?.clearanceThresholdM, currentTask?.lane, setMountHeight, setHeightThreshold, setOperationLane]);
-
-  useEffect(() => {
-    setLatestAbnormalHeightM(null);
-  }, [currentTask?.taskId]);
-
-  useEffect(() => {
-    if (
-      currentTask?.status !== "采集中" ||
-      currentTask.operationPhase !== "recording" ||
-      displayedClearanceHeightM === null ||
-      !heightThresholdValid
-    ) return;
-    if (displayedClearanceHeightM < parsedHeightThreshold) {
-      setLatestAbnormalHeightM(displayedClearanceHeightM);
-    }
-  }, [currentTask?.taskId, currentTask?.status, currentTask?.operationPhase, displayedClearanceHeightM, heightThresholdValid, parsedHeightThreshold]);
 
   const taskBusy = isTaskControlBusy(currentTask) || controlSubmitting !== null;
   const taskLocked = isTaskActive(currentTask);
@@ -749,7 +748,6 @@ function Dashboard({
       !heightThresholdValid ||
       !mountHeightValid
     ) return;
-    setLatestAbnormalHeightM(null);
     void executeControl("start", () => startTaskControl(currentTask.taskId, {
       lane: operationLane,
       lidarMountHeightM: parsedMountHeight,
@@ -838,20 +836,26 @@ function Dashboard({
           </div>
 
           <div className="health-kpi-grid" aria-label="实时测量摘要">
-            <article className="health-kpi-card health-kpi-card--primary">
+            <article className={`health-kpi-card health-kpi-card--primary${clearanceAbnormal ? " health-kpi-card--alert" : ""}`}>
               <span>净空高度</span>
               <strong>{currentHeightText}<small>m</small></strong>
             </article>
-            <article className="health-kpi-card health-kpi-card--coordinate">
-              <span>当前坐标</span>
-              <strong className="health-kpi-coordinate">
-                <span><small>经度</small>{longitudeText}</span>
-                <span><small>纬度</small>{latitudeText}</span>
-              </strong>
-            </article>
-            <article className={`health-kpi-card health-kpi-card--anomaly${latestAbnormalHeightM !== null ? " health-kpi-card--alert" : ""}`}>
-              <span>异常高度</span>
-              <strong>{latestAbnormalHeightM === null ? "--" : <>{latestAbnormalHeightM.toFixed(3)}<small>m</small></>}</strong>
+            <article className="health-kpi-card health-kpi-card--rtk">
+              <div className="health-kpi-rtk-head">
+                <span>RTK定位</span>
+                <StatusPill tone={rtkTone}>{rtkDeviceText}</StatusPill>
+              </div>
+              <div className="health-kpi-rtk-body">
+                <div className="health-kpi-rtk-coordinate">
+                  <span><small>纬度</small><strong>{rawLatitudeText}</strong></span>
+                  <span><small>经度</small><strong>{rawLongitudeText}</strong></span>
+                  <span><small>高度</small><strong>{rawAltitudeText}</strong></span>
+                </div>
+                <div className="health-kpi-rtk-quality">
+                  <span>卫导星数 <strong>{rtkSnapshot?.satellite_count ?? "--"}</strong></span>
+                  <span>HDOP / PDOP <strong>{formatMetric(rtkSnapshot?.hdop)} / {formatMetric(rtkSnapshot?.pdop)}</strong></span>
+                </div>
+              </div>
             </article>
           </div>
         </div>
@@ -935,7 +939,8 @@ function Dashboard({
 
             <RealtimeAmap
               snapshot={rtkSnapshot}
-              hasFix={localizationValid || (hasFix && rmcCharacter !== "V")}
+              rawRtkValid={rawCoordinateAvailable}
+              fusionValid={localizationValid}
               connectionDetail={rtk.detail}
               expanded={expandedVisual === "map"}
               onToggleExpanded={() => setExpandedVisual((current) => current === "map" ? null : "map")}
@@ -961,30 +966,6 @@ function Dashboard({
         </div>
 
         <aside className="dashboard-side-stack" aria-label="定位与任务控制">
-          <article className="panel rtk-control-panel">
-            <PanelHead
-              title="RTK 定位"
-              description="卫星数、精度因子与高度"
-              trailing={<StatusPill tone={rtkTone}>{rtkDeviceText}</StatusPill>}
-            />
-
-            <section className="rtk-metric-grid" aria-label="RTK质量指标">
-              <article>
-                <span>卫星数</span>
-                <strong>{rtkSnapshot?.satellite_count ?? "--"}</strong>
-              </article>
-              <article>
-                <span>HDOP / PDOP</span>
-                <strong>{formatMetric(rtkSnapshot?.hdop)} / {formatMetric(rtkSnapshot?.pdop)}</strong>
-              </article>
-              <article>
-                <span>高度</span>
-                <strong>{altitudeText}</strong>
-              </article>
-            </section>
-
-          </article>
-
           <article className="panel localization-panel">
             <PanelHead
               title="融合定位"
@@ -992,39 +973,23 @@ function Dashboard({
               trailing={<StatusPill tone={localizationTone}>{localizationStatusText}</StatusPill>}
             />
 
-            <section className="rtk-metric-grid localization-metric-grid" aria-label="融合定位指标">
-              <article>
-                <span>经纬度</span>
-                <strong>{longitudeText} / {latitudeText}</strong>
-              </article>
-              <article>
-                <span>高度</span>
-                <strong>{localizationAltitudeText}</strong>
-              </article>
-              <article>
-                <span>航向</span>
-                <strong>{localizationHeadingText}</strong>
-              </article>
-              <article>
-                <span>模式 / 航向源</span>
-                <strong>{localizationModeText} / {localizationHeadingSourceText}</strong>
-              </article>
-              <article>
-                <span>DR时间 / 锚点距</span>
-                <strong>{localizationDrText} / {localizationAnchorDistanceText}</strong>
-              </article>
-              <article>
-                <span>水平尺度 / 状态</span>
-                <strong>{localizationScaleText} / {localizationScaleStateText}</strong>
-              </article>
-              <article>
-                <span>航向偏差</span>
-                <strong>{localizationDeltaYawText}</strong>
-              </article>
-              <article>
-                <span>恢复误差</span>
-                <strong>{localizationRecoveryErrorText}</strong>
-              </article>
+            <section className="fusion-position-grid" aria-label="融合定位经纬高">
+              <div><span>纬度</span><strong>{localizationLatitudeText}</strong></div>
+              <div><span>经度</span><strong>{localizationLongitudeText}</strong></div>
+              <div><span>高度</span><strong>{localizationAltitudeText}</strong></div>
+            </section>
+            <section className="fusion-attitude-grid" aria-label="ODIN里程计姿态">
+              <div><span>俯仰</span><strong>{odinPitchText}</strong></div>
+              <div><span>横滚</span><strong>{odinRollText}</strong></div>
+              <div><span>方位</span><strong>{odinYawText}</strong></div>
+            </section>
+            <section className="fusion-diagnostics" aria-label="融合定位诊断">
+              <span>车辆航向 <strong>{localizationHeadingText}</strong></span>
+              <span>模式 / 航向源 <strong>{localizationModeText} / {localizationHeadingSourceText}</strong></span>
+              <span>DR时间 / 锚点距 <strong>{localizationDrText} / {localizationAnchorDistanceText}</strong></span>
+              <span>水平尺度 / 状态 <strong>{localizationScaleText} / {localizationScaleStateText}</strong></span>
+              <span>航向偏差 <strong>{localizationDeltaYawText}</strong></span>
+              <span>恢复误差 <strong>{localizationRecoveryErrorText}</strong></span>
             </section>
           </article>
 
@@ -1065,7 +1030,7 @@ function Dashboard({
                         value={mountHeight}
                         disabled={taskLocked}
                         aria-invalid={!mountHeightValid}
-                        onChange={(event) => { setMountHeight(event.target.value); setLatestAbnormalHeightM(null); }}
+                        onChange={(event) => setMountHeight(event.target.value)}
                       />
                       <small>m</small>
                     </div>
@@ -1097,7 +1062,7 @@ function Dashboard({
                         value={heightThreshold}
                         disabled={taskLocked}
                         aria-invalid={!heightThresholdValid}
-                        onChange={(event) => { setHeightThreshold(event.target.value); setLatestAbnormalHeightM(null); }}
+                        onChange={(event) => setHeightThreshold(event.target.value)}
                       />
                       <small>m</small>
                     </div>

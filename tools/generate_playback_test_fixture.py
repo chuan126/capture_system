@@ -32,7 +32,7 @@ def iso_utc(epoch_ns: int) -> str:
 
 
 def create_recording_schema(connection: sqlite3.Connection) -> None:
-    """建立与 data_recorder 当前 schema v6 对齐的测试数据库。"""
+    """建立与 data_recorder 当前 schema v7 对齐的测试数据库。"""
     connection.executescript(
         """
         CREATE TABLE recording_metadata (
@@ -68,7 +68,25 @@ def create_recording_schema(connection: sqlite3.Connection) -> None:
             source_sequence INTEGER NOT NULL DEFAULT 0,
             source_age_ms REAL NOT NULL DEFAULT 0,
             is_repeated INTEGER NOT NULL DEFAULT 0 CHECK (is_repeated IN (0, 1)),
-            repeat_index INTEGER NOT NULL DEFAULT 0
+            repeat_index INTEGER NOT NULL DEFAULT 0,
+            rtk_timestamp_ns INTEGER,
+            gyro_x_rad_s REAL,
+            gyro_y_rad_s REAL,
+            gyro_z_rad_s REAL,
+            accel_x_m_s2 REAL,
+            accel_y_m_s2 REAL,
+            accel_z_m_s2 REAL,
+            imu_sample_count INTEGER NOT NULL DEFAULT 0,
+            radar_temperature_c REAL,
+            minimum_point_x_m REAL,
+            minimum_point_y_m REAL,
+            minimum_point_z_m REAL,
+            odin_pitch_deg REAL,
+            odin_roll_deg REAL,
+            odin_yaw_deg REAL,
+            odin_position_x_m REAL,
+            odin_position_y_m REAL,
+            odin_position_z_m REAL
         );
         CREATE INDEX clearance_samples_timestamp_idx ON clearance_samples(source_timestamp_ns);
         CREATE TABLE clearance_source_frames (
@@ -115,14 +133,21 @@ def create_recording_schema(connection: sqlite3.Connection) -> None:
             longitude_deg REAL NOT NULL,
             altitude_m REAL NOT NULL,
             heading_deg REAL NOT NULL,
+            odin_attitude_valid INTEGER NOT NULL CHECK (odin_attitude_valid IN (0, 1)),
+            odin_pitch_deg REAL NOT NULL,
+            odin_roll_deg REAL NOT NULL,
+            odin_yaw_deg REAL NOT NULL,
             heading_alignment_valid INTEGER NOT NULL CHECK (heading_alignment_valid IN (0, 1)),
             delta_yaw_deg REAL NOT NULL,
-            scale_calibration_enabled INTEGER NOT NULL CHECK (scale_calibration_enabled IN (0, 1)),
+            scale_calibration_mode INTEGER NOT NULL CHECK (scale_calibration_mode IN (0, 1)),
+            scale_status INTEGER NOT NULL,
             scale_valid INTEGER NOT NULL CHECK (scale_valid IN (0, 1)),
             horizontal_scale REAL NOT NULL,
             vertical_scale REAL NOT NULL,
             scale_baseline_m REAL NOT NULL,
+            scale_fit_residual_m REAL NOT NULL,
             heading_baseline_m REAL NOT NULL,
+            heading_alignment_reason TEXT NOT NULL,
             distance_from_anchor_m REAL NOT NULL,
             dr_duration_s REAL NOT NULL,
             rtk_age_s REAL NOT NULL,
@@ -212,7 +237,7 @@ def create_recording(
                 ended_at, complete, nominal_sample_rate_hz, algorithm_version,
                 config_version, software_version, lidar_mount_height_m,
                 clearance_threshold_m, entry_rtk_status, exit_rtk_status
-            ) VALUES (1, 6, ?, 'test_fixture', ?, 'up', ?, ?, ?, ?, 50.0, ?, ?, ?, ?, ?, 'confirmed', ?)
+            ) VALUES (1, 7, ?, 'test_fixture', ?, 'up', ?, ?, ?, ?, 50.0, ?, ?, ?, ?, ?, 'confirmed', ?)
             """,
             (
                 task_id,
@@ -238,6 +263,26 @@ def create_recording(
             source_timestamp_ns = start_ns + index * 20_000_000
             recorded_timestamp_ns = source_timestamp_ns + 1_500_000
             source_sequence = index + 1
+            telemetry = (
+                source_timestamp_ns,
+                0.001 + index * 0.000001,
+                0.002,
+                0.003,
+                0.10,
+                0.20,
+                9.81,
+                8,
+                42.5,
+                0.25,
+                -0.15,
+                2.92,
+                89.5,
+                0.2,
+                45.0,
+                index * 0.02,
+                index * 0.01,
+                0.0,
+            )
             invalid = any(start <= index < end for start, end in invalid_ranges)
             if invalid:
                 sample_rows.append(
@@ -255,6 +300,7 @@ def create_recording(
                         1.5,
                         0,
                         0,
+                        *telemetry,
                     )
                 )
                 source_rows.append(
@@ -303,6 +349,7 @@ def create_recording(
                     1.5,
                     0,
                     0,
+                    *telemetry,
                 )
             )
             source_rows.append(
@@ -330,8 +377,14 @@ def create_recording(
                 sample_index, source_timestamp_ns, recorded_timestamp_ns,
                 elapsed_ms, lidar_to_top_m, clearance_height_m,
                 valid, invalid_reason, quality_score, source_sequence,
-                source_age_ms, is_repeated, repeat_index
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                source_age_ms, is_repeated, repeat_index, rtk_timestamp_ns,
+                gyro_x_rad_s, gyro_y_rad_s, gyro_z_rad_s,
+                accel_x_m_s2, accel_y_m_s2, accel_z_m_s2, imu_sample_count,
+                radar_temperature_c, minimum_point_x_m, minimum_point_y_m,
+                minimum_point_z_m, odin_pitch_deg, odin_roll_deg, odin_yaw_deg,
+                odin_position_x_m, odin_position_y_m, odin_position_z_m
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                      ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             sample_rows,
         )
@@ -586,7 +639,7 @@ def generate(output: Path, *, force: bool) -> None:
             assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
             assert connection.execute(
                 "SELECT schema_version FROM recording_metadata WHERE id=1"
-            ).fetchone()[0] == 6
+            ).fetchone()[0] == 7
 
     print(output)
 

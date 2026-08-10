@@ -156,8 +156,14 @@ def test_preview_and_txt_export_use_only_recorded_completed_task(tmp_path: Path)
     assert "记录时间" in text
     assert "G45-001" in text
     assert "5.180" in text
-    assert "insufficient_points" in text
     assert "39.9000000, 116.3900000" in text
+    header = text.splitlines()[2].split("\t")
+    assert len(header) == 24
+    assert "陀螺X rad/s" in header
+    assert "加速度计Z m/s2" in header
+    assert "俯仰 deg" in header
+    assert "里程计位置z m" in header
+    assert "insufficient_points" not in text
     assert "attachment" in download_response.headers["content-disposition"]
 
 

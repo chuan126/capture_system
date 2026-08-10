@@ -59,14 +59,21 @@ def test_maps_localization_status_as_fused_position_fields() -> None:
         longitude=114.1234567,
         altitude=40.5,
         heading_deg=91.2,
+        odin_attitude_valid=True,
+        odin_pitch_deg=89.5,
+        odin_roll_deg=0.2,
+        odin_yaw_deg=45.0,
         heading_alignment_valid=True,
         delta_yaw_deg=12.5,
-        scale_calibration_enabled=False,
+        scale_calibration_mode=0,
+        scale_status=0,
         scale_valid=False,
         horizontal_scale=1.0,
         vertical_scale=1.0,
         scale_baseline_m=0.0,
+        scale_fit_residual_m=0.0,
         heading_baseline_m=80.0,
+        heading_alignment_reason="ALIGNED",
         distance_from_anchor_m=120.0,
         dr_duration_s=7.5,
         rtk_age_s=2.0,
@@ -84,5 +91,8 @@ def test_maps_localization_status_as_fused_position_fields() -> None:
     assert snapshot.localization_heading_source == 3
     assert snapshot.localization_latitude == 30.1234567
     assert snapshot.localization_longitude == 114.1234567
+    assert snapshot.localization_odin_pitch_deg == 89.5
+    assert snapshot.localization_scale_calibration_mode == 0
+    assert snapshot.localization_scale_status == 0
     assert snapshot.localization_horizontal_scale == 1.0
     assert snapshot.localization_invalid_reason == "NONE"

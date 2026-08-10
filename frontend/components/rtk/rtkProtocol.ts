@@ -36,14 +36,21 @@ export type RtkSnapshot = {
   localization_longitude: number | null;
   localization_altitude: number | null;
   localization_heading_deg: number | null;
+  localization_odin_attitude_valid: boolean | null;
+  localization_odin_pitch_deg: number | null;
+  localization_odin_roll_deg: number | null;
+  localization_odin_yaw_deg: number | null;
   localization_heading_alignment_valid: boolean | null;
   localization_delta_yaw_deg: number | null;
-  localization_scale_calibration_enabled: boolean | null;
+  localization_scale_calibration_mode: number | null;
+  localization_scale_status: number | null;
   localization_scale_valid: boolean | null;
   localization_horizontal_scale: number | null;
   localization_vertical_scale: number | null;
   localization_scale_baseline_m: number | null;
+  localization_scale_fit_residual_m: number | null;
   localization_heading_baseline_m: number | null;
+  localization_heading_alignment_reason: string | null;
   localization_distance_from_anchor_m: number | null;
   localization_dr_duration_s: number | null;
   localization_rtk_age_s: number | null;
@@ -120,10 +127,16 @@ export function parseRtkText(text: string): RtkTextMessage {
     "localization_longitude",
     "localization_altitude",
     "localization_heading_deg",
+    "localization_odin_pitch_deg",
+    "localization_odin_roll_deg",
+    "localization_odin_yaw_deg",
     "localization_delta_yaw_deg",
+    "localization_scale_calibration_mode",
+    "localization_scale_status",
     "localization_horizontal_scale",
     "localization_vertical_scale",
     "localization_scale_baseline_m",
+    "localization_scale_fit_residual_m",
     "localization_heading_baseline_m",
     "localization_distance_from_anchor_m",
     "localization_dr_duration_s",
@@ -138,17 +151,18 @@ export function parseRtkText(text: string): RtkTextMessage {
 
   const booleanFields = [
     "localization_valid",
+    "localization_odin_attitude_valid",
     "localization_heading_alignment_valid",
-    "localization_scale_calibration_enabled",
     "localization_scale_valid",
   ] as const;
   if (booleanFields.some((field) => value[field] !== null && typeof value[field] !== "boolean")) {
     throw new Error("RTK快照布尔字段无效");
   }
-  if (
-    value.localization_invalid_reason !== null &&
-    typeof value.localization_invalid_reason !== "string"
-  ) {
+  const stringFields = [
+    "localization_heading_alignment_reason",
+    "localization_invalid_reason",
+  ] as const;
+  if (stringFields.some((field) => value[field] !== null && typeof value[field] !== "string")) {
     throw new Error("RTK快照融合定位原因字段无效");
   }
 

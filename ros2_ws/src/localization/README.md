@@ -125,8 +125,10 @@ colcon test-result --all --verbose
 ```
 
 RTK有效时，节点使用RTK经纬高作为绝对位置，使用RTK航迹角或RTK长基线位置轨迹估计
-绝对航向，并与ODIN四元数航向相减得到 `delta_yaw`。`delta_yaw` 使用圆周统计，
-不会把359°和1°平均成180°。RTK `track_degrees=0` 被视为合法正北航迹角。
+绝对航向。ODIN四元数把配置的车辆前向轴 `vehicle_forward_axis_body` 旋转到ODIN水平系，
+再与RTK航向单位向量通过 `atan2(cross, dot)` 求 `delta_yaw`；核心对齐不读取Euler yaw。
+`delta_yaw` 使用圆周统计，不会把359°和1°平均成180°。RTK `track_degrees=0`
+被视为合法正北航迹角。正式默认车辆前向轴为 `[0,0,-1]`，适配ODIN镜头朝天安装。
 
 RTK状态无效或失锁且满足曾有可靠RTK锚点、ODIN有效、`delta_yaw`已可靠等条件后，节点冻结：
 
@@ -147,16 +149,22 @@ p_enu(t) = delta_p_enu
 LLH(t) = ENU_to_WGS84(LLH_anchor, p_enu(t))
 ```
 
-这里禁止再次将ODIN position乘实时姿态矩阵。实时绝对航向使用：
+这里禁止再次将ODIN position乘实时姿态矩阵。完整绝对姿态使用：
 
 ```text
-psi_absolute = wrap(psi_odin + delta_yaw_anchor)
+R_n_from_b = Rz(delta_yaw_anchor) * R_o_from_b
 ```
 
-若 `scale_calibration_enabled=false`，水平尺度固定为1.0，但航向对齐仍继续工作。
-若开启尺度标定，节点用长轨迹RTK/ODIN同步点拟合二维相似变换，同时估计scale、
-`delta_yaw`和平移；只有样本数、基线、残差和尺度范围都满足参数要求时，
-`scale_valid=true`。
+最终车辆航向仍由完整绝对姿态旋转车辆前向轴并投影到ENU水平面得到，不经过Euler角往返。
+`q2att` 只用于状态消息和TXT中的ODIN原始里程计俯仰、横滚、方位显示。
+
+DR期间ODIN短时超时后，节点保持最后位置，并用IMU角速度对完整四元数做最多
+`gyro_fallback_max_duration_s`的桥接，航向来源标记为`HEADING_IMU_GYRO`。IMU超时或达到
+时限后输出无效；加速度计不用于航向修正。
+
+`scale_calibration_mode=0` 时不收集尺度轨迹、不执行拟合，水平尺度固定为1.0，
+`scale_status=SCALE_DISABLED`，且不阻塞航向对齐或进入DR。仅当模式为1时，节点用长轨迹
+RTK/ODIN同步点拟合二维相似变换；只有样本数、基线、残差和尺度范围都满足要求时应用尺度。
 
 室内测试可临时设置 `rtk_simulation_enabled=1`，节点会用北纬24°34′26″、
 东经118°5′22″、高度20m、航迹角北偏东45°建立模拟RTK锚点，并直接输出

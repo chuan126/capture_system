@@ -24,7 +24,11 @@
 #include "interfaces/srv/recording_command.hpp"
 #include "nav_msgs/msg/odometry.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include "sensor_msgs/msg/imu.hpp"
 #include "sensor_msgs/msg/nav_sat_fix.hpp"
+#include "sensor_msgs/msg/temperature.hpp"
+
+#include "localization/Attitude/attitude_matrix.h"
 
 namespace fs = std::filesystem;
 using namespace std::chrono_literals;
@@ -133,6 +137,19 @@ void bind_nullable_double(
   }
 }
 
+void bind_nullable_int64(
+  sqlite3_stmt * statement, int index, const std::optional<std::int64_t> & value)
+{
+  if (value.has_value()) {
+    check_sqlite(
+      sqlite3_bind_int64(statement, index, *value), sqlite3_db_handle(statement),
+      "绑定可空整数失败");
+  } else {
+    check_sqlite(
+      sqlite3_bind_null(statement, index), sqlite3_db_handle(statement), "绑定空整数失败");
+  }
+}
+
 }  // namespace
 
 class DataRecorderNode : public rclcpp::Node
@@ -156,9 +173,18 @@ public:
       "localization_status_topic", "/capture/localization/status");
     localization_odometry_topic_ = declare_parameter<std::string>(
       "localization_odometry_topic", "/capture/localization/odometry");
+    imu_topic_ = declare_parameter<std::string>("imu_topic", "/capture/imu/data");
+    odometry_topic_ = declare_parameter<std::string>(
+      "odometry_topic", "/capture/odometry/high_rate");
+    radar_temperature_topic_ = declare_parameter<std::string>(
+      "radar_temperature_topic", "/capture/lidar/temperature");
     sample_rate_hz_ = declare_parameter<double>("sample_rate_hz", 50.0);
     source_timeout_ms_ = declare_parameter<double>("source_timeout_ms", 250.0);
     endpoint_rtk_max_age_ms_ = declare_parameter<double>("endpoint_rtk_max_age_ms", 2000.0);
+    odometry_snapshot_max_age_ms_ = declare_parameter<double>(
+      "odometry_snapshot_max_age_ms", 250.0);
+    radar_temperature_max_age_ms_ = declare_parameter<double>(
+      "radar_temperature_max_age_ms", 2000.0);
     transaction_batch_size_ = declare_parameter<int>("transaction_batch_size", 100);
     software_version_ = declare_parameter<std::string>("software_version", "0.2.0");
     algorithm_version_ = declare_parameter<std::string>(
@@ -174,6 +200,9 @@ public:
     }
     if (!(endpoint_rtk_max_age_ms_ > 0.0)) {
       throw std::runtime_error("endpoint_rtk_max_age_ms必须大于0");
+    }
+    if (!(odometry_snapshot_max_age_ms_ > 0.0) || !(radar_temperature_max_age_ms_ > 0.0)) {
+      throw std::runtime_error("里程计和雷达温度快照超时参数必须大于0");
     }
     transaction_batch_size_ = std::max(transaction_batch_size_, 1);
 
@@ -199,6 +228,15 @@ public:
     localization_odometry_subscription_ = create_subscription<nav_msgs::msg::Odometry>(
       localization_odometry_topic_, reliable_qos,
       std::bind(&DataRecorderNode::on_localization_odometry, this, std::placeholders::_1));
+    imu_subscription_ = create_subscription<sensor_msgs::msg::Imu>(
+      imu_topic_, rclcpp::QoS(rclcpp::KeepLast(1000)).best_effort(),
+      std::bind(&DataRecorderNode::on_imu, this, std::placeholders::_1));
+    odometry_subscription_ = create_subscription<nav_msgs::msg::Odometry>(
+      odometry_topic_, rclcpp::QoS(rclcpp::KeepLast(1000)).reliable(),
+      std::bind(&DataRecorderNode::on_odometry, this, std::placeholders::_1));
+    radar_temperature_subscription_ = create_subscription<sensor_msgs::msg::Temperature>(
+      radar_temperature_topic_, rclcpp::QoS(rclcpp::KeepLast(20)).best_effort(),
+      std::bind(&DataRecorderNode::on_radar_temperature, this, std::placeholders::_1));
 
     status_publisher_ = create_publisher<interfaces::msg::RecordingStatus>(
       "/capture/recording/status",
@@ -252,6 +290,36 @@ private:
     double longitude_deg{0.0};
     std::optional<double> altitude_m;
     std::string fix_type{"UNKNOWN"};
+  };
+
+  struct ImuAccumulator
+  {
+    std::uint64_t count{0};
+    double gyro_x_sum{0.0};
+    double gyro_y_sum{0.0};
+    double gyro_z_sum{0.0};
+    double accel_x_sum{0.0};
+    double accel_y_sum{0.0};
+    double accel_z_sum{0.0};
+  };
+
+  struct LatestOdin
+  {
+    bool available{false};
+    std::int64_t received_monotonic_ns{0};
+    double position_x_m{0.0};
+    double position_y_m{0.0};
+    double position_z_m{0.0};
+    double pitch_deg{0.0};
+    double roll_deg{0.0};
+    double yaw_deg{0.0};
+  };
+
+  struct LatestTemperature
+  {
+    bool available{false};
+    std::int64_t received_monotonic_ns{0};
+    double celsius{0.0};
   };
 
   void recover_orphan_recordings()
@@ -512,6 +580,7 @@ private:
     }
     flush_transaction();
     paused_ = true;
+    imu_accumulator_ = ImuAccumulator{};
     pause_started_ns_ = requested_ns;
     insert_event("paused", requested_ns, "正式测量记录已暂停", "");
     capture_event_rtk("pause", requested_ns, latest_fix_is_fresh());
@@ -529,6 +598,7 @@ private:
     }
     close_pause_interval(requested_ns);
     paused_ = false;
+    imu_accumulator_ = ImuAccumulator{};
     begin_transaction();
     insert_event("resumed", requested_ns, "正式测量记录已继续", "");
     capture_event_rtk("resume", requested_ns, latest_fix_is_fresh());
@@ -675,6 +745,76 @@ private:
     }
   }
 
+  void on_imu(const sensor_msgs::msg::Imu::SharedPtr message)
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!active_ || paused_) {
+      return;
+    }
+    const auto & gyro = message->angular_velocity;
+    const auto & accel = message->linear_acceleration;
+    if (!std::isfinite(gyro.x) || !std::isfinite(gyro.y) || !std::isfinite(gyro.z) ||
+      !std::isfinite(accel.x) || !std::isfinite(accel.y) || !std::isfinite(accel.z))
+    {
+      return;
+    }
+    ++imu_accumulator_.count;
+    imu_accumulator_.gyro_x_sum += gyro.x;
+    imu_accumulator_.gyro_y_sum += gyro.y;
+    imu_accumulator_.gyro_z_sum += gyro.z;
+    imu_accumulator_.accel_x_sum += accel.x;
+    imu_accumulator_.accel_y_sum += accel.y;
+    imu_accumulator_.accel_z_sum += accel.z;
+  }
+
+  void on_odometry(const nav_msgs::msg::Odometry::SharedPtr message)
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const auto & position = message->pose.pose.position;
+    const auto & orientation = message->pose.pose.orientation;
+    if (!std::isfinite(position.x) || !std::isfinite(position.y) || !std::isfinite(position.z) ||
+      !std::isfinite(orientation.x) || !std::isfinite(orientation.y) ||
+      !std::isfinite(orientation.z) || !std::isfinite(orientation.w))
+    {
+      return;
+    }
+    const double norm = std::sqrt(
+      orientation.x * orientation.x + orientation.y * orientation.y +
+      orientation.z * orientation.z + orientation.w * orientation.w);
+    if (!std::isfinite(norm) || norm <= 1.0e-12) {
+      return;
+    }
+    double quaternion_wxyz[4]{
+      orientation.w / norm, orientation.x / norm, orientation.y / norm, orientation.z / norm};
+    double attitude_rad[3]{};
+    q2att(quaternion_wxyz, attitude_rad);
+    if (!std::isfinite(attitude_rad[0]) || !std::isfinite(attitude_rad[1]) ||
+      !std::isfinite(attitude_rad[2]))
+    {
+      return;
+    }
+    constexpr double radians_to_degrees = 180.0 / 3.14159265358979323846;
+    latest_odin_.available = true;
+    latest_odin_.received_monotonic_ns = steady_now_ns();
+    latest_odin_.position_x_m = position.x;
+    latest_odin_.position_y_m = position.y;
+    latest_odin_.position_z_m = position.z;
+    latest_odin_.pitch_deg = attitude_rad[0] * radians_to_degrees;
+    latest_odin_.roll_deg = attitude_rad[1] * radians_to_degrees;
+    latest_odin_.yaw_deg = attitude_rad[2] * radians_to_degrees;
+  }
+
+  void on_radar_temperature(const sensor_msgs::msg::Temperature::SharedPtr message)
+  {
+    if (!std::isfinite(message->temperature)) {
+      return;
+    }
+    std::lock_guard<std::mutex> lock(mutex_);
+    latest_temperature_.available = true;
+    latest_temperature_.received_monotonic_ns = steady_now_ns();
+    latest_temperature_.celsius = message->temperature;
+  }
+
   void write_periodic_sample()
   {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -728,15 +868,66 @@ private:
         invalid_reason = "source_unavailable";
       }
 
+      const std::optional<std::int64_t> rtk_timestamp_ns = latest_fix_.available ?
+        std::optional<std::int64_t>(latest_fix_.timestamp_ns) : std::nullopt;
+      const std::uint64_t imu_sample_count = imu_accumulator_.count;
+      std::optional<double> gyro_x;
+      std::optional<double> gyro_y;
+      std::optional<double> gyro_z;
+      std::optional<double> accel_x;
+      std::optional<double> accel_y;
+      std::optional<double> accel_z;
+      if (imu_sample_count > 0U) {
+        const double inverse_count = 1.0 / static_cast<double>(imu_sample_count);
+        gyro_x = imu_accumulator_.gyro_x_sum * inverse_count;
+        gyro_y = imu_accumulator_.gyro_y_sum * inverse_count;
+        gyro_z = imu_accumulator_.gyro_z_sum * inverse_count;
+        accel_x = imu_accumulator_.accel_x_sum * inverse_count;
+        accel_y = imu_accumulator_.accel_y_sum * inverse_count;
+        accel_z = imu_accumulator_.accel_z_sum * inverse_count;
+      }
+      imu_accumulator_ = ImuAccumulator{};
+
+      std::optional<double> minimum_point_x;
+      std::optional<double> minimum_point_y;
+      std::optional<double> minimum_point_z;
+      if (latest_clearance_.has_value()) {
+        const auto & minimum = latest_clearance_->message;
+        if (std::isfinite(minimum.minimum_position_east_m)) {
+          minimum_point_x = minimum.minimum_position_east_m;
+        }
+        if (std::isfinite(minimum.minimum_position_north_m)) {
+          minimum_point_y = minimum.minimum_position_north_m;
+        }
+        if (std::isfinite(minimum.minimum_position_up_m)) {
+          minimum_point_z = minimum.minimum_position_up_m;
+        }
+      }
+
+      const auto monotonic_now_ns = steady_now_ns();
+      const bool odin_fresh = latest_odin_.available &&
+        static_cast<double>(std::max<std::int64_t>(
+          0, monotonic_now_ns - latest_odin_.received_monotonic_ns)) / 1'000'000.0 <=
+        odometry_snapshot_max_age_ms_;
+      const bool temperature_fresh = latest_temperature_.available &&
+        static_cast<double>(std::max<std::int64_t>(
+          0, monotonic_now_ns - latest_temperature_.received_monotonic_ns)) / 1'000'000.0 <=
+        radar_temperature_max_age_ms_;
+
       sqlite3_stmt * statement = nullptr;
       check_sqlite(
         sqlite3_prepare_v2(
           database_,
           "INSERT INTO clearance_samples ("
-          "sample_index, source_timestamp_ns, recorded_timestamp_ns, elapsed_ms, "
-          "lidar_to_top_m, clearance_height_m, valid, invalid_reason, quality_score, "
-          "source_sequence, source_age_ms, is_repeated, repeat_index) "
-          "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+           "sample_index, source_timestamp_ns, recorded_timestamp_ns, elapsed_ms, "
+           "lidar_to_top_m, clearance_height_m, valid, invalid_reason, quality_score, "
+           "source_sequence, source_age_ms, is_repeated, repeat_index, rtk_timestamp_ns, "
+           "gyro_x_rad_s, gyro_y_rad_s, gyro_z_rad_s, accel_x_m_s2, accel_y_m_s2, "
+           "accel_z_m_s2, imu_sample_count, radar_temperature_c, minimum_point_x_m, "
+           "minimum_point_y_m, minimum_point_z_m, odin_pitch_deg, odin_roll_deg, "
+           "odin_yaw_deg, odin_position_x_m, odin_position_y_m, odin_position_z_m) "
+           "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
+           "?, ?, ?, ?, ?, ?, ?, ?, ?)",
           -1, &statement, nullptr),
         database_, "准备50Hz样本写入失败");
       check_sqlite(sqlite3_bind_int64(statement, 1, static_cast<sqlite3_int64>(total_samples_)), database_, "绑定样本序号失败");
@@ -757,6 +948,37 @@ private:
       check_sqlite(sqlite3_bind_double(statement, 11, source_age_ms), database_, "绑定源年龄失败");
       check_sqlite(sqlite3_bind_int(statement, 12, repeated ? 1 : 0), database_, "绑定重复标志失败");
       check_sqlite(sqlite3_bind_int(statement, 13, static_cast<int>(repeat_index)), database_, "绑定重复序号失败");
+      bind_nullable_int64(statement, 14, rtk_timestamp_ns);
+      bind_nullable_double(statement, 15, gyro_x);
+      bind_nullable_double(statement, 16, gyro_y);
+      bind_nullable_double(statement, 17, gyro_z);
+      bind_nullable_double(statement, 18, accel_x);
+      bind_nullable_double(statement, 19, accel_y);
+      bind_nullable_double(statement, 20, accel_z);
+      check_sqlite(
+        sqlite3_bind_int64(statement, 21, static_cast<sqlite3_int64>(imu_sample_count)),
+        database_, "绑定IMU平均样本数失败");
+      bind_nullable_double(
+        statement, 22, temperature_fresh ?
+        std::optional<double>(latest_temperature_.celsius) : std::nullopt);
+      bind_nullable_double(statement, 23, minimum_point_x);
+      bind_nullable_double(statement, 24, minimum_point_y);
+      bind_nullable_double(statement, 25, minimum_point_z);
+      bind_nullable_double(
+        statement, 26, odin_fresh ? std::optional<double>(latest_odin_.pitch_deg) : std::nullopt);
+      bind_nullable_double(
+        statement, 27, odin_fresh ? std::optional<double>(latest_odin_.roll_deg) : std::nullopt);
+      bind_nullable_double(
+        statement, 28, odin_fresh ? std::optional<double>(latest_odin_.yaw_deg) : std::nullopt);
+      bind_nullable_double(
+        statement, 29, odin_fresh ?
+        std::optional<double>(latest_odin_.position_x_m) : std::nullopt);
+      bind_nullable_double(
+        statement, 30, odin_fresh ?
+        std::optional<double>(latest_odin_.position_y_m) : std::nullopt);
+      bind_nullable_double(
+        statement, 31, odin_fresh ?
+        std::optional<double>(latest_odin_.position_z_m) : std::nullopt);
       check_sqlite(sqlite3_step(statement), database_, "写入50Hz样本失败");
       sqlite3_finalize(statement);
 
@@ -824,7 +1046,25 @@ private:
         source_sequence INTEGER NOT NULL DEFAULT 0,
         source_age_ms REAL NOT NULL DEFAULT 0,
         is_repeated INTEGER NOT NULL DEFAULT 0 CHECK (is_repeated IN (0, 1)),
-        repeat_index INTEGER NOT NULL DEFAULT 0
+        repeat_index INTEGER NOT NULL DEFAULT 0,
+        rtk_timestamp_ns INTEGER,
+        gyro_x_rad_s REAL,
+        gyro_y_rad_s REAL,
+        gyro_z_rad_s REAL,
+        accel_x_m_s2 REAL,
+        accel_y_m_s2 REAL,
+        accel_z_m_s2 REAL,
+        imu_sample_count INTEGER NOT NULL DEFAULT 0 CHECK (imu_sample_count >= 0),
+        radar_temperature_c REAL,
+        minimum_point_x_m REAL,
+        minimum_point_y_m REAL,
+        minimum_point_z_m REAL,
+        odin_pitch_deg REAL,
+        odin_roll_deg REAL,
+        odin_yaw_deg REAL,
+        odin_position_x_m REAL,
+        odin_position_y_m REAL,
+        odin_position_z_m REAL
       );
       CREATE INDEX clearance_samples_timestamp_idx ON clearance_samples(source_timestamp_ns);
       CREATE TABLE clearance_source_frames (
@@ -871,14 +1111,21 @@ private:
         longitude_deg REAL NOT NULL,
         altitude_m REAL NOT NULL,
         heading_deg REAL NOT NULL,
+        odin_attitude_valid INTEGER NOT NULL CHECK (odin_attitude_valid IN (0, 1)),
+        odin_pitch_deg REAL NOT NULL,
+        odin_roll_deg REAL NOT NULL,
+        odin_yaw_deg REAL NOT NULL,
         heading_alignment_valid INTEGER NOT NULL CHECK (heading_alignment_valid IN (0, 1)),
         delta_yaw_deg REAL NOT NULL,
-        scale_calibration_enabled INTEGER NOT NULL CHECK (scale_calibration_enabled IN (0, 1)),
+        scale_calibration_mode INTEGER NOT NULL CHECK (scale_calibration_mode IN (0, 1)),
+        scale_status INTEGER NOT NULL,
         scale_valid INTEGER NOT NULL CHECK (scale_valid IN (0, 1)),
         horizontal_scale REAL NOT NULL,
         vertical_scale REAL NOT NULL,
         scale_baseline_m REAL NOT NULL,
+        scale_fit_residual_m REAL NOT NULL,
         heading_baseline_m REAL NOT NULL,
+        heading_alignment_reason TEXT NOT NULL,
         distance_from_anchor_m REAL NOT NULL,
         dr_duration_s REAL NOT NULL,
         rtk_age_s REAL NOT NULL,
@@ -955,7 +1202,7 @@ private:
         "started_at, ended_at, complete, nominal_sample_rate_hz, algorithm_version, "
         "config_version, software_version, lidar_mount_height_m, clearance_threshold_m, "
         "entry_rtk_status, exit_rtk_status) "
-        "VALUES (1, 6, ?, 'recorded', ?, ?, ?, ?, NULL, 0, ?, ?, ?, ?, ?, ?, 'pending', 'not_requested')",
+        "VALUES (1, 7, ?, 'recorded', ?, ?, ?, ?, NULL, 0, ?, ?, ?, ?, ?, ?, 'pending', 'not_requested')",
         -1, &statement, nullptr),
       database_, "准备任务元数据写入失败");
     bind_text(statement, 1, task_id_);
@@ -1078,11 +1325,14 @@ private:
         database_,
         "INSERT INTO localization_status_samples ("
         "timestamp_ns, valid, mode, heading_source, latitude_deg, longitude_deg, altitude_m, "
-        "heading_deg, heading_alignment_valid, delta_yaw_deg, scale_calibration_enabled, "
-        "scale_valid, horizontal_scale, vertical_scale, scale_baseline_m, heading_baseline_m, "
+        "heading_deg, odin_attitude_valid, odin_pitch_deg, odin_roll_deg, odin_yaw_deg, "
+        "heading_alignment_valid, delta_yaw_deg, scale_calibration_mode, scale_status, "
+        "scale_valid, horizontal_scale, vertical_scale, scale_baseline_m, scale_fit_residual_m, "
+        "heading_baseline_m, heading_alignment_reason, "
         "distance_from_anchor_m, dr_duration_s, rtk_age_s, odometry_age_s, imu_age_s, "
         "position_difference_to_rtk_m, invalid_reason) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
+        "?, ?, ?, ?, ?, ?)",
         -1, &statement, nullptr),
       database_, "准备融合定位status写入失败");
     const auto stamp_ns = rclcpp::Time(status.header.stamp).nanoseconds();
@@ -1094,21 +1344,28 @@ private:
     check_sqlite(sqlite3_bind_double(statement, 6, status.longitude), database_, "绑定融合status经度失败");
     check_sqlite(sqlite3_bind_double(statement, 7, status.altitude), database_, "绑定融合status高度失败");
     check_sqlite(sqlite3_bind_double(statement, 8, status.heading_deg), database_, "绑定融合航向失败");
-    check_sqlite(sqlite3_bind_int(statement, 9, status.heading_alignment_valid ? 1 : 0), database_, "绑定航向对齐有效性失败");
-    check_sqlite(sqlite3_bind_double(statement, 10, status.delta_yaw_deg), database_, "绑定航向偏差失败");
-    check_sqlite(sqlite3_bind_int(statement, 11, status.scale_calibration_enabled ? 1 : 0), database_, "绑定尺度开关失败");
-    check_sqlite(sqlite3_bind_int(statement, 12, status.scale_valid ? 1 : 0), database_, "绑定尺度有效性失败");
-    check_sqlite(sqlite3_bind_double(statement, 13, status.horizontal_scale), database_, "绑定水平尺度失败");
-    check_sqlite(sqlite3_bind_double(statement, 14, status.vertical_scale), database_, "绑定垂直尺度失败");
-    check_sqlite(sqlite3_bind_double(statement, 15, status.scale_baseline_m), database_, "绑定尺度基线失败");
-    check_sqlite(sqlite3_bind_double(statement, 16, status.heading_baseline_m), database_, "绑定航向基线失败");
-    check_sqlite(sqlite3_bind_double(statement, 17, status.distance_from_anchor_m), database_, "绑定锚点距离失败");
-    check_sqlite(sqlite3_bind_double(statement, 18, status.dr_duration_s), database_, "绑定DR时间失败");
-    check_sqlite(sqlite3_bind_double(statement, 19, status.rtk_age_s), database_, "绑定RTK年龄失败");
-    check_sqlite(sqlite3_bind_double(statement, 20, status.odometry_age_s), database_, "绑定里程计年龄失败");
-    check_sqlite(sqlite3_bind_double(statement, 21, status.imu_age_s), database_, "绑定IMU年龄失败");
-    check_sqlite(sqlite3_bind_double(statement, 22, status.position_difference_to_rtk_m), database_, "绑定恢复误差失败");
-    bind_text(statement, 23, status.invalid_reason);
+    check_sqlite(sqlite3_bind_int(statement, 9, status.odin_attitude_valid ? 1 : 0), database_, "绑定ODIN姿态有效性失败");
+    check_sqlite(sqlite3_bind_double(statement, 10, status.odin_pitch_deg), database_, "绑定ODIN俯仰失败");
+    check_sqlite(sqlite3_bind_double(statement, 11, status.odin_roll_deg), database_, "绑定ODIN横滚失败");
+    check_sqlite(sqlite3_bind_double(statement, 12, status.odin_yaw_deg), database_, "绑定ODIN欧拉方位失败");
+    check_sqlite(sqlite3_bind_int(statement, 13, status.heading_alignment_valid ? 1 : 0), database_, "绑定航向对齐有效性失败");
+    check_sqlite(sqlite3_bind_double(statement, 14, status.delta_yaw_deg), database_, "绑定航向偏差失败");
+    check_sqlite(sqlite3_bind_int(statement, 15, status.scale_calibration_mode), database_, "绑定尺度模式失败");
+    check_sqlite(sqlite3_bind_int(statement, 16, status.scale_status), database_, "绑定尺度状态失败");
+    check_sqlite(sqlite3_bind_int(statement, 17, status.scale_valid ? 1 : 0), database_, "绑定尺度有效性失败");
+    check_sqlite(sqlite3_bind_double(statement, 18, status.horizontal_scale), database_, "绑定水平尺度失败");
+    check_sqlite(sqlite3_bind_double(statement, 19, status.vertical_scale), database_, "绑定垂直尺度失败");
+    check_sqlite(sqlite3_bind_double(statement, 20, status.scale_baseline_m), database_, "绑定尺度基线失败");
+    check_sqlite(sqlite3_bind_double(statement, 21, status.scale_fit_residual_m), database_, "绑定尺度拟合残差失败");
+    check_sqlite(sqlite3_bind_double(statement, 22, status.heading_baseline_m), database_, "绑定航向基线失败");
+    bind_text(statement, 23, status.heading_alignment_reason);
+    check_sqlite(sqlite3_bind_double(statement, 24, status.distance_from_anchor_m), database_, "绑定锚点距离失败");
+    check_sqlite(sqlite3_bind_double(statement, 25, status.dr_duration_s), database_, "绑定DR时间失败");
+    check_sqlite(sqlite3_bind_double(statement, 26, status.rtk_age_s), database_, "绑定RTK年龄失败");
+    check_sqlite(sqlite3_bind_double(statement, 27, status.odometry_age_s), database_, "绑定里程计年龄失败");
+    check_sqlite(sqlite3_bind_double(statement, 28, status.imu_age_s), database_, "绑定IMU年龄失败");
+    check_sqlite(sqlite3_bind_double(statement, 29, status.position_difference_to_rtk_m), database_, "绑定恢复误差失败");
+    bind_text(statement, 30, status.invalid_reason);
     check_sqlite(sqlite3_step(statement), database_, "写入融合定位status失败");
     sqlite3_finalize(statement);
   }
@@ -1523,6 +1780,7 @@ private:
     last_written_source_sequence_ = 0;
     last_persisted_source_sequence_ = 0;
     current_repeat_index_ = 0;
+    imu_accumulator_ = ImuAccumulator{};
     entry_rtk_status_ = "not_requested";
     exit_rtk_status_ = "not_requested";
   }
@@ -1535,9 +1793,14 @@ private:
   std::string localization_fix_topic_;
   std::string localization_status_topic_;
   std::string localization_odometry_topic_;
+  std::string imu_topic_;
+  std::string odometry_topic_;
+  std::string radar_temperature_topic_;
   double sample_rate_hz_{50.0};
   double source_timeout_ms_{250.0};
   double endpoint_rtk_max_age_ms_{2000.0};
+  double odometry_snapshot_max_age_ms_{250.0};
+  double radar_temperature_max_age_ms_{2000.0};
   int transaction_batch_size_{100};
   std::string software_version_;
   std::string algorithm_version_;
@@ -1575,6 +1838,9 @@ private:
   std::string exit_rtk_status_{"not_requested"};
   std::optional<LatestClearance> latest_clearance_;
   LatestFix latest_fix_;
+  ImuAccumulator imu_accumulator_;
+  LatestOdin latest_odin_;
+  LatestTemperature latest_temperature_;
 
   rclcpp::Subscription<interfaces::msg::ClearanceResult>::SharedPtr clearance_subscription_;
   rclcpp::Subscription<sensor_msgs::msg::NavSatFix>::SharedPtr rtk_fix_subscription_;
@@ -1582,6 +1848,9 @@ private:
   rclcpp::Subscription<sensor_msgs::msg::NavSatFix>::SharedPtr localization_fix_subscription_;
   rclcpp::Subscription<interfaces::msg::LocalizationStatus>::SharedPtr localization_status_subscription_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr localization_odometry_subscription_;
+  rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_subscription_;
+  rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odometry_subscription_;
+  rclcpp::Subscription<sensor_msgs::msg::Temperature>::SharedPtr radar_temperature_subscription_;
   rclcpp::Publisher<interfaces::msg::RecordingStatus>::SharedPtr status_publisher_;
   rclcpp::Service<interfaces::srv::PrepareRecording>::SharedPtr prepare_service_;
   rclcpp::Service<interfaces::srv::RecordingCommand>::SharedPtr command_service_;

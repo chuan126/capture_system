@@ -22,6 +22,13 @@ double clampUnit(const double value) noexcept
   return std::clamp(value, -1.0, 1.0);
 }
 
+HorizontalDirection2d invalidHorizontalDirection(const std::string & reason) noexcept
+{
+  HorizontalDirection2d result;
+  result.invalid_reason = reason;
+  return result;
+}
+
 }  // namespace
 
 bool isFinite(const Vector3d & vector) noexcept
@@ -124,6 +131,76 @@ double yawFromRosQuaternion(Quaterniond quaternion) noexcept
   return wrapAngleRad(std::atan2(siny_cosp, cosy_cosp));
 }
 
+HorizontalDirection2d projectBodyAxisToHorizontal(
+  Quaterniond orientation_navigation_from_body, Vector3d axis_body,
+  const double minimum_projection_norm) noexcept
+{
+  if (!normalizeQuaternion(orientation_navigation_from_body) || !isFinite(axis_body) ||
+    !std::isfinite(minimum_projection_norm) || minimum_projection_norm < 0.0)
+  {
+    return invalidHorizontalDirection("INVALID_ORIENTATION_OR_FORWARD_AXIS");
+  }
+  const double axis_norm = std::sqrt(
+    axis_body.x * axis_body.x + axis_body.y * axis_body.y + axis_body.z * axis_body.z);
+  if (!std::isfinite(axis_norm) || axis_norm <= 1.0e-12) {
+    return invalidHorizontalDirection("INVALID_VEHICLE_FORWARD_AXIS");
+  }
+  axis_body.x /= axis_norm;
+  axis_body.y /= axis_norm;
+  axis_body.z /= axis_norm;
+
+  const double x = orientation_navigation_from_body.x;
+  const double y = orientation_navigation_from_body.y;
+  const double z = orientation_navigation_from_body.z;
+  const double w = orientation_navigation_from_body.w;
+  const double rotated_x =
+    (w * w + x * x - y * y - z * z) * axis_body.x +
+    2.0 * (x * y - w * z) * axis_body.y +
+    2.0 * (x * z + w * y) * axis_body.z;
+  const double rotated_y =
+    2.0 * (x * y + w * z) * axis_body.x +
+    (w * w - x * x + y * y - z * z) * axis_body.y +
+    2.0 * (y * z - w * x) * axis_body.z;
+  const double projection_norm = std::hypot(rotated_x, rotated_y);
+  if (!std::isfinite(projection_norm) || projection_norm < minimum_projection_norm ||
+    projection_norm <= 1.0e-12)
+  {
+    HorizontalDirection2d result = invalidHorizontalDirection(
+      "FORWARD_AXIS_HORIZONTAL_PROJECTION_TOO_SMALL");
+    result.projection_norm = projection_norm;
+    return result;
+  }
+
+  HorizontalDirection2d result;
+  result.valid = true;
+  result.x = rotated_x / projection_norm;
+  result.y = rotated_y / projection_norm;
+  result.projection_norm = projection_norm;
+  result.invalid_reason = "NONE";
+  return result;
+}
+
+double yawBetweenHorizontalDirections(
+  const HorizontalDirection2d & source, const HorizontalDirection2d & target) noexcept
+{
+  if (!source.valid || !target.valid || !std::isfinite(source.x) || !std::isfinite(source.y) ||
+    !std::isfinite(target.x) || !std::isfinite(target.y))
+  {
+    return std::numeric_limits<double>::quiet_NaN();
+  }
+  const double dot = source.x * target.x + source.y * target.y;
+  const double cross = source.x * target.y - source.y * target.x;
+  return wrapAngleRad(std::atan2(cross, dot));
+}
+
+double yawFromHorizontalDirection(const HorizontalDirection2d & direction) noexcept
+{
+  if (!direction.valid || !std::isfinite(direction.x) || !std::isfinite(direction.y)) {
+    return std::numeric_limits<double>::quiet_NaN();
+  }
+  return wrapAngleRad(std::atan2(direction.y, direction.x));
+}
+
 Quaterniond absoluteQuaternionFromOdin(
   const double delta_yaw_rad, Quaterniond odin_orientation) noexcept
 {
@@ -219,8 +296,11 @@ DeadReckoningResult propagateDeadReckoning(
     result.invalid_reason = "ABSOLUTE_ORIENTATION_FAILED";
     return result;
   }
-  result.heading_enu_rad =
-    wrapAngleRad(yawFromRosQuaternion(current_odin_orientation_xyzw) + anchor.delta_yaw_rad);
+  const HorizontalDirection2d forward_enu = projectBodyAxisToHorizontal(
+    result.orientation_xyzw, anchor.vehicle_forward_axis_body,
+    anchor.heading_projection_min_norm);
+  result.heading_enu_rad = yawFromHorizontalDirection(forward_enu);
+  result.heading_valid = forward_enu.valid && std::isfinite(result.heading_enu_rad);
   result.distance_from_anchor_m = horizontalNorm(result.enu_position_m);
   result.valid = true;
   result.invalid_reason = "NONE";

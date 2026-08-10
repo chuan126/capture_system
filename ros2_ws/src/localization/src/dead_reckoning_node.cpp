@@ -3,6 +3,8 @@
 #include "localization/heading_alignment.hpp"
 #include "localization/similarity_alignment.hpp"
 
+#include "attitude_matrix.h"
+
 #include "builtin_interfaces/msg/time.hpp"
 #include "interfaces/msg/localization_status.hpp"
 #include "interfaces/msg/rtk_status.hpp"
@@ -72,13 +74,19 @@ double statusAgeSeconds(std::int64_t now_ns, std::int64_t stamp_ns) noexcept
   return std::isfinite(age) ? age : -1.0;
 }
 
-double filteredAngle(double current, double target, double alpha) noexcept
+HorizontalDirection2d courseDirection(const double yaw_enu_rad) noexcept
 {
-  if (!std::isfinite(current)) {
-    return target;
+  HorizontalDirection2d direction;
+  if (!std::isfinite(yaw_enu_rad)) {
+    direction.invalid_reason = "INVALID_RTK_COURSE";
+    return direction;
   }
-  alpha = std::clamp(alpha, 0.0, 1.0);
-  return wrapAngleRad(current + alpha * wrapAngleRad(target - current));
+  direction.valid = true;
+  direction.x = std::cos(yaw_enu_rad);
+  direction.y = std::sin(yaw_enu_rad);
+  direction.projection_norm = 1.0;
+  direction.invalid_reason = "NONE";
+  return direction;
 }
 
 }  // namespace
@@ -196,6 +204,9 @@ public:
   {
     declareRemainingParameters();
     validateParameters();
+    scale_status_ = scale_calibration_mode_ == 0 ?
+      interfaces::msg::LocalizationStatus::SCALE_DISABLED :
+      interfaces::msg::LocalizationStatus::SCALE_COLLECTING;
 
     const auto reliable_qos = rclcpp::QoS(rclcpp::KeepLast(20)).reliable().durability_volatile();
     rtk_fix_subscription_ = create_subscription<sensor_msgs::msg::NavSatFix>(
@@ -233,6 +244,10 @@ public:
       "ODIN航位推算节点已启动：fix=%s status=%s odom=%s output=%s",
       rtk_fix_topic_.c_str(), rtk_status_topic_.c_str(), odometry_topic_.c_str(),
       localization_status_topic_.c_str());
+    RCLCPP_INFO(
+      get_logger(), "vehicle_forward_axis_body = [%.6f, %.6f, %.6f]",
+      vehicle_forward_axis_body_.x, vehicle_forward_axis_body_.y,
+      vehicle_forward_axis_body_.z);
   }
 
 private:
@@ -301,6 +316,7 @@ private:
     Llh llh;
     Enu enu;
     Quaterniond orientation;
+    bool heading_valid{false};
     double heading_enu_rad{0.0};
     double distance_from_anchor_m{0.0};
     double dr_duration_s{0.0};
@@ -354,7 +370,23 @@ private:
     imu_timeout_s_ = declare_parameter<double>("imu_timeout_s", 0.1);
     rtk_simulation_enabled_ = declare_parameter<int>("rtk_simulation_enabled", 0);
 
-    scale_calibration_enabled_ = declare_parameter<bool>("scale_calibration_enabled", false);
+    const std::vector<double> forward_axis = declare_parameter<std::vector<double>>(
+      "vehicle_forward_axis_body", std::vector<double>{0.0, 0.0, -1.0});
+    if (forward_axis.size() != 3U) {
+      throw std::invalid_argument("vehicle_forward_axis_body必须包含3个分量");
+    }
+    vehicle_forward_axis_body_ = Vector3d{forward_axis[0], forward_axis[1], forward_axis[2]};
+    heading_projection_min_norm_ = declare_parameter<double>("heading_projection_min_norm", 0.2);
+    forward_axis_motion_validation_enabled_ = declare_parameter<bool>(
+      "forward_axis_motion_validation_enabled", true);
+    forward_axis_validation_min_speed_mps_ = declare_parameter<double>(
+      "forward_axis_validation_min_speed_mps", 5.0);
+    forward_axis_validation_min_distance_m_ = declare_parameter<double>(
+      "forward_axis_validation_min_distance_m", 20.0);
+    forward_axis_validation_min_dot_ = declare_parameter<double>(
+      "forward_axis_validation_min_dot", 0.8);
+
+    scale_calibration_mode_ = declare_parameter<int>("scale_calibration_mode", 0);
     scale_min_baseline_m_ = declare_parameter<double>("scale_min_baseline_m", 500.0);
     scale_target_baseline_m_ = declare_parameter<double>("scale_target_baseline_m", 1000.0);
     scale_min_samples_ = static_cast<std::size_t>(declare_parameter<int>("scale_min_samples", 50));
@@ -396,7 +428,7 @@ private:
     output_child_frame_id_ = declare_parameter<std::string>("output_child_frame_id", "base_link");
   }
 
-  void validateParameters() const
+  void validateParameters()
   {
     if (!(output_rate_hz_ > 0.0) || output_rate_hz_ > 100.0) {
       throw std::invalid_argument("output_rate_hz必须位于(0,100] Hz");
@@ -417,6 +449,33 @@ private:
     }
     if (rtk_simulation_enabled_ != 0 && rtk_simulation_enabled_ != 1) {
       throw std::invalid_argument("rtk_simulation_enabled只能为0或1");
+    }
+    if (!isFinite(vehicle_forward_axis_body_)) {
+      throw std::invalid_argument("vehicle_forward_axis_body的3个分量必须为有限数");
+    }
+    const double forward_norm = std::sqrt(
+      vehicle_forward_axis_body_.x * vehicle_forward_axis_body_.x +
+      vehicle_forward_axis_body_.y * vehicle_forward_axis_body_.y +
+      vehicle_forward_axis_body_.z * vehicle_forward_axis_body_.z);
+    if (!std::isfinite(forward_norm) || forward_norm <= 1.0e-9) {
+      throw std::invalid_argument("vehicle_forward_axis_body模长不能接近0");
+    }
+    vehicle_forward_axis_body_.x /= forward_norm;
+    vehicle_forward_axis_body_.y /= forward_norm;
+    vehicle_forward_axis_body_.z /= forward_norm;
+    if (!(heading_projection_min_norm_ > 0.0) || heading_projection_min_norm_ > 1.0 ||
+      !std::isfinite(heading_projection_min_norm_))
+    {
+      throw std::invalid_argument("heading_projection_min_norm必须位于(0,1]");
+    }
+    if (scale_calibration_mode_ != 0 && scale_calibration_mode_ != 1) {
+      throw std::invalid_argument("scale_calibration_mode只能为0或1");
+    }
+    if (!(forward_axis_validation_min_speed_mps_ >= 0.0) ||
+      !(forward_axis_validation_min_distance_m_ > 0.0) ||
+      forward_axis_validation_min_dot_ < -1.0 || forward_axis_validation_min_dot_ > 1.0)
+    {
+      throw std::invalid_argument("车辆前向轴运动诊断参数无效");
     }
   }
 
@@ -457,6 +516,11 @@ private:
       latest_rtk_status_ = latest_real_rtk_status_;
       last_processed_rtk_stamp_ns_ = 0;
       simulated_anchor_initialized_ = false;
+      last_reliable_anchor_candidate_ = AnchorCandidate{};
+      heading_alignment_valid_ = false;
+      heading_alignment_reason_ = "NOT_INITIALIZED";
+      heading_estimator_.reset();
+      course_estimator_.reset();
       latest_heading_observation_source_ =
         interfaces::msg::LocalizationStatus::HEADING_INVALID;
       RCLCPP_INFO(get_logger(), "RTK simulation disabled; real RTK input restored");
@@ -467,6 +531,11 @@ private:
     last_recovery_position_error_m_ = 0.0;
     active_anchor_.reset();
     last_dr_result_.reset();
+    last_reliable_anchor_candidate_ = AnchorCandidate{};
+    heading_alignment_valid_ = false;
+    heading_alignment_reason_ = "WAITING_FOR_ODIN";
+    heading_estimator_.reset();
+    course_estimator_.reset();
     simulated_anchor_initialized_ = false;
     mode_ = InternalMode::kWaitingForRtk;
     RCLCPP_INFO(
@@ -536,15 +605,20 @@ private:
       return;
     }
 
-    const double absolute_yaw_enu =
-      clockwiseCourseDegreesToEnuYawRad(kSimulatedRtkTrackDeg);
-    const double odin_yaw = yawFromRosQuaternion(latest_odom->orientation_xyzw);
-    if (!std::isfinite(absolute_yaw_enu) || !std::isfinite(odin_yaw)) {
+    const HorizontalDirection2d odin_forward = projectBodyAxisToHorizontal(
+      latest_odom->orientation_xyzw, vehicle_forward_axis_body_,
+      heading_projection_min_norm_);
+    const HorizontalDirection2d rtk_forward = courseDirection(
+      clockwiseCourseDegreesToEnuYawRad(kSimulatedRtkTrackDeg));
+    const double delta_sample = yawBetweenHorizontalDirections(odin_forward, rtk_forward);
+    if (!odin_forward.valid || !std::isfinite(delta_sample)) {
+      heading_alignment_reason_ = odin_forward.invalid_reason;
       return;
     }
 
-    delta_yaw_rad_ = wrapAngleRad(absolute_yaw_enu - odin_yaw);
+    delta_yaw_rad_ = delta_sample;
     heading_alignment_valid_ = true;
+    heading_alignment_reason_ = "NONE";
     heading_baseline_m_ = std::max(heading_baseline_m_, 1.0);
     last_reliable_anchor_candidate_ =
       AnchorCandidate{true, simulation_stamp_ns, latest_fix_.llh, *latest_odom};
@@ -575,10 +649,43 @@ private:
         get_logger(), *get_clock(), 5000, "丢弃时间戳乱序或非有限的ODIN里程计样本");
       return;
     }
+    validateForwardAxisMotion(sample);
     last_absolute_orientation_ =
       heading_alignment_valid_ ?
       absoluteQuaternionFromOdin(delta_yaw_rad_, sample.orientation_xyzw) :
       sample.orientation_xyzw;
+  }
+
+  void validateForwardAxisMotion(const OdomSample & sample)
+  {
+    if (!forward_axis_motion_validation_enabled_ ||
+      latest_rtk_status_.speed_mps < forward_axis_validation_min_speed_mps_)
+    {
+      forward_axis_validation_reference_.reset();
+      return;
+    }
+    if (!forward_axis_validation_reference_.has_value()) {
+      forward_axis_validation_reference_ = sample;
+      return;
+    }
+    const double delta_x = sample.position_m.x - forward_axis_validation_reference_->position_m.x;
+    const double delta_y = sample.position_m.y - forward_axis_validation_reference_->position_m.y;
+    const double distance = std::hypot(delta_x, delta_y);
+    if (distance < forward_axis_validation_min_distance_m_) {
+      return;
+    }
+    const HorizontalDirection2d forward = projectBodyAxisToHorizontal(
+      sample.orientation_xyzw, vehicle_forward_axis_body_, heading_projection_min_norm_);
+    if (forward.valid) {
+      const double dot = forward.x * delta_x / distance + forward.y * delta_y / distance;
+      if (dot < forward_axis_validation_min_dot_) {
+        RCLCPP_WARN(
+          get_logger(),
+          "车辆前向轴与ODIN运动方向不一致：dot=%.3f，检查vehicle_forward_axis_body符号",
+          dot);
+      }
+    }
+    forward_axis_validation_reference_ = sample;
   }
 
   void onImu(sensor_msgs::msg::Imu::SharedPtr message)
@@ -684,12 +791,14 @@ private:
       return;
     }
 
-    calibration_pairs_.push_back(
-      CalibrationPair{
-        latest_fix_.stamp_ns,
-        Point2d{odom_at_rtk.position_m.x, odom_at_rtk.position_m.y},
-        Point2d{rtk_enu.east_m, rtk_enu.north_m}});
-    trimCalibrationPairs();
+    if (scale_calibration_mode_ == 1) {
+      calibration_pairs_.push_back(
+        CalibrationPair{
+          latest_fix_.stamp_ns,
+          Point2d{odom_at_rtk.position_m.x, odom_at_rtk.position_m.y},
+          Point2d{rtk_enu.east_m, rtk_enu.north_m}});
+      trimCalibrationPairs();
+    }
 
     double absolute_yaw_enu = 0.0;
     double heading_baseline_m = 0.0;
@@ -707,19 +816,36 @@ private:
     }
 
     if (source != interfaces::msg::LocalizationStatus::HEADING_INVALID) {
-      const double odin_yaw = yawFromRosQuaternion(odom_at_rtk.orientation_xyzw);
-      const double delta_sample = wrapAngleRad(absolute_yaw_enu - odin_yaw);
-      if (heading_estimator_.addObservation(delta_sample, heading_baseline_m)) {
+      const HorizontalDirection2d odin_forward = projectBodyAxisToHorizontal(
+        odom_at_rtk.orientation_xyzw, vehicle_forward_axis_body_,
+        heading_projection_min_norm_);
+      const HorizontalDirection2d rtk_forward = courseDirection(absolute_yaw_enu);
+      const double delta_sample = yawBetweenHorizontalDirections(odin_forward, rtk_forward);
+      if (!odin_forward.valid) {
+        heading_alignment_reason_ = odin_forward.invalid_reason;
+      } else if (std::isfinite(delta_sample) &&
+        heading_estimator_.addObservation(delta_sample, heading_baseline_m))
+      {
         latest_heading_observation_source_ = source;
+        heading_alignment_reason_ = "COLLECTING";
       }
     }
 
-    updateSimilarityCalibration();
+    if (scale_calibration_mode_ == 1) {
+      updateSimilarityCalibration();
+    } else {
+      horizontal_scale_ = 1.0;
+      scale_valid_ = false;
+      scale_status_ = interfaces::msg::LocalizationStatus::SCALE_DISABLED;
+      scale_baseline_m_ = 0.0;
+      scale_fit_residual_m_ = 0.0;
+    }
     const HeadingAlignmentState heading_state = heading_estimator_.state();
     heading_baseline_m_ = heading_state.baseline_m;
     if (heading_state.valid) {
       heading_alignment_valid_ = true;
       delta_yaw_rad_ = heading_state.delta_yaw_rad;
+      heading_alignment_reason_ = "NONE";
     }
 
     last_reliable_anchor_candidate_ =
@@ -741,12 +867,6 @@ private:
 
   void updateSimilarityCalibration()
   {
-    if (!scale_calibration_enabled_) {
-      horizontal_scale_ = 1.0;
-      scale_valid_ = false;
-      scale_baseline_m_ = calibrationTrajectoryBaseline();
-      return;
-    }
     std::vector<Point2d> source;
     std::vector<Point2d> target;
     source.reserve(calibration_pairs_.size());
@@ -764,35 +884,23 @@ private:
     options.max_rms_residual_m = scale_max_fit_residual_m_;
     const Similarity2dResult fit = estimateSimilarity2d(source, target, options);
     scale_baseline_m_ = fit.baseline_m;
+    scale_fit_residual_m_ = fit.rms_residual_m;
     if (!fit.valid) {
+      if (fit.invalid_reason == "INSUFFICIENT_SAMPLES" ||
+        fit.invalid_reason == "INSUFFICIENT_VALID_SAMPLES" ||
+        fit.invalid_reason == "BASELINE_TOO_SHORT")
+      {
+        scale_status_ = interfaces::msg::LocalizationStatus::SCALE_COLLECTING;
+      } else {
+        scale_status_ = interfaces::msg::LocalizationStatus::SCALE_REJECTED;
+      }
       return;
     }
     horizontal_scale_ = scale_valid_ ?
       horizontal_scale_ + scale_filter_alpha_ * (fit.scale - horizontal_scale_) :
       fit.scale;
     scale_valid_ = true;
-    delta_yaw_rad_ = heading_alignment_valid_ ?
-      filteredAngle(delta_yaw_rad_, fit.yaw_rad, scale_filter_alpha_) :
-      fit.yaw_rad;
-    heading_alignment_valid_ = true;
-  }
-
-  double calibrationTrajectoryBaseline() const noexcept
-  {
-    if (calibration_pairs_.size() < 2U) {
-      return 0.0;
-    }
-    double min_x = calibration_pairs_.front().rtk_enu.x;
-    double max_x = calibration_pairs_.front().rtk_enu.x;
-    double min_y = calibration_pairs_.front().rtk_enu.y;
-    double max_y = calibration_pairs_.front().rtk_enu.y;
-    for (const CalibrationPair & pair : calibration_pairs_) {
-      min_x = std::min(min_x, pair.rtk_enu.x);
-      max_x = std::max(max_x, pair.rtk_enu.x);
-      min_y = std::min(min_y, pair.rtk_enu.y);
-      max_y = std::max(max_y, pair.rtk_enu.y);
-    }
-    return std::hypot(max_x - min_x, max_y - min_y);
+    scale_status_ = interfaces::msg::LocalizationStatus::SCALE_VALID;
   }
 
   void publishOutput()
@@ -869,8 +977,10 @@ private:
     anchor.llh = last_reliable_anchor_candidate_.llh;
     anchor.odin_position_m = last_reliable_anchor_candidate_.odom.position_m;
     anchor.delta_yaw_rad = delta_yaw_rad_;
-    anchor.horizontal_scale = scale_calibration_enabled_ && scale_valid_ ? horizontal_scale_ : 1.0;
+    anchor.horizontal_scale = scale_calibration_mode_ == 1 && scale_valid_ ? horizontal_scale_ : 1.0;
     anchor.vertical_scale = vertical_scale_;
+    anchor.vehicle_forward_axis_body = vehicle_forward_axis_body_;
+    anchor.heading_projection_min_norm = heading_projection_min_norm_;
     active_anchor_ = anchor;
     dr_start_ns_ = now_ns;
     recovery_state_ = RecoveryState{};
@@ -921,7 +1031,11 @@ private:
       output.llh = last_dr_result_->llh;
       output.enu = last_dr_result_->enu_position_m;
       output.orientation = last_dr_result_->orientation_xyzw;
+      output.heading_valid = last_dr_result_->heading_valid;
       output.heading_enu_rad = last_dr_result_->heading_enu_rad;
+      output.heading_source = output.heading_valid ?
+        interfaces::msg::LocalizationStatus::HEADING_ODIN :
+        interfaces::msg::LocalizationStatus::HEADING_INVALID;
       output.distance_from_anchor_m = last_dr_result_->distance_from_anchor_m;
       output.dr_duration_s = dr_start_ns_ > 0 ? ageSeconds(now_ns, dr_start_ns_) : 0.0;
       output.invalid_reason = "NONE";
@@ -936,6 +1050,7 @@ private:
       Llh{kSimulatedRtkLatitudeDeg, kSimulatedRtkLongitudeDeg, kSimulatedRtkAltitudeM};
     output.enu = Enu{0.0, 0.0, 0.0};
     output.heading_enu_rad = clockwiseCourseDegreesToEnuYawRad(kSimulatedRtkTrackDeg);
+    output.heading_valid = true;
     output.orientation = yawQuaternion(output.heading_enu_rad);
     output.invalid_reason = "NONE";
     return output;
@@ -950,6 +1065,8 @@ private:
     output.enu = active_anchor_.has_value() ? llhToEnu(active_anchor_->llh, latest_fix_.llh) :
       Enu{0.0, 0.0, 0.0};
     output.heading_source = currentHeadingSourceForRtk(now_ns, output.heading_enu_rad);
+    output.heading_valid =
+      output.heading_source != interfaces::msg::LocalizationStatus::HEADING_INVALID;
     if (output.heading_source == interfaces::msg::LocalizationStatus::HEADING_INVALID) {
       output.heading_enu_rad = 0.0;
     }
@@ -983,10 +1100,55 @@ private:
     if (heading_alignment_valid_ && latest_odom.has_value() &&
       ageSeconds(now_ns, latest_odom->stamp_ns) <= odometry_timeout_s_)
     {
-      heading_enu_rad = wrapAngleRad(yawFromRosQuaternion(latest_odom->orientation_xyzw) + delta_yaw_rad_);
-      return interfaces::msg::LocalizationStatus::HEADING_ODIN;
+      const Quaterniond absolute_orientation = absoluteQuaternionFromOdin(
+        delta_yaw_rad_, latest_odom->orientation_xyzw);
+      const HorizontalDirection2d forward_enu = projectBodyAxisToHorizontal(
+        absolute_orientation, vehicle_forward_axis_body_, heading_projection_min_norm_);
+      heading_enu_rad = yawFromHorizontalDirection(forward_enu);
+      if (forward_enu.valid && std::isfinite(heading_enu_rad)) {
+        return interfaces::msg::LocalizationStatus::HEADING_ODIN;
+      }
     }
     return interfaces::msg::LocalizationStatus::HEADING_INVALID;
+  }
+
+  std::optional<Output> makeGyroFallbackOutput(const std::int64_t now_ns) const
+  {
+    const auto latest_odom = odom_buffer_.latest();
+    if (!gyro_fallback_enabled_ || !last_dr_result_.has_value() ||
+      !last_dr_result_->valid || !last_absolute_orientation_.has_value() ||
+      !latest_odom.has_value() ||
+      ageSeconds(now_ns, latest_odom->stamp_ns) >
+      odometry_timeout_s_ + gyro_fallback_max_duration_s_ ||
+      !latest_imu_.available || ageSeconds(now_ns, latest_imu_.stamp_ns) > imu_timeout_s_)
+    {
+      return std::nullopt;
+    }
+
+    Quaterniond orientation = *last_absolute_orientation_;
+    if (!normalizeQuaternion(orientation)) {
+      return std::nullopt;
+    }
+    const HorizontalDirection2d forward_enu = projectBodyAxisToHorizontal(
+      orientation, vehicle_forward_axis_body_, heading_projection_min_norm_);
+    const double heading_enu_rad = yawFromHorizontalDirection(forward_enu);
+
+    Output output;
+    output.valid = true;
+    output.mode = interfaces::msg::LocalizationStatus::MODE_DEAD_RECKONING;
+    output.heading_valid = forward_enu.valid && std::isfinite(heading_enu_rad);
+    output.heading_source = output.heading_valid ?
+      interfaces::msg::LocalizationStatus::HEADING_IMU_GYRO :
+      interfaces::msg::LocalizationStatus::HEADING_INVALID;
+    output.llh = last_dr_result_->llh;
+    output.enu = last_dr_result_->enu_position_m;
+    output.orientation = orientation;
+    output.heading_enu_rad = output.heading_valid ? heading_enu_rad : 0.0;
+    output.distance_from_anchor_m = last_dr_result_->distance_from_anchor_m;
+    output.dr_duration_s = ageSeconds(now_ns, dr_start_ns_);
+    output.position_difference_to_rtk_m = last_recovery_position_error_m_;
+    output.invalid_reason = "NONE";
+    return output;
   }
 
   Output makeDeadReckoningOutput(const std::int64_t now_ns)
@@ -996,6 +1158,10 @@ private:
     }
     const auto latest_odom = odom_buffer_.latest();
     if (!latest_odom.has_value() || !odometryUsable(now_ns, *latest_odom)) {
+      const std::optional<Output> gyro_fallback = makeGyroFallbackOutput(now_ns);
+      if (gyro_fallback.has_value()) {
+        return *gyro_fallback;
+      }
       if (rtk_simulation_enabled_ == 1) {
         return makeSimulatedAnchorOutput(now_ns);
       }
@@ -1020,10 +1186,13 @@ private:
     Output output;
     output.valid = true;
     output.mode = interfaces::msg::LocalizationStatus::MODE_DEAD_RECKONING;
-    output.heading_source = interfaces::msg::LocalizationStatus::HEADING_ODIN;
+    output.heading_source = result.heading_valid ?
+      interfaces::msg::LocalizationStatus::HEADING_ODIN :
+      interfaces::msg::LocalizationStatus::HEADING_INVALID;
     output.llh = result.llh;
     output.enu = result.enu_position_m;
     output.orientation = result.orientation_xyzw;
+    output.heading_valid = result.heading_valid;
     output.heading_enu_rad = result.heading_enu_rad;
     output.distance_from_anchor_m = result.distance_from_anchor_m;
     output.dr_duration_s = dr_duration_s;
@@ -1052,6 +1221,8 @@ private:
     output.valid = true;
     output.mode = interfaces::msg::LocalizationStatus::MODE_RTK_RECOVERY;
     output.heading_source = currentHeadingSourceForRtk(now_ns, output.heading_enu_rad);
+    output.heading_valid =
+      output.heading_source != interfaces::msg::LocalizationStatus::HEADING_INVALID;
     output.llh = enuToLlh(active_anchor_->llh, blended);
     output.enu = blended;
     const auto latest_odom = odom_buffer_.latest();
@@ -1123,19 +1294,40 @@ private:
     message.latitude = output.llh.latitude_deg;
     message.longitude = output.llh.longitude_deg;
     message.altitude = output.llh.altitude_m;
-    message.heading_deg = output.valid ? enuYawRadToClockwiseCourseDegrees(output.heading_enu_rad) : 0.0;
+    message.heading_deg = output.valid && output.heading_valid ?
+      enuYawRadToClockwiseCourseDegrees(output.heading_enu_rad) : 0.0;
+    const auto latest_odom = odom_buffer_.latest();
+    if (latest_odom.has_value()) {
+      Quaterniond raw_orientation = latest_odom->orientation_xyzw;
+      if (normalizeQuaternion(raw_orientation)) {
+        double quaternion_wxyz[4]{
+          raw_orientation.w, raw_orientation.x, raw_orientation.y, raw_orientation.z};
+        double attitude_rad[3]{};
+        q2att(quaternion_wxyz, attitude_rad);
+        if (std::isfinite(attitude_rad[0]) && std::isfinite(attitude_rad[1]) &&
+          std::isfinite(attitude_rad[2]))
+        {
+          message.odin_attitude_valid = true;
+          message.odin_pitch_deg = radiansToDegrees(attitude_rad[0]);
+          message.odin_roll_deg = radiansToDegrees(attitude_rad[1]);
+          message.odin_yaw_deg = radiansToDegrees(attitude_rad[2]);
+        }
+      }
+    }
     message.heading_alignment_valid = heading_alignment_valid_;
     message.delta_yaw_deg = radiansToDegrees(delta_yaw_rad_);
-    message.scale_calibration_enabled = scale_calibration_enabled_;
+    message.scale_calibration_mode = static_cast<std::uint8_t>(scale_calibration_mode_);
+    message.scale_status = scale_status_;
     message.scale_valid = scale_valid_;
-    message.horizontal_scale = scale_calibration_enabled_ && scale_valid_ ? horizontal_scale_ : 1.0;
+    message.horizontal_scale = scale_calibration_mode_ == 1 && scale_valid_ ? horizontal_scale_ : 1.0;
     message.vertical_scale = vertical_scale_;
     message.scale_baseline_m = scale_baseline_m_;
+    message.scale_fit_residual_m = scale_fit_residual_m_;
     message.heading_baseline_m = heading_baseline_m_;
+    message.heading_alignment_reason = heading_alignment_reason_;
     message.distance_from_anchor_m = output.distance_from_anchor_m;
     message.dr_duration_s = output.dr_duration_s;
     message.rtk_age_s = statusAgeSeconds(now_ns, latest_fix_.stamp_ns);
-    const auto latest_odom = odom_buffer_.latest();
     message.odometry_age_s =
       latest_odom.has_value() ? statusAgeSeconds(now_ns, latest_odom->stamp_ns) : -1.0;
     message.imu_age_s = statusAgeSeconds(now_ns, latest_imu_.stamp_ns);
@@ -1158,7 +1350,14 @@ private:
   double course_min_speed_mps_{5.0};
   double course_max_jump_rad_{degreesToRadians(20.0)};
 
-  bool scale_calibration_enabled_{false};
+  Vector3d vehicle_forward_axis_body_{0.0, 0.0, -1.0};
+  double heading_projection_min_norm_{0.2};
+  bool forward_axis_motion_validation_enabled_{true};
+  double forward_axis_validation_min_speed_mps_{5.0};
+  double forward_axis_validation_min_distance_m_{20.0};
+  double forward_axis_validation_min_dot_{0.8};
+
+  int scale_calibration_mode_{0};
   double scale_min_baseline_m_{500.0};
   double scale_target_baseline_m_{1000.0};
   std::size_t scale_min_samples_{50U};
@@ -1209,6 +1408,9 @@ private:
   bool scale_valid_{false};
   double horizontal_scale_{1.0};
   double scale_baseline_m_{0.0};
+  double scale_fit_residual_m_{0.0};
+  std::uint8_t scale_status_{interfaces::msg::LocalizationStatus::SCALE_DISABLED};
+  std::string heading_alignment_reason_{"NOT_INITIALIZED"};
 
   InternalMode mode_{InternalMode::kWaitingForRtk};
   AnchorCandidate last_reliable_anchor_candidate_;
@@ -1221,6 +1423,7 @@ private:
   std::optional<Quaterniond> last_absolute_orientation_;
   std::int64_t last_imu_stamp_ns_{0};
   double gyro_fallback_duration_s_{0.0};
+  std::optional<OdomSample> forward_axis_validation_reference_;
 
   rclcpp::Subscription<sensor_msgs::msg::NavSatFix>::SharedPtr rtk_fix_subscription_;
   rclcpp::Subscription<interfaces::msg::RtkStatus>::SharedPtr rtk_status_subscription_;

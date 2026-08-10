@@ -42,6 +42,29 @@ def test_data_recorder_cpp_schema_executes_without_duplicate_columns() -> None:
         "is_repeated",
         "repeat_index",
     }.issubset(sample_columns)
+    assert {
+        "rtk_timestamp_ns",
+        "gyro_x_rad_s",
+        "gyro_y_rad_s",
+        "gyro_z_rad_s",
+        "accel_x_m_s2",
+        "accel_y_m_s2",
+        "accel_z_m_s2",
+        "imu_sample_count",
+        "radar_temperature_c",
+        "minimum_point_x_m",
+        "minimum_point_y_m",
+        "minimum_point_z_m",
+        "odin_pitch_deg",
+        "odin_roll_deg",
+        "odin_yaw_deg",
+        "odin_position_x_m",
+        "odin_position_y_m",
+        "odin_position_z_m",
+    }.issubset(sample_columns)
+    assert "imu_accumulator_ = ImuAccumulator{};" in source
+    assert "q2att(quaternion_wxyz, attitude_rad);" in source
+    assert "orientation.w / norm, orientation.x / norm" in source
     assert "insert_source_frame(source);" in source
     assert "DELETE FROM clearance_samples WHERE recorded_timestamp_ns > ?" in source
 
@@ -57,7 +80,7 @@ def test_data_recorder_stores_mount_adjusted_clearance_and_keeps_raw_algorithm_v
         / "data_recorder_node.cpp"
     ).read_text(encoding="utf-8")
 
-    assert "VALUES (1, 6, ?, 'recorded'" in source
+    assert "VALUES (1, 7, ?, 'recorded'" in source
     assert "clearance_height = *value + lidar_mount_height_m_" in source
     assert "bind_nullable_double(statement, 5, value);" in source
     assert "bind_nullable_double(statement, 6, clearance_height);" in source

@@ -44,6 +44,24 @@ class MeasurementExportSampleRecord:
     source_age_ms: float | None
     is_repeated: bool | None
     repeat_index: int | None
+    rtk_timestamp_ms: int | None
+    gyro_x_rad_s: float | None
+    gyro_y_rad_s: float | None
+    gyro_z_rad_s: float | None
+    accel_x_m_s2: float | None
+    accel_y_m_s2: float | None
+    accel_z_m_s2: float | None
+    imu_sample_count: int | None
+    radar_temperature_c: float | None
+    minimum_point_x_m: float | None
+    minimum_point_y_m: float | None
+    minimum_point_z_m: float | None
+    odin_pitch_deg: float | None
+    odin_roll_deg: float | None
+    odin_yaw_deg: float | None
+    odin_position_x_m: float | None
+    odin_position_y_m: float | None
+    odin_position_z_m: float | None
 
 
 @dataclass(frozen=True)
@@ -116,7 +134,7 @@ class MeasurementHistoryRecord:
     samples: list[ClearanceHistorySampleRecord]
 
 
-_SUPPORTED_SCHEMA_VERSIONS = {1, 2, 3, 4, 5, 6}
+_SUPPORTED_SCHEMA_VERSIONS = {1, 2, 3, 4, 5, 6, 7}
 _MAX_HISTORY_SAMPLES = 500_000
 
 
@@ -246,6 +264,9 @@ class MeasurementRepository:
             source_age_expr = "source_age_ms" if "source_age_ms" in sample_columns else "NULL"
             repeated_expr = "is_repeated" if "is_repeated" in sample_columns else "NULL"
             repeat_index_expr = "repeat_index" if "repeat_index" in sample_columns else "NULL"
+            def optional_column(name: str) -> str:
+                return name if name in sample_columns else "NULL"
+
             cursor = connection.execute(
                 f"""
                 SELECT
@@ -261,7 +282,25 @@ class MeasurementRepository:
                     {source_sequence_expr} AS source_sequence,
                     {source_age_expr} AS source_age_ms,
                     {repeated_expr} AS is_repeated,
-                    {repeat_index_expr} AS repeat_index
+                    {repeat_index_expr} AS repeat_index,
+                    {optional_column("rtk_timestamp_ns")} AS rtk_timestamp_ns,
+                    {optional_column("gyro_x_rad_s")} AS gyro_x_rad_s,
+                    {optional_column("gyro_y_rad_s")} AS gyro_y_rad_s,
+                    {optional_column("gyro_z_rad_s")} AS gyro_z_rad_s,
+                    {optional_column("accel_x_m_s2")} AS accel_x_m_s2,
+                    {optional_column("accel_y_m_s2")} AS accel_y_m_s2,
+                    {optional_column("accel_z_m_s2")} AS accel_z_m_s2,
+                    {optional_column("imu_sample_count")} AS imu_sample_count,
+                    {optional_column("radar_temperature_c")} AS radar_temperature_c,
+                    {optional_column("minimum_point_x_m")} AS minimum_point_x_m,
+                    {optional_column("minimum_point_y_m")} AS minimum_point_y_m,
+                    {optional_column("minimum_point_z_m")} AS minimum_point_z_m,
+                    {optional_column("odin_pitch_deg")} AS odin_pitch_deg,
+                    {optional_column("odin_roll_deg")} AS odin_roll_deg,
+                    {optional_column("odin_yaw_deg")} AS odin_yaw_deg,
+                    {optional_column("odin_position_x_m")} AS odin_position_x_m,
+                    {optional_column("odin_position_y_m")} AS odin_position_y_m,
+                    {optional_column("odin_position_z_m")} AS odin_position_z_m
                 FROM clearance_samples
                 ORDER BY sample_index ASC
                 """
@@ -290,6 +329,30 @@ class MeasurementRepository:
                         int(row["repeat_index"])
                         if row["repeat_index"] is not None else None
                     ),
+                    rtk_timestamp_ms=(
+                        int(row["rtk_timestamp_ns"]) // 1_000_000
+                        if row["rtk_timestamp_ns"] is not None else None
+                    ),
+                    gyro_x_rad_s=_optional_float(row["gyro_x_rad_s"]),
+                    gyro_y_rad_s=_optional_float(row["gyro_y_rad_s"]),
+                    gyro_z_rad_s=_optional_float(row["gyro_z_rad_s"]),
+                    accel_x_m_s2=_optional_float(row["accel_x_m_s2"]),
+                    accel_y_m_s2=_optional_float(row["accel_y_m_s2"]),
+                    accel_z_m_s2=_optional_float(row["accel_z_m_s2"]),
+                    imu_sample_count=(
+                        int(row["imu_sample_count"])
+                        if row["imu_sample_count"] is not None else None
+                    ),
+                    radar_temperature_c=_optional_float(row["radar_temperature_c"]),
+                    minimum_point_x_m=_optional_float(row["minimum_point_x_m"]),
+                    minimum_point_y_m=_optional_float(row["minimum_point_y_m"]),
+                    minimum_point_z_m=_optional_float(row["minimum_point_z_m"]),
+                    odin_pitch_deg=_optional_float(row["odin_pitch_deg"]),
+                    odin_roll_deg=_optional_float(row["odin_roll_deg"]),
+                    odin_yaw_deg=_optional_float(row["odin_yaw_deg"]),
+                    odin_position_x_m=_optional_float(row["odin_position_x_m"]),
+                    odin_position_y_m=_optional_float(row["odin_position_y_m"]),
+                    odin_position_z_m=_optional_float(row["odin_position_z_m"]),
                 )
         except MeasurementStorageError:
             raise

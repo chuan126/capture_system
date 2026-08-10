@@ -45,14 +45,21 @@ class RtkSnapshot:
     localization_longitude: float | None = None
     localization_altitude: float | None = None
     localization_heading_deg: float | None = None
+    localization_odin_attitude_valid: bool | None = None
+    localization_odin_pitch_deg: float | None = None
+    localization_odin_roll_deg: float | None = None
+    localization_odin_yaw_deg: float | None = None
     localization_heading_alignment_valid: bool | None = None
     localization_delta_yaw_deg: float | None = None
-    localization_scale_calibration_enabled: bool | None = None
+    localization_scale_calibration_mode: int | None = None
+    localization_scale_status: int | None = None
     localization_scale_valid: bool | None = None
     localization_horizontal_scale: float | None = None
     localization_vertical_scale: float | None = None
     localization_scale_baseline_m: float | None = None
+    localization_scale_fit_residual_m: float | None = None
     localization_heading_baseline_m: float | None = None
+    localization_heading_alignment_reason: str | None = None
     localization_distance_from_anchor_m: float | None = None
     localization_dr_duration_s: float | None = None
     localization_rtk_age_s: float | None = None
@@ -106,18 +113,29 @@ def with_localization_status(snapshot: RtkSnapshot, message: object) -> RtkSnaps
         localization_longitude=float(getattr(message, "longitude")),
         localization_altitude=float(getattr(message, "altitude")),
         localization_heading_deg=float(getattr(message, "heading_deg")),
+        localization_odin_attitude_valid=bool(getattr(message, "odin_attitude_valid")),
+        localization_odin_pitch_deg=float(getattr(message, "odin_pitch_deg")),
+        localization_odin_roll_deg=float(getattr(message, "odin_roll_deg")),
+        localization_odin_yaw_deg=float(getattr(message, "odin_yaw_deg")),
         localization_heading_alignment_valid=bool(
             getattr(message, "heading_alignment_valid")
         ),
         localization_delta_yaw_deg=float(getattr(message, "delta_yaw_deg")),
-        localization_scale_calibration_enabled=bool(
-            getattr(message, "scale_calibration_enabled")
+        localization_scale_calibration_mode=int(
+            getattr(message, "scale_calibration_mode")
         ),
+        localization_scale_status=int(getattr(message, "scale_status")),
         localization_scale_valid=bool(getattr(message, "scale_valid")),
         localization_horizontal_scale=float(getattr(message, "horizontal_scale")),
         localization_vertical_scale=float(getattr(message, "vertical_scale")),
         localization_scale_baseline_m=float(getattr(message, "scale_baseline_m")),
+        localization_scale_fit_residual_m=float(
+            getattr(message, "scale_fit_residual_m")
+        ),
         localization_heading_baseline_m=float(getattr(message, "heading_baseline_m")),
+        localization_heading_alignment_reason=str(
+            getattr(message, "heading_alignment_reason")
+        ),
         localization_distance_from_anchor_m=float(
             getattr(message, "distance_from_anchor_m")
         ),
