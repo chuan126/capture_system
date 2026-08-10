@@ -26,6 +26,7 @@ def generate_launch_description() -> LaunchDescription:
                     "rtk_status_topic": "/capture/rtk/status",
                     "sample_rate_hz": 50.0,
                     "source_timeout_ms": 250.0,
+                    "endpoint_rtk_max_age_ms": 2000.0,
                     "transaction_batch_size": 100,
                     "software_version": "0.2.0",
                     "algorithm_version": "clearance_engine-current",

@@ -59,3 +59,23 @@ def test_task_manager_accepts_zero_mount_height_and_threshold() -> None:
     assert "request.clearance_threshold_m < 0.0" in source
     assert "request.lidar_mount_height_m <= 0.0" not in source
     assert "request.clearance_threshold_m <= 0.0" not in source
+
+
+def test_task_manager_freezes_actual_direction_lane_and_threshold_on_start() -> None:
+    source = (
+        Path(__file__).parents[2]
+        / "ros2_ws"
+        / "src"
+        / "task_manager"
+        / "src"
+        / "task_manager_node.cpp"
+    ).read_text(encoding="utf-8")
+
+    assert "travel_direction=excluded.travel_direction" in source
+    assert "lane_side=excluded.lane_side" in source
+    assert "clearance_threshold_m=excluded.clearance_threshold_m" in source
+    assert "request.travel_direction == \"up\"" in source
+    assert "request.travel_direction == \"down\"" in source
+    assert "request.lane_side.empty() ? request.lane : request.lane_side" in source
+    assert "recorder_request->travel_direction = request.travel_direction" in source
+    assert "recorder_request->lane_side = lane_side" in source

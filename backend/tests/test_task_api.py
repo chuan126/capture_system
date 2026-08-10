@@ -414,3 +414,41 @@ def test_task_api_returns_frozen_start_parameters_including_zero(tmp_path: Path)
     assert payload["lane"] == "left"
     assert payload["lidar_mount_height_m"] == 0.0
     assert payload["clearance_threshold_m"] == 0.0
+
+
+def test_task_creation_persists_independent_planned_lane_and_threshold(tmp_path: Path) -> None:
+    import sqlite3
+
+    static_dir = tmp_path / "site"
+    make_static_site(static_dir)
+    data_root = tmp_path / "runtime"
+
+    with TestClient(create_app(static_dir, data_root=data_root, start_ros_bridge=False)) as client:
+        task = client.post(
+            "/api/v1/tasks",
+            json={
+                "tunnel_code": "T-501",
+                "tunnel_name": "计划参数测试",
+                "travel_direction": "down",
+                "lane_side": "left",
+                "clearance_threshold_m": 4.6,
+            },
+        )
+
+    assert task.status_code == 201
+    payload = task.json()
+    assert payload["planned_travel_direction"] == "down"
+    assert payload["planned_lane_side"] == "left"
+    assert payload["planned_clearance_threshold_m"] == 4.6
+    assert payload["travel_direction"] is None
+    assert payload["lane_side"] is None
+    assert payload["lane"] is None
+    assert payload["clearance_threshold_m"] is None
+
+    with sqlite3.connect(data_root / "capture.db") as connection:
+        row = connection.execute(
+            "SELECT planned_travel_direction, planned_lane_side, planned_clearance_threshold_m "
+            "FROM tasks WHERE task_id=?",
+            (payload["task_id"],),
+        ).fetchone()
+    assert row == ("down", "left", 4.6)

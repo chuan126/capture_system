@@ -59,6 +59,8 @@ def _preview_response(assessment: TaskExportAssessment) -> TaskExportPreviewResp
         blocked_reason=assessment.blocked_reason,
         data_origin=summary.data_origin if summary else None,
         lane=summary.lane if summary else None,
+        travel_direction=summary.travel_direction if summary else None,
+        lane_side=summary.lane_side if summary else None,
         started_at=summary.started_at if summary else assessment.task.started_at,
         ended_at=summary.ended_at if summary else assessment.task.completed_at,
         complete=summary.complete if summary else None,

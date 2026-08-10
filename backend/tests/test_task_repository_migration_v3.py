@@ -60,16 +60,16 @@ def test_version_2_database_migrates_to_task_control_schema(tmp_path: Path) -> N
     assert task.sequence == 1
     assert task.global_sequence == 1
     with sqlite3.connect(database_path) as connection:
-        assert connection.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 7
+        assert connection.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 8
         tables = {row[0] for row in connection.execute(
             "SELECT name FROM sqlite_master WHERE type='table'"
         )}
     assert {"task_parameters", "task_events", "control_requests", "operation_batches"}.issubset(tables)
     with sqlite3.connect(database_path) as connection:
         columns = {row[1] for row in connection.execute("PRAGMA table_info(tasks)")}
-    assert {"transition_started_at", "transition_deadline_at", "display_id", "local_data_purged_at", "purged_bytes"}.issubset(columns)
+    assert {"transition_started_at", "transition_deadline_at", "display_id", "local_data_purged_at", "purged_bytes", "planned_travel_direction", "planned_lane_side", "planned_clearance_threshold_m"}.issubset(columns)
     assert task.display_id == "20260801_080000"
-    assert task.schema_version == 7
+    assert task.schema_version == 8
 
 
 
@@ -93,7 +93,7 @@ def test_version_6_task_parameters_migrate_to_allow_zero_values(tmp_path: Path) 
             """,
             (task.task_id,),
         )
-        connection.execute("DELETE FROM schema_migrations WHERE version=7")
+        connection.execute("DELETE FROM schema_migrations WHERE version IN (7, 8)")
         connection.execute("UPDATE tasks SET schema_version=6")
         connection.execute("ALTER TABLE task_parameters RENAME TO task_parameters_v7")
         connection.execute(
@@ -109,7 +109,15 @@ def test_version_6_task_parameters_migrate_to_allow_zero_values(tmp_path: Path) 
             """
         )
         connection.execute(
-            "INSERT INTO task_parameters SELECT * FROM task_parameters_v7"
+            """
+            INSERT INTO task_parameters (
+                task_id, lane, lidar_mount_height_m, clearance_threshold_m,
+                captured_at, parameter_schema_version
+            )
+            SELECT task_id, lane, lidar_mount_height_m, clearance_threshold_m,
+                   captured_at, parameter_schema_version
+            FROM task_parameters_v7
+            """
         )
         connection.execute("DROP TABLE task_parameters_v7")
 
@@ -132,8 +140,10 @@ def test_version_6_task_parameters_migrate_to_allow_zero_values(tmp_path: Path) 
         task_schema = connection.execute(
             "SELECT schema_version FROM tasks WHERE task_id=?", (task.task_id,)
         ).fetchone()[0]
+        parameter_columns = {row[1] for row in connection.execute("PRAGMA table_info(task_parameters)")}
 
+    assert {"travel_direction", "lane_side"}.issubset(parameter_columns)
     assert preserved == (1.86, 4.5)
     assert zero_values == (0.0, 0.0)
-    assert version == 7
-    assert task_schema == 7
+    assert version == 8
+    assert task_schema == 8

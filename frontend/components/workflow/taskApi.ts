@@ -1,6 +1,7 @@
-import type { CollectionTask, RtkCaptureStatus, TaskOperationPhase } from "@/components/workflow/taskModel";
+import { formatLaneDisplay, laneSelectionParts } from "./taskModel";
+import type { CollectionTask, CollectionTaskLane, RtkCaptureStatus, TaskOperationPhase } from "@/components/workflow/taskModel";
 
-export type TaskCreateDraft = { tunnelCode: string; tunnelName: string };
+export type TaskCreateDraft = { tunnelCode: string; tunnelName: string; lane: CollectionTaskLane; clearanceThresholdM: number };
 type TaskApiStatus = "pending" | "running" | "paused" | "completed" | "interrupted" | "failed";
 
 type TaskApiResponse = {
@@ -10,7 +11,9 @@ type TaskApiResponse = {
   stop_requested_at: string | null; completed_at: string | null; entry_rtk_status: RtkCaptureStatus;
   exit_rtk_status: RtkCaptureStatus; has_measurements: boolean; recording_path: string | null;
   local_data_purged_at: string | null; purged_bytes: number; last_error_code: string | null;
-  last_error_message: string | null; warning_code: string | null; lane: "left" | "right" | null;
+  last_error_message: string | null; warning_code: string | null;
+  planned_travel_direction: "up" | "down" | null; planned_lane_side: "left" | "right" | null; planned_clearance_threshold_m: number | null;
+  travel_direction: "up" | "down" | null; lane_side: "left" | "right" | null; lane: "left" | "right" | null;
   lidar_mount_height_m: number | null; clearance_threshold_m: number | null; schema_version: number;
 };
 
@@ -32,12 +35,23 @@ const parseTask=(value:unknown):CollectionTask=>{
   const entryRtkStatus=readString(value.entry_rtk_status,"entry_rtk_status") as RtkCaptureStatus;const exitRtkStatus=readString(value.exit_rtk_status,"exit_rtk_status") as RtkCaptureStatus;
   if(!rtkCaptureStatuses.has(entryRtkStatus)||!rtkCaptureStatuses.has(exitRtkStatus))throw new TaskApiError("任务接口返回了未知RTK端点状态");
   if(typeof value.has_measurements!=="boolean")throw new TaskApiError("任务接口字段 has_measurements 无效");
+  const actualLane=formatLaneDisplay(
+    value.travel_direction as string|null|undefined,
+    value.lane_side as string|null|undefined,
+    value.lane as string|null|undefined,
+  );
+  const plannedLane=formatLaneDisplay(
+    value.planned_travel_direction as string|null|undefined,
+    value.planned_lane_side as string|null|undefined,
+  );
+  const actualThreshold=readNullableNumber(value.clearance_threshold_m,"clearance_threshold_m");
+  const plannedThreshold=readNullableNumber(value.planned_clearance_threshold_m,"planned_clearance_threshold_m");
   return {
     taskId:readString(value.task_id,"task_id"), displayId:readString(value.display_id,"display_id"), tunnelCode:readString(value.tunnel_code,"tunnel_code"), tunnelName:readString(value.tunnel_name,"tunnel_name"),
     status:statusLabels[status], operationPhase, statusRevision:readNumber(value.status_revision,"status_revision"),
-    lane:value.lane === "left" ? "左车道" : value.lane === "right" ? "右车道" : null,
+    lane:actualLane??plannedLane,
     lidarMountHeightM:readNullableNumber(value.lidar_mount_height_m,"lidar_mount_height_m"),
-    clearanceThresholdM:readNullableNumber(value.clearance_threshold_m,"clearance_threshold_m"),
+    clearanceThresholdM:actualThreshold??plannedThreshold,
     createdAt:readString(value.created_at,"created_at"), updatedAt:readString(value.updated_at,"updated_at"), startRequestedAt:readNullableString(value.start_requested_at,"start_requested_at"), startedAt:readNullableString(value.started_at,"started_at"), stopRequestedAt:readNullableString(value.stop_requested_at,"stop_requested_at"), completedAt:readNullableString(value.completed_at,"completed_at"),
     entryRtkStatus, exitRtkStatus, hasMeasurements:value.has_measurements, recordingPath:readNullableString(value.recording_path,"recording_path"), localDataPurgedAt:readNullableString(value.local_data_purged_at,"local_data_purged_at"), purgedBytes:readNumber(value.purged_bytes,"purged_bytes"), lastErrorCode:readNullableString(value.last_error_code,"last_error_code"), lastErrorMessage:readNullableString(value.last_error_message,"last_error_message"), warningCode:readNullableString(value.warning_code,"warning_code"), schemaVersion:readNumber(value.schema_version,"schema_version"),
   };
@@ -48,9 +62,11 @@ const requestJson=async(input:RequestInfo|URL,init?:RequestInit):Promise<unknown
 
 export const listTasks=async():Promise<CollectionTask[]>=>{const pageSize=500;const tasks:CollectionTask[]=[];for(let offset=0;;offset+=pageSize){const payload=await requestJson(`/api/v1/tasks?limit=${pageSize}&offset=${offset}&order=asc`,{method:"GET",headers:{Accept:"application/json"},cache:"no-store"});if(!Array.isArray(payload))throw new TaskApiError("任务列表接口返回了无效数据");tasks.push(...payload.map(parseTask));if(payload.length<pageSize)return tasks;}};
 
-export const createTask=async(draft:TaskCreateDraft,idempotencyKey:string):Promise<CollectionTask>=>{const payload=await requestJson("/api/v1/tasks",{method:"POST",headers:{Accept:"application/json","Content-Type":"application/json","Idempotency-Key":idempotencyKey},body:JSON.stringify({tunnel_code:draft.tunnelCode,tunnel_name:draft.tunnelName})});return parseTask(payload);};
+const createPayload=(draft:TaskCreateDraft)=>{const parts=laneSelectionParts[draft.lane];return{tunnel_code:draft.tunnelCode,tunnel_name:draft.tunnelName,travel_direction:parts.travelDirection,lane_side:parts.laneSide,clearance_threshold_m:draft.clearanceThresholdM};};
 
-export const createTaskBatch=async(drafts:TaskCreateDraft[],idempotencyKey:string):Promise<CollectionTask[]>=>{const payload=await requestJson("/api/v1/tasks/batch",{method:"POST",headers:{Accept:"application/json","Content-Type":"application/json","Idempotency-Key":idempotencyKey},body:JSON.stringify({tasks:drafts.map(draft=>({tunnel_code:draft.tunnelCode,tunnel_name:draft.tunnelName}))})});if(!Array.isArray(payload))throw new TaskApiError("任务创建接口返回了无效数据");return payload.map(parseTask);};
+export const createTask=async(draft:TaskCreateDraft,idempotencyKey:string):Promise<CollectionTask>=>{const payload=await requestJson("/api/v1/tasks",{method:"POST",headers:{Accept:"application/json","Content-Type":"application/json","Idempotency-Key":idempotencyKey},body:JSON.stringify(createPayload(draft))});return parseTask(payload);};
+
+export const createTaskBatch=async(drafts:TaskCreateDraft[],idempotencyKey:string):Promise<CollectionTask[]>=>{const payload=await requestJson("/api/v1/tasks/batch",{method:"POST",headers:{Accept:"application/json","Content-Type":"application/json","Idempotency-Key":idempotencyKey},body:JSON.stringify({tasks:drafts.map(createPayload)})});if(!Array.isArray(payload))throw new TaskApiError("任务创建接口返回了无效数据");return payload.map(parseTask);};
 
 export const deleteTask=async(taskId:string):Promise<void>=>{const response=await fetch(`/api/v1/tasks/${encodeURIComponent(taskId)}`,{method:"DELETE",headers:{Accept:"application/json"}});if(!response.ok)throw new TaskApiError(await readErrorMessage(response),response.status);};
 

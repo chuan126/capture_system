@@ -279,7 +279,7 @@ class ReportExportService:
         writer.writerow(["任务编号", task.display_id])
         writer.writerow(["隧道编号", task.tunnel_code])
         writer.writerow(["隧道名称", task.tunnel_name])
-        writer.writerow(["检测车道", _lane_text(summary.lane)])
+        writer.writerow(["检测车道", _lane_text(summary.lane, summary.travel_direction, summary.lane_side)])
         writer.writerow(["记录开始时间", _format_iso_text(summary.started_at)])
         writer.writerow(["记录结束时间", _format_iso_text(summary.ended_at)])
         writer.writerow(["最低有效高度 m", _format_number(summary.statistics.minimum_height_m, 3)])
@@ -325,7 +325,7 @@ class ReportExportService:
                     _format_timestamp_ms(sample.recorded_timestamp_ms),
                     f"{sample.elapsed_ms:.3f}",
                     task.tunnel_code,
-                    _lane_text(summary.lane),
+                    _lane_text(summary.lane, summary.travel_direction, summary.lane_side),
                     _format_number(sample.height_m if sample.valid else None, 3),
                     minimum_height,
                     "是" if sample.valid and sample.height_m is not None else "否",
@@ -443,7 +443,7 @@ class ReportExportService:
                 [
                     Paragraph(assessment.task.display_id, body_style),
                     Paragraph(_escape_pdf_text(assessment.task.tunnel_code), body_style),
-                    Paragraph(_lane_text(summary.lane), body_style),
+                    Paragraph(_lane_text(summary.lane, summary.travel_direction, summary.lane_side), body_style),
                     Paragraph(_format_number(summary.statistics.minimum_height_m, 3), body_style),
                     Paragraph(time_text, body_style),
                     Paragraph(_escape_pdf_text(_format_rtk(summary.entry_rtk)), body_style),
@@ -506,10 +506,19 @@ def _safe_component(value: str) -> str:
     return normalized[:80] or "tunnel"
 
 
-def _lane_text(lane: str) -> str:
-    if lane == "left":
+def _lane_text(lane: str, travel_direction: str = "unknown", lane_side: str | None = None) -> str:
+    side = lane_side if lane_side in {"left", "right"} else lane
+    if travel_direction == "up" and side == "left":
+        return "上行左车道"
+    if travel_direction == "up" and side == "right":
+        return "上行右车道"
+    if travel_direction == "down" and side == "left":
+        return "下行左车道"
+    if travel_direction == "down" and side == "right":
+        return "下行右车道"
+    if side == "left":
         return "左车道"
-    if lane == "right":
+    if side == "right":
         return "右车道"
     return "未记录"
 

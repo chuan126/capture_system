@@ -1,6 +1,6 @@
 # 任务历史测量 HTTP 接口
 
-核对日期：2026-08-08
+核对日期：2026-08-09
 
 ## 1. 接口边界
 
@@ -9,6 +9,8 @@ SQLite 文件。写入由 ROS 2 记录器完成，FastAPI 只读加载。
 
 任务对外显示编号为 `display_id`，由创建时间生成，例如 `20260807_145601`。同秒创建多项任务
 时追加 `_02`、`_03`。内部状态、目录和接口路径始终使用稳定 `task_id` UUID。
+
+新任务创建请求同时保存计划 `travel_direction`、`lane_side` 和 `clearance_threshold_m`。计划值保存在中央任务索引中；开始采集时，任务控制卡片当前值可以覆盖计划作业车道和阈值，设备端随后把实际执行方向、左右车道和阈值冻结到 `task_parameters` 和每任务 `measurements.db`。
 
 ## 2. 任务逻辑删除
 
@@ -74,7 +76,7 @@ GET /api/v1/tasks/{task_id}/measurements
 返回内容包括
 
 - 任务 ID、时间显示编号、测量文件版本和数据来源；
-- 检测车道、开始时间、结束时间和完整性；
+- 实际检测方向和车道、开始时间、结束时间和完整性；
 - 最低、平均和最高高度；
 - 总样本数、有效样本数和无效样本数；
 - 标称频率和实际平均频率；
@@ -97,22 +99,22 @@ CAPTURE_DATA_ROOT/
         └── measurements.db
 ```
 
-当前读取格式兼容版本 1、2 和 3。设备端记录器生成版本 3。
+当前读取格式兼容版本 1、2、3、4 和 5。设备端记录器生成版本 5。
 
 | 表 | 内容 |
 | --- | --- |
-| `recording_metadata` | 任务 ID、数据来源、车道、时间、完整性和版本 |
+| `recording_metadata` | 任务 ID、数据来源、实际行驶方向、左右车道、时间、完整性和版本；v5 新增 `travel_direction` 和 `lane_side`，同时保留兼容字段 `lane` |
 | `clearance_samples` | 50 Hz 最近源帧保持样本、有效性、质量和来源字段 |
-| `clearance_source_frames` | 净空算法实际输出源帧及质量字段 |
+| `clearance_source_frames` | 净空算法实际输出源帧及质量字段。v4 使用合格连通区域数、水平投影网格覆盖面积、中位残差和 P95 残差的明确字段名 |
 | `rtk_samples` | 任务期间 RTK 快照 |
-| `rtk_endpoints` | 入口和出口 RTK |
+| `rtk_endpoints` | 最近 2 s 内有效 Fix 确认的入口和出口 RTK |
+| `event_rtk_snapshots` | 开始和停止时的 RTK 事件快照；超时或无效 Fix 仍可保留坐标证据但 `valid=0` |
 | `pause_intervals` | 暂停区间 |
 | `task_events` | 开始、暂停、继续、停止和异常事件 |
 | `recording_counters` | 样本和写入错误计数 |
 
 `data_origin` 取值为 `recorded` 或 `test_fixture`。前端必须明确显示测试数据，不得将其作为正式
-测量结果。版本 2 和版本 3 的每条 50 Hz 样本包含 `source_sequence`、`source_age_ms`、`is_repeated` 和
-`repeat_index`。版本 3 中 `lidar_to_top_m` 保留算法原始输出，`clearance_height_m` 保存 `lidar_to_top_m + 雷达安装高度`。没有源帧或源帧超时的记录保持无效和空高度。重复记录不能解释为 50 Hz 独立
+测量结果。版本 2、3、4 和 5 的每条 50 Hz 样本包含 `source_sequence`、`source_age_ms`、`is_repeated` 和 `repeat_index`。版本 3 起 `lidar_to_top_m` 保留算法原始输出，`clearance_height_m` 保存 `lidar_to_top_m + 雷达安装高度`。版本 4 将源帧诊断字段整理为 `candidate_region_count`、`selected_grid_area_m2`、`selected_residual_median_m` 和 `selected_residual_p95_m`。版本 5 在元数据中新增实际行驶方向和左右车道，报告与回放优先使用这组实际执行值。没有源帧或源帧超时的记录保持无效和空高度。重复记录不能解释为 50 Hz 独立
 算法源帧。
 
 ## 7. 当前限制

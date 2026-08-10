@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 TaskStatus = Literal[
     "pending",
@@ -39,6 +39,7 @@ RtkCaptureStatus = Literal[
 ]
 
 TaskLane = Literal["left", "right"]
+TaskTravelDirection = Literal["up", "down"]
 
 
 def _normalize_required_text(value: str, field_name: str, maximum_length: int) -> str:
@@ -57,6 +58,9 @@ class TaskCreateRequest(BaseModel):
 
     tunnel_code: str = Field(description="隧道业务编号")
     tunnel_name: str = Field(description="隧道名称")
+    travel_direction: TaskTravelDirection | None = Field(default=None, description="计划行驶方向")
+    lane_side: TaskLane | None = Field(default=None, description="计划车道位置")
+    clearance_threshold_m: float = Field(default=0.0, ge=0.0, le=20.0, description="计划高度阈值")
 
     @field_validator("tunnel_code")
     @classmethod
@@ -101,10 +105,21 @@ class TaskPurgeDataResponse(BaseModel):
 class TaskStartRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    lane: TaskLane
+    travel_direction: TaskTravelDirection | None = None
+    lane_side: TaskLane | None = None
+    lane: TaskLane | None = None
     lidar_mount_height_m: float = Field(ge=0.0, le=20.0)
     clearance_threshold_m: float = Field(ge=0.0, le=20.0)
     expected_revision: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def validate_lane_fields(self) -> "TaskStartRequest":
+        resolved_lane = self.lane_side or self.lane
+        if resolved_lane is None:
+            raise ValueError("必须提供作业车道")
+        if self.lane_side is not None and self.lane is not None and self.lane_side != self.lane:
+            raise ValueError("lane 与 lane_side 不一致")
+        return self
 
 
 class TaskCommandRequest(BaseModel):
@@ -175,6 +190,11 @@ class TaskResponse(BaseModel):
     last_error_code: str | None
     last_error_message: str | None
     warning_code: str | None
+    planned_travel_direction: TaskTravelDirection | None = None
+    planned_lane_side: TaskLane | None = None
+    planned_clearance_threshold_m: float | None = None
+    travel_direction: TaskTravelDirection | None = None
+    lane_side: TaskLane | None = None
     lane: TaskLane | None = None
     lidar_mount_height_m: float | None = None
     clearance_threshold_m: float | None = None

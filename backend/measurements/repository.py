@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator, cast
 
-from backend.measurements.models import MeasurementDataOrigin, MeasurementLane
+from backend.measurements.models import MeasurementDataOrigin, MeasurementLane, MeasurementTravelDirection
 from backend.tasks.repository import TaskRecord
 
 
@@ -81,6 +81,8 @@ class MeasurementSummaryRecord:
     recording_schema_version: int
     data_origin: MeasurementDataOrigin
     lane: MeasurementLane
+    travel_direction: MeasurementTravelDirection
+    lane_side: MeasurementLane
     started_at: str
     ended_at: str | None
     complete: bool
@@ -99,6 +101,8 @@ class MeasurementHistoryRecord:
     recording_schema_version: int
     data_origin: MeasurementDataOrigin
     lane: MeasurementLane
+    travel_direction: MeasurementTravelDirection
+    lane_side: MeasurementLane
     started_at: str
     ended_at: str | None
     complete: bool
@@ -112,7 +116,7 @@ class MeasurementHistoryRecord:
     samples: list[ClearanceHistorySampleRecord]
 
 
-_SUPPORTED_SCHEMA_VERSIONS = {1, 2, 3}
+_SUPPORTED_SCHEMA_VERSIONS = {1, 2, 3, 4, 5}
 _MAX_HISTORY_SAMPLES = 500_000
 
 
@@ -208,6 +212,8 @@ class MeasurementRepository:
                 recording_schema_version=summary.recording_schema_version,
                 data_origin=summary.data_origin,
                 lane=summary.lane,
+                travel_direction=summary.travel_direction,
+                lane_side=summary.lane_side,
                 started_at=summary.started_at,
                 ended_at=summary.ended_at,
                 complete=summary.complete,
@@ -404,11 +410,22 @@ class MeasurementRepository:
         lane = str(metadata["lane"])
         if lane not in {"left", "right", "unknown"}:
             raise MeasurementStorageError(f"未知检测车道：{lane}")
+        metadata_keys = set(metadata.keys())
+        travel_direction = (
+            str(metadata["travel_direction"]) if "travel_direction" in metadata_keys else "unknown"
+        )
+        lane_side = str(metadata["lane_side"]) if "lane_side" in metadata_keys else lane
+        if travel_direction not in {"up", "down", "unknown"}:
+            raise MeasurementStorageError(f"未知行驶方向：{travel_direction}")
+        if lane_side not in {"left", "right", "unknown"}:
+            raise MeasurementStorageError(f"未知车道位置：{lane_side}")
         return MeasurementSummaryRecord(
             task_id=task.task_id,
             recording_schema_version=int(metadata["schema_version"]),
             data_origin=cast(MeasurementDataOrigin, data_origin),
             lane=cast(MeasurementLane, lane),
+            travel_direction=cast(MeasurementTravelDirection, travel_direction),
+            lane_side=cast(MeasurementLane, lane_side),
             started_at=str(metadata["started_at"]),
             ended_at=metadata["ended_at"],
             complete=bool(metadata["complete"]),

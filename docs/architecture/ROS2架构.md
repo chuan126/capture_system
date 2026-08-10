@@ -68,8 +68,7 @@
 | `/capture/recording/prepare` | `PrepareRecording` | 创建任务测量数据库并开始50 Hz记录 |
 | `/capture/recording/control` | `RecordingCommand` | 执行pause、resume、finalize或abort |
 
-开始和停止不检查雷达或RTK真实数据是否就绪。RTK快照缺失时返回`unconfirmed`，
-不阻塞任务状态转换。
+开始采集前由 FastAPI 统一检查雷达原始点云和 RTK 上线状态；该准入只限制 `start`。任务开始后，暂停、继续、停止和恢复仍按各自 Service 独立判断。入口和出口 RTK 端点只有在最近 2 s 内收到有效 Fix 时标记为 `confirmed`；无 Fix、无效 Fix 或 Fix 超时均返回 `unconfirmed`，不阻塞已经开始的任务停止和收尾。
 
 ## 6. QoS 原则
 

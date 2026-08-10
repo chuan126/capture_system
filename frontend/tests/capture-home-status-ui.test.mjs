@@ -84,7 +84,7 @@ test("task card exposes only one create-task entry", () => {
   assert.doesNotMatch(taskCard, />新建任务<\/button>|>批量创建<\/button>/);
 });
 
-test("height threshold, mount height and lane are shared task-card settings", () => {
+test("task card shows current task lane and threshold and keeps pre-start override controls", () => {
   assert.match(taskCard, /task-parameter-strip/);
   assert.match(taskCard, />高度阈值</);
   assert.match(taskCard, /value=\{heightThreshold\}/);
@@ -92,35 +92,40 @@ test("height threshold, mount height and lane are shared task-card settings", ()
   assert.match(taskCard, /value=\{mountHeight\}/);
   assert.match(taskCard, />作业车道</);
   assert.match(taskCard, /value=\{operationLane\}/);
-  assert.match(taskCard, /option value="左车道"/);
-  assert.match(taskCard, /option value="右车道"/);
-  assert.doesNotMatch(taskDialog, />高度阈值/);
-  assert.doesNotMatch(taskDialog, />雷达安装高度/);
-  assert.doesNotMatch(taskDialog, />作业车道/);
+  for (const lane of ["上行左车道", "上行右车道", "下行左车道", "下行右车道"]) {
+    assert.match(taskCard, new RegExp(`option value="${lane}"`));
+  }
+  assert.match(taskCard, /当前任务参数/);
+  assert.match(taskCard, /disabled=\{taskLocked\}/);
+  assert.match(taskCard, /taskLocked \? \(currentTask\.lane \?\? operationLane\) : operationLane/);
   assert.match(page, /useState\("0\.00"\)/);
   assert.match(taskCard, /min="0"/);
   assert.match(taskCard, /max="20"/);
 });
 
-test("task creation uses creation-time identifiers and only asks for tunnel fields", () => {
+test("task creation stores independent planned lane and threshold", () => {
   assert.match(taskDialog, />创建检测任务</);
   assert.match(taskDialog, /任务编号由设备端按创建时间生成/);
   assert.match(taskDialog, /20260807_145601/);
   assert.match(taskDialog, />隧道编号</);
   assert.match(taskDialog, />隧道名称</);
+  assert.match(taskDialog, />作业车道</);
+  assert.match(taskDialog, />高度阈值</);
+  for (const lane of ["上行左车道", "上行右车道", "下行左车道", "下行右车道"]) {
+    assert.match(taskDialog, new RegExp(`option value="${lane}"`));
+  }
   assert.match(taskDialog, /"保存并关闭"/);
   assert.match(taskDialog, /"保存并继续创建"/);
-  assert.match(taskDialog, /await onCreate\(\{ tunnelCode, tunnelName \}, idempotencyKey\)/);
+  assert.match(taskDialog, /await onCreate\(\{ tunnelCode, tunnelName, lane: draft\.lane, clearanceThreshold:/);
   assert.match(taskDialog, /setDraft\(createTaskDraft\(\)\)/);
   assert.doesNotMatch(taskDialog, />＋ 添加任务|>复制<\/button>|>删除<\/button>|rows\.map/);
-  assert.match(taskDialog, /draft\.tunnelCode/);
-  assert.match(taskDialog, /draft\.tunnelName/);
+  assert.doesNotMatch(taskDialog, />雷达安装高度</);
   assert.doesNotMatch(taskDialog, />任务名称|row\.taskName|batchMode|作业批次/);
-  assert.match(page, /createTask\(draft, idempotencyKey\)/);
+  assert.match(page, /const created = await createTask\(\{/);
+  assert.match(page, /clearanceThresholdM: Number\(draft\.clearanceThreshold\)/);
   assert.doesNotMatch(page, /createTaskBatch\(/);
   assert.match(page, /task\.displayId/);
   assert.doesNotMatch(page, /createTaskId|nextTaskSequence|formatTaskSequence/);
-  assert.doesNotMatch(taskDialog, /startingSequence|row\.mountHeight|row\.lane/);
 });
 
 

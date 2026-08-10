@@ -16,7 +16,7 @@ clearance_engine_node:
     ransac.voxel_size_m: 0.04
     ransac.max_iterations: 500
     ransac.probability: 0.99
-    ransac.max_candidate_planes: 500
+    ransac.max_candidate_planes: 1000
     ransac.min_remaining_points: 100
     ransac.min_inliers_absolute: 50
     ransac.min_inlier_ratio: 0.0003

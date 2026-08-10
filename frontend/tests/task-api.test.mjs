@@ -101,7 +101,7 @@ test("creates one task per formal frontend request without any ROS 2 browser int
 
   try {
     const task = await createTask(
-      { tunnelCode: "T-001", tunnelName: "东山隧道" },
+      { tunnelCode: "T-001", tunnelName: "东山隧道", lane: "上行左车道", clearanceThresholdM: 4.5 },
       "request-001",
     );
     assert.equal(task.displayId, "20260807_145601");
@@ -109,7 +109,11 @@ test("creates one task per formal frontend request without any ROS 2 browser int
     assert.equal(capturedInit.method, "POST");
     assert.equal(capturedInit.headers["Idempotency-Key"], "request-001");
     assert.deepEqual(JSON.parse(capturedInit.body), {
-      tunnel_code: "T-001", tunnel_name: "东山隧道",
+      tunnel_code: "T-001",
+      tunnel_name: "东山隧道",
+      travel_direction: "up",
+      lane_side: "left",
+      clearance_threshold_m: 4.5,
     });
     const source = await readFile(new URL("../components/workflow/taskApi.ts", import.meta.url), "utf8");
     assert.doesNotMatch(source, /batch_mode|rclpy|rclcpp|ros2|create_subscription|create_publisher|ros service|ros action/i);
@@ -122,7 +126,7 @@ test("keeps batch creation only as a compatibility API", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => jsonResponse([apiTask], 201);
   try {
-    const tasks = await createTaskBatch([{ tunnelCode: "T-001", tunnelName: "东山隧道" }], "compat-001");
+    const tasks = await createTaskBatch([{ tunnelCode: "T-001", tunnelName: "东山隧道", lane: "下行右车道", clearanceThresholdM: 4.2 }], "compat-001");
     assert.equal(tasks.length, 1);
   } finally {
     globalThis.fetch = originalFetch;
@@ -154,9 +158,49 @@ test("surfaces backend task errors and does not synthesize a local task", async 
   globalThis.fetch = async () => jsonResponse({ detail: "任务数据库不可用" }, 503);
   try {
     await assert.rejects(
-      () => createTask({ tunnelCode: "T-001", tunnelName: "东山隧道" }, "request-002"),
+      () => createTask({ tunnelCode: "T-001", tunnelName: "东山隧道", lane: "下行左车道", clearanceThresholdM: 4.1 }, "request-002"),
       (error) => error instanceof TaskApiError && error.status === 503 && error.message === "任务数据库不可用",
     );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("loads planned lane and threshold before start and prefers frozen actual values after start", async () => {
+  const originalFetch = globalThis.fetch;
+  let call = 0;
+  globalThis.fetch = async () => {
+    call += 1;
+    if (call === 1) return jsonResponse([{
+      ...apiTask,
+      planned_travel_direction: "down",
+      planned_lane_side: "left",
+      planned_clearance_threshold_m: 4.6,
+      travel_direction: null,
+      lane_side: null,
+      lane: null,
+      clearance_threshold_m: null,
+    }]);
+    return jsonResponse([{
+      ...apiTask,
+      status: "running",
+      operation_phase: "recording",
+      planned_travel_direction: "down",
+      planned_lane_side: "left",
+      planned_clearance_threshold_m: 4.6,
+      travel_direction: "up",
+      lane_side: "right",
+      lane: "right",
+      clearance_threshold_m: 4.3,
+    }]);
+  };
+  try {
+    const [pending] = await listTasks();
+    assert.equal(pending.lane, "下行左车道");
+    assert.equal(pending.clearanceThresholdM, 4.6);
+    const [running] = await listTasks();
+    assert.equal(running.lane, "上行右车道");
+    assert.equal(running.clearanceThresholdM, 4.3);
   } finally {
     globalThis.fetch = originalFetch;
   }

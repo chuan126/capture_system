@@ -32,7 +32,7 @@ def iso_utc(epoch_ns: int) -> str:
 
 
 def create_recording_schema(connection: sqlite3.Connection) -> None:
-    """建立与 data_recorder 当前 schema v3 对齐的测试数据库。"""
+    """建立与 data_recorder 当前 schema v5 对齐的测试数据库。"""
     connection.executescript(
         """
         CREATE TABLE recording_metadata (
@@ -41,6 +41,8 @@ def create_recording_schema(connection: sqlite3.Connection) -> None:
             task_id TEXT NOT NULL,
             data_origin TEXT NOT NULL CHECK (data_origin IN ('recorded', 'test_fixture')),
             lane TEXT NOT NULL CHECK (lane IN ('left', 'right', 'unknown')),
+            travel_direction TEXT NOT NULL CHECK (travel_direction IN ('up', 'down', 'unknown')),
+            lane_side TEXT NOT NULL CHECK (lane_side IN ('left', 'right', 'unknown')),
             started_at TEXT NOT NULL,
             ended_at TEXT,
             complete INTEGER NOT NULL CHECK (complete IN (0, 1)),
@@ -77,11 +79,12 @@ def create_recording_schema(connection: sqlite3.Connection) -> None:
             lidar_to_top_m REAL,
             invalid_reason TEXT,
             quality_score REAL,
-            candidate_plane_count INTEGER,
+            candidate_region_count INTEGER,
             selected_inlier_count INTEGER,
-            selected_area_m2 REAL,
+            selected_grid_area_m2 REAL,
             selected_tilt_deg REAL,
-            selected_rms_m REAL,
+            selected_residual_median_m REAL,
+            selected_residual_p95_m REAL,
             processing_time_ms REAL
         );
         CREATE TABLE rtk_samples (
@@ -157,14 +160,15 @@ def create_recording(
         connection.execute(
             """
             INSERT INTO recording_metadata (
-                id, schema_version, task_id, data_origin, lane, started_at,
+                id, schema_version, task_id, data_origin, lane, travel_direction, lane_side, started_at,
                 ended_at, complete, nominal_sample_rate_hz, algorithm_version,
                 config_version, software_version, lidar_mount_height_m,
                 clearance_threshold_m, entry_rtk_status, exit_rtk_status
-            ) VALUES (1, 3, ?, 'test_fixture', ?, ?, ?, ?, 50.0, ?, ?, ?, ?, ?, 'confirmed', ?)
+            ) VALUES (1, 5, ?, 'test_fixture', ?, 'up', ?, ?, ?, ?, 50.0, ?, ?, ?, ?, ?, 'confirmed', ?)
             """,
             (
                 task_id,
+                lane,
                 lane,
                 iso_utc(start_ns),
                 iso_utc(end_ns) if complete else None,
@@ -219,6 +223,7 @@ def create_recording(
                         None,
                         None,
                         None,
+                        None,
                         2.0,
                     )
                 )
@@ -266,6 +271,7 @@ def create_recording(
                     1.2,
                     1.0,
                     0.012,
+                    0.028,
                     2.0,
                 )
             )
@@ -286,9 +292,10 @@ def create_recording(
             INSERT INTO clearance_source_frames (
                 source_sequence, source_timestamp_ns, received_timestamp_ns,
                 valid, lidar_to_top_m, invalid_reason, quality_score,
-                candidate_plane_count, selected_inlier_count, selected_area_m2,
-                selected_tilt_deg, selected_rms_m, processing_time_ms
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                candidate_region_count, selected_inlier_count, selected_grid_area_m2,
+                selected_tilt_deg, selected_residual_median_m, selected_residual_p95_m,
+                processing_time_ms
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             source_rows,
         )
@@ -415,8 +422,10 @@ def generate(output: Path, *, force: bool) -> None:
                 tunnel_code, tunnel_name, status, operation_phase,
                 created_at, updated_at, started_at, completed_at,
                 entry_rtk_status, exit_rtk_status, has_measurements,
-                recording_path, schema_version, deleted_at, delete_reason
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)
+                recording_path, schema_version,
+                planned_travel_direction, planned_lane_side, planned_clearance_threshold_m,
+                deleted_at, delete_reason
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)
             """,
             [
                 (
@@ -438,6 +447,9 @@ def generate(output: Path, *, force: bool) -> None:
                     0,
                     None,
                     schema_version,
+                    "up",
+                    "left",
+                    4.5,
                 ),
                 (
                     TASK_COMPLETED,
@@ -458,6 +470,9 @@ def generate(output: Path, *, force: bool) -> None:
                     1,
                     completed_path,
                     schema_version,
+                    "up",
+                    "left",
+                    4.5,
                 ),
                 (
                     TASK_INTERRUPTED,
@@ -478,6 +493,9 @@ def generate(output: Path, *, force: bool) -> None:
                     1,
                     interrupted_path,
                     schema_version,
+                    "down",
+                    "right",
+                    4.2,
                 ),
             ],
         )
@@ -520,7 +538,7 @@ def generate(output: Path, *, force: bool) -> None:
             assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
             assert connection.execute(
                 "SELECT schema_version FROM recording_metadata WHERE id=1"
-            ).fetchone()[0] == 3
+            ).fetchone()[0] == 5
 
     print(output)
 

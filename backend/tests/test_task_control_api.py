@@ -181,6 +181,8 @@ def test_task_control_requires_lidar_and_rtk_online_before_start(tmp_path: Path)
                 "task_id": task["task_id"],
                 "command_id": "start-command-001",
                 "expected_revision": 0,
+                "travel_direction": None,
+                "lane_side": "right",
                 "lane": "right",
                 "lidar_mount_height_m": 1.86,
                 "clearance_threshold_m": 4.5,

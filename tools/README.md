@@ -1,6 +1,6 @@
 # 离线工具
 
-核对日期：2026-08-08
+核对日期：2026-08-09
 
 > 当前目录以规划说明为主，正式标定、报告和数据导出工具尚未形成稳定命令接口。
 
@@ -21,8 +21,8 @@ tools/                      # 标定、分析、仿真和导出工具根目录
 
 `generate_playback_test_fixture.py` 生成独立的 `CAPTURE_DATA_ROOT` 测试目录。中央 `capture.db`
 使用当前任务 schema，并写入仅供兼容 JOIN 使用的 `operation_batches` 记录；任务具有 UUID、
-`display_id`、`batch_id` 和 `batch_sequence`。每任务 `measurements.db` 使用记录器 schema v3，
-测试来源固定为 `data_origin=test_fixture`，不会满足正式报告的数据来源条件。
+`display_id`、`batch_id` 和 `batch_sequence`。每任务 `measurements.db` 使用记录器 schema v5，
+测试元数据写入实际方向和左右车道字段；测试来源固定为 `data_origin=test_fixture`，不会满足正式报告的数据来源条件。
 
 ```bash
 python3 tools/generate_playback_test_fixture.py /tmp/capture-playback-fixture --force

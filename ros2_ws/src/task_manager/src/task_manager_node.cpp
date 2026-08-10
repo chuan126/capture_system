@@ -455,8 +455,12 @@ private:
 
   TransitionResult begin_start(const interfaces::srv::StartTask::Request & request)
   {
+    const std::string lane_side = request.lane_side.empty() ? request.lane : request.lane_side;
+    const bool direction_valid = request.travel_direction.empty() ||
+      request.travel_direction == "up" || request.travel_direction == "down";
     if (request.task_id.empty() || request.command_id.empty() ||
-      (request.lane != "left" && request.lane != "right") ||
+      (lane_side != "left" && lane_side != "right") || !direction_valid ||
+      (!request.lane.empty() && request.lane != lane_side) ||
       !std::isfinite(request.lidar_mount_height_m) ||
       !std::isfinite(request.clearance_threshold_m) ||
       request.lidar_mount_height_m < 0.0 || request.lidar_mount_height_m > 20.0 ||
@@ -534,22 +538,29 @@ private:
         sqlite3_prepare_v2(
           database,
           "INSERT INTO task_parameters (task_id, lane, lidar_mount_height_m, "
-          "clearance_threshold_m, captured_at, parameter_schema_version) VALUES (?, ?, ?, ?, ?, 1) "
+          "clearance_threshold_m, captured_at, parameter_schema_version, travel_direction, lane_side) "
+          "VALUES (?, ?, ?, ?, ?, 2, ?, ?) "
           "ON CONFLICT(task_id) DO UPDATE SET lane=excluded.lane, "
           "lidar_mount_height_m=excluded.lidar_mount_height_m, "
-          "clearance_threshold_m=excluded.clearance_threshold_m, captured_at=excluded.captured_at",
+          "clearance_threshold_m=excluded.clearance_threshold_m, captured_at=excluded.captured_at, "
+          "parameter_schema_version=excluded.parameter_schema_version, "
+          "travel_direction=excluded.travel_direction, lane_side=excluded.lane_side",
           -1, &parameters, nullptr), database, "准备任务参数写入失败");
       bind_text(parameters, 1, request.task_id);
-      bind_text(parameters, 2, request.lane);
+      bind_text(parameters, 2, lane_side);
       sqlite3_bind_double(parameters, 3, request.lidar_mount_height_m);
       sqlite3_bind_double(parameters, 4, request.clearance_threshold_m);
       bind_text(parameters, 5, now_text);
+      bind_optional_text(
+        parameters, 6, request.travel_direction.empty() ? std::nullopt :
+        std::optional<std::string>(request.travel_direction));
+      bind_text(parameters, 7, lane_side);
       check_sqlite(sqlite3_step(parameters), database, "写入任务参数失败");
       sqlite3_finalize(parameters);
       insert_event(
         database, request.task_id, "start_requested", task->status, task->status,
         "radar_initializing", request.command_id, now_text,
-        "开始命令已接受，不等待雷达或RTK真实数据检查", "");
+        "开始命令已接受，实际作业参数已冻结", "");
       auto updated = load_task(database, request.task_id).value();
       TransitionResult result{true, updated, "", "开始命令已接受"};
       store_control_request(database, request.command_id, request.task_id, "start", true, result);
@@ -937,7 +948,10 @@ private:
     recorder_request->task_sequence = task.sequence;
     recorder_request->tunnel_code = task.tunnel_code;
     recorder_request->tunnel_name = task.tunnel_name;
-    recorder_request->lane = request.lane;
+    const std::string lane_side = request.lane_side.empty() ? request.lane : request.lane_side;
+    recorder_request->lane = lane_side;
+    recorder_request->travel_direction = request.travel_direction;
+    recorder_request->lane_side = lane_side;
     recorder_request->lidar_mount_height_m = request.lidar_mount_height_m;
     recorder_request->clearance_threshold_m = request.clearance_threshold_m;
     recorder_request->requested_at_ns = task.start_requested_ns > 0 ?

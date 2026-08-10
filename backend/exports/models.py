@@ -5,7 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from backend.measurements.models import MeasurementDataOrigin, MeasurementLane, RtkEndpointResponse
+from backend.measurements.models import MeasurementDataOrigin, MeasurementLane, MeasurementTravelDirection, RtkEndpointResponse
 from backend.tasks.models import TaskStatus
 
 
@@ -21,6 +21,8 @@ class TaskExportPreviewResponse(BaseModel):
     blocked_reason: str | None
     data_origin: MeasurementDataOrigin | None
     lane: MeasurementLane | None
+    travel_direction: MeasurementTravelDirection | None = None
+    lane_side: MeasurementLane | None = None
     started_at: datetime | None
     ended_at: datetime | None
     complete: bool | None

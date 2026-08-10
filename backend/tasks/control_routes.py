@@ -266,13 +266,16 @@ def start_task(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"{sensor_detail}，无法开始采集",
         )
+    resolved_lane = payload.lane_side or payload.lane
     return _invoke(
         request,
         "start",
         task_id=task_id,
         command_id=_command_id(idempotency_key),
         expected_revision=payload.expected_revision,
-        lane=payload.lane,
+        travel_direction=payload.travel_direction,
+        lane_side=resolved_lane,
+        lane=resolved_lane,
         lidar_mount_height_m=payload.lidar_mount_height_m,
         clearance_threshold_m=payload.clearance_threshold_m,
     )

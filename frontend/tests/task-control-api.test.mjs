@@ -38,7 +38,7 @@ test("starts a task only through FastAPI HTTP and forwards frozen parameters", a
   };
   try {
     const result = await startTaskControl("task-001", {
-      lane: "右车道",
+      lane: "上行右车道",
       lidarMountHeightM: 1.86,
       clearanceThresholdM: 4.5,
       expectedRevision: 0,
@@ -48,6 +48,8 @@ test("starts a task only through FastAPI HTTP and forwards frozen parameters", a
     assert.equal(capturedInit.method, "POST");
     assert.equal(capturedInit.headers["Idempotency-Key"], "command-001");
     assert.deepEqual(JSON.parse(capturedInit.body), {
+      travel_direction: "up",
+      lane_side: "right",
       lane: "right",
       lidar_mount_height_m: 1.86,
       clearance_threshold_m: 4.5,

@@ -2820,7 +2820,10 @@ table {
 .task-dialog-single { display: grid; gap: 14px; padding: 18px 0 4px; }
 .task-dialog-single label { display: grid; gap: 7px; }
 .task-dialog-single label > span { color: var(--muted); font-size: 12px; font-weight: 700; }
-.task-dialog-single input { width: 100%; min-height: 40px; border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; background: #fff; color: var(--text); }
+.task-dialog-single input,
+.task-dialog-single select { width: 100%; min-height: 40px; border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; background: #fff; color: var(--text); }
+.task-dialog-measure { display: grid; grid-template-columns: minmax(0,1fr) 18px; align-items: center; gap: 6px; }
+.task-dialog-measure small { color: var(--muted); font-size: 11px; font-weight: 700; }
 .task-dialog-success { margin: 12px 0 0; color: #2e6b49; font-size: 12px; }
 
 .task-browser__head-actions {

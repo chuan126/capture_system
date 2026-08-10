@@ -11,6 +11,7 @@ def test_system_monitor_uses_raw_pointcloud_freshness_for_lidar_online_state() -
 
     assert '"lidar_raw_topic", "/capture/lidar/points_raw"' in source
     assert "create_subscription<sensor_msgs::msg::PointCloud2>" in source
+    assert "#include <sensor_msgs/msg/point_cloud2.hpp>" in source
     assert "lidar_monitor_.observe" in source
     assert "lidar_monitor_.evaluate" in source
     assert "status.level = diagnostic_level(health.level)" in source

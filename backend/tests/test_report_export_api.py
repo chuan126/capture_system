@@ -329,3 +329,13 @@ def test_report_preview_and_pdf_use_task_creation_order(tmp_path: Path) -> None:
     )
     assert manifest["task_ids"] == [task["task_id"] for task in created]
     assert manifest["task_display_ids"] == [task["display_id"] for task in created]
+
+
+def test_report_lane_text_uses_actual_direction_and_lane_side() -> None:
+    from backend.exports.service import _lane_text
+
+    assert _lane_text("left", "up", "left") == "上行左车道"
+    assert _lane_text("right", "up", "right") == "上行右车道"
+    assert _lane_text("left", "down", "left") == "下行左车道"
+    assert _lane_text("right", "down", "right") == "下行右车道"
+    assert _lane_text("left", "unknown", "left") == "左车道"

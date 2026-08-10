@@ -3,6 +3,8 @@ uint64 task_sequence
 string tunnel_code
 string tunnel_name
 string lane
+string travel_direction
+string lane_side
 float64 lidar_mount_height_m
 float64 clearance_threshold_m
 int64 requested_at_ns

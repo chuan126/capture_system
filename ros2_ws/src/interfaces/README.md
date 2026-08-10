@@ -1,6 +1,6 @@
 # interfaces
 
-核对日期：2026-08-06
+核对日期：2026-08-09
 
 系统自定义ROS 2消息和Service包。优先使用标准消息，只为标准消息无法表达的任务状态、
 RTK原始字段、净空结果和记录控制创建接口。
@@ -27,12 +27,10 @@ interfaces/
 `TaskStatus`发布持久任务状态、执行阶段、状态版本、RTK端点状态、记录路径和错误。
 QoS由`task_manager`设置为reliable、transient local，使FastAPI重连后可获得最近状态。
 
-`StartTask`冻结车道、雷达安装高度和高度阈值。`TaskCommand`执行暂停、继续和停止。
-`PrepareRecording`及`RecordingCommand`仅用于`task_manager`与`data_recorder`之间的内部
-记录控制。
+`StartTask`冻结实际行驶方向、左右车道、雷达安装高度和高度阈值；兼容字段 `lane` 继续承载左右车道。`TaskCommand`执行暂停、继续和停止。
+`PrepareRecording`把冻结后的实际行驶方向、左右车道和其他正式参数交给 `data_recorder`；`RecordingCommand`用于暂停、继续和停止记录。两者仅用于 `task_manager` 与 `data_recorder` 之间的内部记录控制。
 
-开始和停止不等待雷达或RTK真实数据。入口或出口RTK缺失时，Service返回
-`unconfirmed`，任务继续执行。
+浏览器开始请求先由 FastAPI 根据系统诊断检查雷达原始点云和 RTK 上线状态，检查通过后才调用 `StartTask`。入口或出口 RTK 缺失、无效或超时时，Service 返回 `unconfirmed`，已经进入的任务流程继续执行。
 
 `RtkStatus`只承载NMEA解析器直接输出，不包含稳定性或进出洞结论。
 

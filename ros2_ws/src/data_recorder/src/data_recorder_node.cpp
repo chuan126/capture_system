@@ -78,6 +78,12 @@ std::int64_t system_now_ns()
     std::chrono::system_clock::now().time_since_epoch()).count();
 }
 
+std::int64_t steady_now_ns()
+{
+  return std::chrono::duration_cast<std::chrono::nanoseconds>(
+    std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
 std::string rtk_fix_type(std::uint8_t gps_state)
 {
   switch (gps_state) {
@@ -144,6 +150,7 @@ public:
       "rtk_status_topic", "/capture/rtk/status");
     sample_rate_hz_ = declare_parameter<double>("sample_rate_hz", 50.0);
     source_timeout_ms_ = declare_parameter<double>("source_timeout_ms", 250.0);
+    endpoint_rtk_max_age_ms_ = declare_parameter<double>("endpoint_rtk_max_age_ms", 2000.0);
     transaction_batch_size_ = declare_parameter<int>("transaction_batch_size", 100);
     software_version_ = declare_parameter<std::string>("software_version", "0.2.0");
     algorithm_version_ = declare_parameter<std::string>(
@@ -156,6 +163,9 @@ public:
     }
     if (!(source_timeout_ms_ > 0.0)) {
       throw std::runtime_error("source_timeout_ms必须大于0");
+    }
+    if (!(endpoint_rtk_max_age_ms_ > 0.0)) {
+      throw std::runtime_error("endpoint_rtk_max_age_ms必须大于0");
     }
     transaction_batch_size_ = std::max(transaction_batch_size_, 1);
 
@@ -219,6 +229,7 @@ private:
     bool available{false};
     bool valid{false};
     std::int64_t timestamp_ns{0};
+    std::int64_t received_monotonic_ns{0};
     double latitude_deg{0.0};
     double longitude_deg{0.0};
     std::optional<double> altitude_m;
@@ -381,7 +392,11 @@ private:
       reject_prepare(*response, "recorder_busy", "记录器当前已有活动任务");
       return;
     }
-    if (request->task_id.empty() || (request->lane != "left" && request->lane != "right") ||
+    const std::string lane_side = request->lane_side.empty() ? request->lane : request->lane_side;
+    const bool direction_valid = request->travel_direction.empty() ||
+      request->travel_direction == "up" || request->travel_direction == "down";
+    if (request->task_id.empty() || (lane_side != "left" && lane_side != "right") ||
+      !direction_valid || (!request->lane.empty() && request->lane != lane_side) ||
       !std::isfinite(request->lidar_mount_height_m) ||
       !std::isfinite(request->clearance_threshold_m) ||
       request->lidar_mount_height_m < 0.0 || request->lidar_mount_height_m > 20.0 ||
@@ -397,7 +412,9 @@ private:
       task_sequence_ = request->task_sequence;
       tunnel_code_ = request->tunnel_code;
       tunnel_name_ = request->tunnel_name;
-      lane_ = request->lane;
+      travel_direction_ = request->travel_direction.empty() ? "unknown" : request->travel_direction;
+      lane_side_ = lane_side;
+      lane_ = lane_side;
       lidar_mount_height_m_ = request->lidar_mount_height_m;
       clearance_threshold_m_ = request->clearance_threshold_m;
       start_requested_ns_ = request->requested_at_ns > 0 ? request->requested_at_ns : system_now_ns();
@@ -479,7 +496,7 @@ private:
     paused_ = true;
     pause_started_ns_ = requested_ns;
     insert_event("paused", requested_ns, "正式测量记录已暂停", "");
-    capture_event_rtk("pause", requested_ns);
+    capture_event_rtk("pause", requested_ns, latest_fix_is_fresh());
     populate_command_success(response, "记录已暂停", "not_requested", false);
     publish_status("paused", response.message, "");
   }
@@ -496,7 +513,7 @@ private:
     paused_ = false;
     begin_transaction();
     insert_event("resumed", requested_ns, "正式测量记录已继续", "");
-    capture_event_rtk("resume", requested_ns);
+    capture_event_rtk("resume", requested_ns, latest_fix_is_fresh());
     populate_command_success(response, "记录已继续", "not_requested", false);
     publish_status("recording", response.message, "");
   }
@@ -577,6 +594,7 @@ private:
   {
     std::lock_guard<std::mutex> lock(mutex_);
     latest_fix_.available = true;
+    latest_fix_.received_monotonic_ns = steady_now_ns();
     latest_fix_.timestamp_ns = rclcpp::Time(message->header.stamp).nanoseconds();
     if (latest_fix_.timestamp_ns <= 0) {
       latest_fix_.timestamp_ns = system_now_ns();
@@ -725,6 +743,8 @@ private:
         task_id TEXT NOT NULL,
         data_origin TEXT NOT NULL CHECK (data_origin IN ('recorded', 'test_fixture')),
         lane TEXT NOT NULL CHECK (lane IN ('left', 'right', 'unknown')),
+        travel_direction TEXT NOT NULL CHECK (travel_direction IN ('up', 'down', 'unknown')),
+        lane_side TEXT NOT NULL CHECK (lane_side IN ('left', 'right', 'unknown')),
         started_at TEXT NOT NULL,
         ended_at TEXT,
         complete INTEGER NOT NULL CHECK (complete IN (0, 1)),
@@ -761,11 +781,12 @@ private:
         lidar_to_top_m REAL,
         invalid_reason TEXT,
         quality_score REAL,
-        candidate_plane_count INTEGER,
+        candidate_region_count INTEGER,
         selected_inlier_count INTEGER,
-        selected_area_m2 REAL,
+        selected_grid_area_m2 REAL,
         selected_tilt_deg REAL,
-        selected_rms_m REAL,
+        selected_residual_median_m REAL,
+        selected_residual_p95_m REAL,
         processing_time_ms REAL
       );
       CREATE TABLE rtk_samples (
@@ -828,21 +849,24 @@ private:
       sqlite3_prepare_v2(
         database_,
         "INSERT INTO recording_metadata ("
-        "id, schema_version, task_id, data_origin, lane, started_at, ended_at, complete, "
-        "nominal_sample_rate_hz, algorithm_version, config_version, software_version, "
-        "lidar_mount_height_m, clearance_threshold_m, entry_rtk_status, exit_rtk_status) "
-        "VALUES (1, 3, ?, 'recorded', ?, ?, NULL, 0, ?, ?, ?, ?, ?, ?, 'pending', 'not_requested')",
+        "id, schema_version, task_id, data_origin, lane, travel_direction, lane_side, "
+        "started_at, ended_at, complete, nominal_sample_rate_hz, algorithm_version, "
+        "config_version, software_version, lidar_mount_height_m, clearance_threshold_m, "
+        "entry_rtk_status, exit_rtk_status) "
+        "VALUES (1, 5, ?, 'recorded', ?, ?, ?, ?, NULL, 0, ?, ?, ?, ?, ?, ?, 'pending', 'not_requested')",
         -1, &statement, nullptr),
       database_, "准备任务元数据写入失败");
     bind_text(statement, 1, task_id_);
     bind_text(statement, 2, lane_);
-    bind_text(statement, 3, iso_utc_from_ns(start_requested_ns_));
-    check_sqlite(sqlite3_bind_double(statement, 4, sample_rate_hz_), database_, "绑定采样频率失败");
-    bind_text(statement, 5, algorithm_version_);
-    bind_text(statement, 6, config_version_);
-    bind_text(statement, 7, software_version_);
-    check_sqlite(sqlite3_bind_double(statement, 8, lidar_mount_height_m_), database_, "绑定安装高度失败");
-    check_sqlite(sqlite3_bind_double(statement, 9, clearance_threshold_m_), database_, "绑定高度阈值失败");
+    bind_text(statement, 3, travel_direction_);
+    bind_text(statement, 4, lane_side_);
+    bind_text(statement, 5, iso_utc_from_ns(start_requested_ns_));
+    check_sqlite(sqlite3_bind_double(statement, 6, sample_rate_hz_), database_, "绑定采样频率失败");
+    bind_text(statement, 7, algorithm_version_);
+    bind_text(statement, 8, config_version_);
+    bind_text(statement, 9, software_version_);
+    check_sqlite(sqlite3_bind_double(statement, 10, lidar_mount_height_m_), database_, "绑定安装高度失败");
+    check_sqlite(sqlite3_bind_double(statement, 11, clearance_threshold_m_), database_, "绑定高度阈值失败");
     check_sqlite(sqlite3_step(statement), database_, "写入任务元数据失败");
     sqlite3_finalize(statement);
   }
@@ -858,9 +882,10 @@ private:
         database_,
         "INSERT OR REPLACE INTO clearance_source_frames ("
         "source_sequence, source_timestamp_ns, received_timestamp_ns, valid, lidar_to_top_m, "
-        "invalid_reason, quality_score, candidate_plane_count, selected_inlier_count, "
-        "selected_area_m2, selected_tilt_deg, selected_rms_m, processing_time_ms) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "invalid_reason, quality_score, candidate_region_count, selected_inlier_count, "
+        "selected_grid_area_m2, selected_tilt_deg, selected_residual_median_m, "
+        "selected_residual_p95_m, processing_time_ms) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         -1, &statement, nullptr),
       database_, "准备源帧写入失败");
     check_sqlite(sqlite3_bind_int64(statement, 1, source.sequence), database_, "绑定源帧序号失败");
@@ -874,12 +899,13 @@ private:
       statement, 6,
       source.invalid_reason.empty() ? std::nullopt : std::optional<std::string>(source.invalid_reason));
     bind_nullable_double(statement, 7, source.quality_score);
-    check_sqlite(sqlite3_bind_int(statement, 8, static_cast<int>(source.message.candidate_count)), database_, "绑定候选面数量失败");
+    check_sqlite(sqlite3_bind_int(statement, 8, static_cast<int>(source.message.candidate_count)), database_, "绑定合格连通区域数量失败");
     check_sqlite(sqlite3_bind_int(statement, 9, static_cast<int>(source.message.selected_inlier_count)), database_, "绑定内点数量失败");
     bind_nullable_double(statement, 10, std::isfinite(source.message.selected_area_m2) ? std::optional<double>(source.message.selected_area_m2) : std::nullopt);
     bind_nullable_double(statement, 11, std::isfinite(source.message.selected_tilt_deg) ? std::optional<double>(source.message.selected_tilt_deg) : std::nullopt);
     bind_nullable_double(statement, 12, std::isfinite(source.message.residual_median_m) ? std::optional<double>(source.message.residual_median_m) : std::nullopt);
-    bind_nullable_double(statement, 13, std::isfinite(source.message.processing_time_ms) ? std::optional<double>(source.message.processing_time_ms) : std::nullopt);
+    bind_nullable_double(statement, 13, std::isfinite(source.message.residual_p95_m) ? std::optional<double>(source.message.residual_p95_m) : std::nullopt);
+    bind_nullable_double(statement, 14, std::isfinite(source.message.processing_time_ms) ? std::optional<double>(source.message.processing_time_ms) : std::nullopt);
     check_sqlite(sqlite3_step(statement), database_, "写入源帧失败");
     sqlite3_finalize(statement);
     last_persisted_source_sequence_ = source.sequence;
@@ -911,11 +937,26 @@ private:
     sqlite3_finalize(statement);
   }
 
+  bool latest_fix_is_fresh() const
+  {
+    if (!latest_fix_.available || latest_fix_.received_monotonic_ns <= 0) {
+      return false;
+    }
+    const auto age_ns = std::max<std::int64_t>(
+      0, steady_now_ns() - latest_fix_.received_monotonic_ns);
+    return static_cast<double>(age_ns) / 1'000'000.0 <= endpoint_rtk_max_age_ms_;
+  }
+
   std::string capture_endpoint(const std::string & role, std::int64_t requested_ns)
   {
-    capture_event_rtk(role, requested_ns);
-    if (!latest_fix_.available || !latest_fix_.valid) {
-      insert_event(role + "_rtk_unconfirmed", requested_ns, role + " RTK坐标未确认", "");
+    const bool fresh = latest_fix_is_fresh();
+    capture_event_rtk(role, requested_ns, fresh);
+    if (!latest_fix_.available || !latest_fix_.valid || !fresh) {
+      const std::string reason = !latest_fix_.available ? "no_fix" :
+        (!latest_fix_.valid ? "invalid_fix" : "stale_fix");
+      insert_event(
+        role + "_rtk_unconfirmed", requested_ns,
+        role + " RTK坐标未确认：" + reason, reason);
       return "unconfirmed";
     }
     sqlite3_stmt * statement = nullptr;
@@ -939,7 +980,8 @@ private:
     return "confirmed";
   }
 
-  void capture_event_rtk(const std::string & event_type, std::int64_t requested_ns)
+  void capture_event_rtk(
+    const std::string & event_type, std::int64_t requested_ns, bool fresh)
   {
     sqlite3_stmt * statement = nullptr;
     check_sqlite(
@@ -965,7 +1007,9 @@ private:
       sqlite3_bind_null(statement, 6);
       sqlite3_bind_null(statement, 7);
     }
-    check_sqlite(sqlite3_bind_int(statement, 8, latest_fix_.valid ? 1 : 0), database_, "绑定事件RTK有效性失败");
+    check_sqlite(
+      sqlite3_bind_int(statement, 8, latest_fix_.valid && fresh ? 1 : 0),
+      database_, "绑定事件RTK有效性失败");
     check_sqlite(sqlite3_step(statement), database_, "写入事件RTK失败");
     sqlite3_finalize(statement);
   }
@@ -1260,6 +1304,8 @@ private:
     task_sequence_ = 0;
     tunnel_code_.clear();
     tunnel_name_.clear();
+    travel_direction_.clear();
+    lane_side_.clear();
     lane_.clear();
     task_directory_.clear();
     final_database_path_.clear();
@@ -1286,6 +1332,7 @@ private:
   std::string rtk_status_topic_;
   double sample_rate_hz_{50.0};
   double source_timeout_ms_{250.0};
+  double endpoint_rtk_max_age_ms_{2000.0};
   int transaction_batch_size_{100};
   std::string software_version_;
   std::string algorithm_version_;
@@ -1299,6 +1346,8 @@ private:
   std::uint64_t task_sequence_{0};
   std::string tunnel_code_;
   std::string tunnel_name_;
+  std::string travel_direction_;
+  std::string lane_side_;
   std::string lane_;
   double lidar_mount_height_m_{0.0};
   double clearance_threshold_m_{0.0};

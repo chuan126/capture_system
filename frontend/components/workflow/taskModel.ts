@@ -14,7 +14,32 @@ export type TaskOperationPhase =
   | "exit_rtk_capture" | "finalizing" | "completed" | "interrupted" | "failed";
 
 export type RtkCaptureStatus = "not_requested" | "pending" | "confirmed" | "unconfirmed";
-export type CollectionTaskLane = "左车道" | "右车道";
+export type TaskTravelDirection = "up" | "down";
+export type TaskLaneSide = "left" | "right";
+export type CollectionTaskLane = "上行左车道" | "上行右车道" | "下行左车道" | "下行右车道";
+export type CollectionTaskLaneDisplay = CollectionTaskLane | "左车道" | "右车道";
+
+export const laneSelectionParts: Record<CollectionTaskLane, { travelDirection: TaskTravelDirection; laneSide: TaskLaneSide }> = {
+  上行左车道: { travelDirection: "up", laneSide: "left" },
+  上行右车道: { travelDirection: "up", laneSide: "right" },
+  下行左车道: { travelDirection: "down", laneSide: "left" },
+  下行右车道: { travelDirection: "down", laneSide: "right" },
+};
+
+export const formatLaneDisplay = (
+  travelDirection: string | null | undefined,
+  laneSide: string | null | undefined,
+  legacyLane?: string | null,
+): CollectionTaskLaneDisplay | null => {
+  const side = laneSide === "left" || laneSide === "right" ? laneSide : legacyLane;
+  if (travelDirection === "up" && side === "left") return "上行左车道";
+  if (travelDirection === "up" && side === "right") return "上行右车道";
+  if (travelDirection === "down" && side === "left") return "下行左车道";
+  if (travelDirection === "down" && side === "right") return "下行右车道";
+  if (side === "left") return "左车道";
+  if (side === "right") return "右车道";
+  return null;
+};
 
 export type CollectionTask = {
   taskId: string;
@@ -24,7 +49,7 @@ export type CollectionTask = {
   status: CollectionTaskStatus;
   operationPhase: TaskOperationPhase;
   statusRevision: number;
-  lane: CollectionTaskLane | null;
+  lane: CollectionTaskLaneDisplay | null;
   lidarMountHeightM: number | null;
   clearanceThresholdM: number | null;
   createdAt: string;

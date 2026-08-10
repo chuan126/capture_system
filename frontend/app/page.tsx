@@ -30,17 +30,22 @@ import {
   rtkCaptureLabels,
   taskPhaseLabels,
 } from "@/components/workflow/taskModel";
+import { laneSelectionParts } from "@/components/workflow/taskModel";
 import type { CollectionTask, CollectionTaskLane, CollectionTaskStatus, WorkflowPageId } from "@/components/workflow/taskModel";
 
 type PageId = WorkflowPageId | "devtools";
 type CollectionTaskDraft = {
   tunnelCode: string;
   tunnelName: string;
+  lane: CollectionTaskLane | "";
+  clearanceThreshold: string;
 };
 
 const createTaskDraft = (): CollectionTaskDraft => ({
   tunnelCode: "",
   tunnelName: "",
+  lane: "",
+  clearanceThreshold: "0.00",
 });
 
 const createClientRequestId = () => {
@@ -100,12 +105,15 @@ function TaskCreateDialog({ onClose, onCreate }: { onClose: () => void; onCreate
   const submit = async (continueCreating: boolean) => {
     const tunnelCode = draft.tunnelCode.trim();
     const tunnelName = draft.tunnelName.trim();
+    const clearanceThresholdM = Number(draft.clearanceThreshold);
     if (!tunnelCode) { setError("请输入隧道编号"); return; }
     if (!tunnelName) { setError("请输入隧道名称"); return; }
+    if (!draft.lane) { setError("请选择作业车道"); return; }
+    if (!Number.isFinite(clearanceThresholdM) || clearanceThresholdM < 0 || clearanceThresholdM > 20) { setError("请输入 0 至 20 m 的高度阈值"); return; }
     setSubmitting(true);
     setError(null);
     try {
-      const created = await onCreate({ tunnelCode, tunnelName }, idempotencyKey);
+      const created = await onCreate({ tunnelCode, tunnelName, lane: draft.lane, clearanceThreshold: String(clearanceThresholdM) }, idempotencyKey);
       if (!continueCreating) { onClose(); return; }
       setSavedDisplayId(created.displayId);
       setDraft(createTaskDraft());
@@ -116,7 +124,7 @@ function TaskCreateDialog({ onClose, onCreate }: { onClose: () => void; onCreate
       setSubmitting(false);
     }
   };
-  return <div className="task-dialog-mask" role="dialog" aria-modal="true"><section className="task-dialog-panel"><header className="task-dialog-head"><div><h2>创建检测任务</h2><p>每次保存一个任务。保存成功后可继续创建下一项，任务编号由设备端按创建时间生成，例如 20260807_145601。</p></div><button type="button" disabled={submitting} onClick={onClose}>×</button></header><div className="task-dialog-single"><label><span>隧道编号</span><input value={draft.tunnelCode} onChange={event=>update("tunnelCode",event.target.value)} placeholder="例如 T-001" autoFocus/></label><label><span>隧道名称</span><input value={draft.tunnelName} onChange={event=>update("tunnelName",event.target.value)} placeholder="请输入隧道名称"/></label></div>{savedDisplayId&&<p className="task-dialog-success" role="status">已保存任务 {savedDisplayId}，可以继续创建下一项。</p>}{error&&<p className="task-dialog-error" role="alert">{error}</p>}<footer className="task-dialog-actions"><button type="button" className="button" disabled={submitting} onClick={onClose}>取消</button><button type="button" className="button" disabled={submitting} onClick={()=>void submit(false)}>{submitting?"正在保存":"保存并关闭"}</button><button type="button" className="button button--primary" disabled={submitting} onClick={()=>void submit(true)}>{submitting?"正在保存":"保存并继续创建"}</button></footer></section></div>;
+  return <div className="task-dialog-mask" role="dialog" aria-modal="true"><section className="task-dialog-panel"><header className="task-dialog-head"><div><h2>创建检测任务</h2><p>每次保存一个任务。保存成功后可继续创建下一项，任务编号由设备端按创建时间生成，例如 20260807_145601。</p></div><button type="button" disabled={submitting} onClick={onClose}>×</button></header><div className="task-dialog-single"><label><span>隧道编号</span><input value={draft.tunnelCode} onChange={event=>update("tunnelCode",event.target.value)} placeholder="例如 T-001" autoFocus/></label><label><span>隧道名称</span><input value={draft.tunnelName} onChange={event=>update("tunnelName",event.target.value)} placeholder="请输入隧道名称"/></label><label><span>作业车道</span><select value={draft.lane} onChange={event=>update("lane",event.target.value as CollectionTaskLane|"")}><option value="">请选择作业车道</option><option value="上行左车道">上行左车道</option><option value="上行右车道">上行右车道</option><option value="下行左车道">下行左车道</option><option value="下行右车道">下行右车道</option></select></label><label><span>高度阈值</span><div className="task-dialog-measure"><input type="number" min="0" max="20" step="0.01" value={draft.clearanceThreshold} onChange={event=>update("clearanceThreshold",event.target.value)}/><small>m</small></div></label></div>{savedDisplayId&&<p className="task-dialog-success" role="status">已保存任务 {savedDisplayId}，可以继续创建下一项。</p>}{error&&<p className="task-dialog-error" role="alert">{error}</p>}<footer className="task-dialog-actions"><button type="button" className="button" disabled={submitting} onClick={onClose}>取消</button><button type="button" className="button" disabled={submitting} onClick={()=>void submit(false)}>{submitting?"正在保存":"保存并关闭"}</button><button type="button" className="button button--primary" disabled={submitting} onClick={()=>void submit(true)}>{submitting?"正在保存":"保存并继续创建"}</button></footer></section></div>;
 }
 
 function TaskSwitchDialog({
@@ -608,11 +616,13 @@ function Dashboard({
   const heightThresholdValid = Number.isFinite(parsedHeightThreshold) && parsedHeightThreshold >= 0 && parsedHeightThreshold <= 20;
 
   useEffect(() => {
-    if (!activeTask) return;
-    if (activeTask.lidarMountHeightM !== null) setMountHeight(String(activeTask.lidarMountHeightM));
-    if (activeTask.clearanceThresholdM !== null) setHeightThreshold(String(activeTask.clearanceThresholdM));
-    if (activeTask.lane !== null) setOperationLane(activeTask.lane);
-  }, [activeTask?.taskId, activeTask?.lidarMountHeightM, activeTask?.clearanceThresholdM, activeTask?.lane, setMountHeight, setHeightThreshold, setOperationLane]);
+    if (!currentTask) return;
+    if (currentTask.lidarMountHeightM !== null) setMountHeight(String(currentTask.lidarMountHeightM));
+    if (currentTask.clearanceThresholdM !== null) setHeightThreshold(String(currentTask.clearanceThresholdM));
+    if (currentTask.lane !== null && currentTask.lane in laneSelectionParts) {
+      setOperationLane(currentTask.lane as CollectionTaskLane);
+    }
+  }, [currentTask?.taskId, currentTask?.lidarMountHeightM, currentTask?.clearanceThresholdM, currentTask?.lane, setMountHeight, setHeightThreshold, setOperationLane]);
 
   useEffect(() => {
     setLatestAbnormalHeightM(null);
@@ -643,7 +653,13 @@ function Dashboard({
       task.taskId === selectedTaskId && (task.status === "待执行" || isTaskActive(task))
     );
     const preferredTaskId = selectedExecutableTask?.taskId ?? firstPendingTask?.taskId ?? null;
-    const created = await createTask(draft, idempotencyKey);
+    if (!draft.lane) throw new Error("请选择作业车道");
+    const created = await createTask({
+      tunnelCode: draft.tunnelCode,
+      tunnelName: draft.tunnelName,
+      lane: draft.lane,
+      clearanceThresholdM: Number(draft.clearanceThreshold),
+    }, idempotencyKey);
     await reloadTasks();
     setSelectedTaskId(preferredTaskId ?? created.taskId);
     return created;
@@ -937,7 +953,7 @@ function Dashboard({
                 <header className="task-section-heading">
                   <div>
                     <h3>作业参数</h3>
-                    <span>所有任务共用</span>
+                    <span>当前任务参数</span>
                   </div>
                   <small>{taskLocked ? "采集中已锁定" : "可直接修改"}</small>
                 </header>
@@ -968,8 +984,10 @@ function Dashboard({
                       onChange={(event) => setOperationLane(event.target.value as CollectionTaskLane)}
                       aria-label="设置作业车道"
                     >
-                      <option value="左车道">左车道</option>
-                      <option value="右车道">右车道</option>
+                      <option value="上行左车道">上行左车道</option>
+                      <option value="上行右车道">上行右车道</option>
+                      <option value="下行左车道">下行左车道</option>
+                      <option value="下行右车道">下行右车道</option>
                     </select>
                   </label>
 
@@ -1004,7 +1022,7 @@ function Dashboard({
                   <div className="task-current-card__content">
                     <div className="task-current-card__identity">
                       <strong>{currentTask.displayId}</strong>
-                      <small>{currentTask.tunnelCode} · {currentTask.tunnelName} · {currentTask.lane ?? operationLane}</small>
+                      <small>{currentTask.tunnelCode} · {currentTask.tunnelName} · {taskLocked ? (currentTask.lane ?? operationLane) : operationLane}</small>
                       <div className="task-current-card__runtime">
                         <span>当前阶段 {taskPhaseLabels[currentTask.operationPhase]}</span>
                         <span>入口 RTK {rtkCaptureLabels[currentTask.entryRtkStatus]}</span>
@@ -1164,7 +1182,7 @@ export default function Home() {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [heightThreshold, setHeightThreshold] = useState("0.00");
   const [mountHeight, setMountHeight] = useState("0.00");
-  const [operationLane, setOperationLane] = useState<CollectionTaskLane>("右车道");
+  const [operationLane, setOperationLane] = useState<CollectionTaskLane>("上行右车道");
   const [taskQueryState, setTaskQueryState] = useState<"loading" | "ready" | "error">("loading");
   const [taskQueryError, setTaskQueryError] = useState<string | null>(null);
   const taskStatus = useTaskStatusSocket();

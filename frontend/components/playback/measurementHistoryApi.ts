@@ -1,6 +1,7 @@
 import type { ClearanceSample } from "./InteractiveClearanceChart";
 import { TaskApiError } from "../workflow/taskApi";
-import type { CollectionTaskLane } from "../workflow/taskModel";
+import { formatLaneDisplay } from "../workflow/taskModel";
+import type { CollectionTaskLaneDisplay } from "../workflow/taskModel";
 
 export type MeasurementRtkEndpoint = {
   timestampMs: number;
@@ -27,7 +28,7 @@ export type MeasurementHistory = {
   taskId: string;
   recordingSchemaVersion: number;
   dataOrigin: "recorded" | "test_fixture";
-  lane: CollectionTaskLane | null;
+  lane: CollectionTaskLaneDisplay | null;
   startedAt: string;
   endedAt: string | null;
   complete: boolean;
@@ -124,7 +125,9 @@ export const loadMeasurementHistory = async (taskId: string): Promise<Measuremen
     throw new TaskApiError(`历史记录数据来源无效 ${dataOrigin}`);
   }
   const laneValue = readString(payload.lane, "lane");
-  const lane = laneValue === "left" ? "左车道" : laneValue === "right" ? "右车道" : null;
+  const travelDirection = typeof payload.travel_direction === "string" ? payload.travel_direction : "unknown";
+  const laneSide = typeof payload.lane_side === "string" ? payload.lane_side : laneValue;
+  const lane = formatLaneDisplay(travelDirection, laneSide, laneValue);
 
   return {
     taskId: readString(payload.task_id, "task_id"),

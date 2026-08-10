@@ -1,3 +1,4 @@
+import { laneSelectionParts } from "./taskModel";
 import type { CollectionTaskLane, RtkCaptureStatus, TaskOperationPhase } from "@/components/workflow/taskModel";
 
 export class TaskControlApiError extends Error {
@@ -105,11 +106,6 @@ const requestControl = async (
   };
 };
 
-const laneValues: Record<CollectionTaskLane, "left" | "right"> = {
-  左车道: "left",
-  右车道: "right",
-};
-
 export const startTaskControl = (
   taskId: string,
   options: {
@@ -122,7 +118,9 @@ export const startTaskControl = (
 ) => requestControl(
   `/api/v1/tasks/${encodeURIComponent(taskId)}/start`,
   {
-    lane: laneValues[options.lane],
+    travel_direction: laneSelectionParts[options.lane].travelDirection,
+    lane_side: laneSelectionParts[options.lane].laneSide,
+    lane: laneSelectionParts[options.lane].laneSide,
     lidar_mount_height_m: options.lidarMountHeightM,
     clearance_threshold_m: options.clearanceThresholdM,
     expected_revision: options.expectedRevision,
