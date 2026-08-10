@@ -8,6 +8,7 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(interfaces REQUIRED)
 find_package(nav_msgs REQUIRED)
+find_package(rcl_interfaces REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 
@@ -48,7 +49,7 @@ add_executable(dead_reckoning_node
   src/dead_reckoning_node.cpp
 )
 target_link_libraries(dead_reckoning_node localization_dead_reckoning_core)
-ament_target_dependencies(dead_reckoning_node interfaces nav_msgs rclcpp sensor_msgs)
+ament_target_dependencies(dead_reckoning_node interfaces nav_msgs rcl_interfaces rclcpp sensor_msgs)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   target_compile_options(attitude_matrix PRIVATE -Wall -Wextra -Wpedantic)

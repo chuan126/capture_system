@@ -169,7 +169,8 @@ position_error = norm(position_rtk - position_dr)
 
 ## 室内RTK模拟测试
 
-节点提供 `rtk_simulation_enabled` 参数，默认 `0`。运行中设为 `1` 时，节点内部模拟一组可靠RTK输入：
+节点提供 `rtk_simulation_enabled` 参数，默认 `0`。运行中设为 `1` 时，节点内部用一组固定RTK坐标建立
+室内测试锚点，并直接输出ODIN航位推算后的融合经纬高：
 
 ```text
 latitude = 24.5738888889    # 北纬24°34′26″
@@ -184,13 +185,15 @@ gps_state = 4
 
 ```bash
 ros2 param set /dead_reckoning_node rtk_simulation_enabled 1
-# 确认 /capture/localization/status 为 MODE_RTK，heading_alignment_valid=true
+# 确认 /capture/localization/status 为 MODE_DEAD_RECKONING，heading_alignment_valid=true
+# 移动雷达，观察 /capture/localization/fix 经纬高随ODIN里程变化
 ros2 param set /dead_reckoning_node rtk_simulation_enabled 0
-# 取消模拟RTK后，节点使用最后模拟RTK坐标作为锚点，进入MODE_DEAD_RECKONING
+# 设回0后取消模拟锚点，节点恢复使用真实RTK输入
 ```
 
-开启模拟时如果ODIN里程计已有新鲜数据，节点会用当前ODIN姿态和模拟航迹角直接建立
-`delta_yaw` 与DR锚点。关闭模拟后不再使用模拟RTK输入，若没有真实可靠RTK，融合输出会切到ODIN推算坐标。
+开启模拟时如果ODIN里程计已有新鲜数据，节点会用当前ODIN位置作为 `p_o_anchor`，用当前ODIN姿态和
+模拟航迹角直接建立 `delta_yaw`，随后固定该锚点进行DR输出。若要重新选择室内起点，先设为 `0`，
+再设回 `1`。
 
 ## 目标机构建
 

@@ -456,6 +456,7 @@ private:
       latest_fix_ = latest_real_fix_;
       latest_rtk_status_ = latest_real_rtk_status_;
       last_processed_rtk_stamp_ns_ = 0;
+      simulated_anchor_initialized_ = false;
       latest_heading_observation_source_ =
         interfaces::msg::LocalizationStatus::HEADING_INVALID;
       RCLCPP_INFO(get_logger(), "RTK simulation disabled; real RTK input restored");
@@ -464,10 +465,13 @@ private:
 
     recovery_state_ = RecoveryState{};
     last_recovery_position_error_m_ = 0.0;
-    mode_ = InternalMode::kRtkValid;
+    active_anchor_.reset();
+    last_dr_result_.reset();
+    simulated_anchor_initialized_ = false;
+    mode_ = InternalMode::kWaitingForRtk;
     RCLCPP_INFO(
       get_logger(),
-      "RTK simulation enabled: lat=%.10f lon=%.10f alt=%.2f track=%.1f deg",
+      "RTK simulation anchor enabled: lat=%.10f lon=%.10f alt=%.2f track=%.1f deg",
       kSimulatedRtkLatitudeDeg, kSimulatedRtkLongitudeDeg, kSimulatedRtkAltitudeM,
       kSimulatedRtkTrackDeg);
   }
@@ -505,15 +509,12 @@ private:
     }
   }
 
-  void applyRtkSimulation(const std::int64_t now_ns)
+  void applyRtkSimulationAnchor(const std::int64_t now_ns)
   {
-    std::int64_t simulation_stamp_ns = now_ns;
     const auto latest_odom = odom_buffer_.latest();
     const bool odom_fresh = latest_odom.has_value() &&
       ageSeconds(now_ns, latest_odom->stamp_ns) <= odometry_timeout_s_;
-    if (odom_fresh) {
-      simulation_stamp_ns = latest_odom->stamp_ns;
-    }
+    const std::int64_t simulation_stamp_ns = odom_fresh ? latest_odom->stamp_ns : now_ns;
 
     latest_fix_.available = true;
     latest_fix_.stamp_ns = simulation_stamp_ns;
@@ -533,7 +534,7 @@ private:
     if (!rtk_origin_llh_.has_value()) {
       rtk_origin_llh_ = latest_fix_.llh;
     }
-    if (!odom_fresh) {
+    if (!odom_fresh || simulated_anchor_initialized_) {
       return;
     }
 
@@ -552,6 +553,7 @@ private:
     last_processed_rtk_stamp_ns_ = simulation_stamp_ns;
     last_absolute_orientation_ =
       absoluteQuaternionFromOdin(delta_yaw_rad_, latest_odom->orientation_xyzw);
+    simulated_anchor_initialized_ = true;
   }
 
   void onOdometry(nav_msgs::msg::Odometry::SharedPtr message)
@@ -796,13 +798,18 @@ private:
   {
     const std::int64_t now_ns = now().nanoseconds();
     if (rtk_simulation_enabled_ == 1) {
-      applyRtkSimulation(now_ns);
+      applyRtkSimulationAnchor(now_ns);
     } else {
       updateCalibrationFromLatestRtk(now_ns);
     }
-    const bool reliable_rtk = rtkReliable(now_ns);
+    const bool simulation_anchor_mode = rtk_simulation_enabled_ == 1;
+    const bool reliable_rtk = !simulation_anchor_mode && rtkReliable(now_ns);
 
-    if (mode_ == InternalMode::kWaitingForRtk) {
+    if (simulation_anchor_mode) {
+      if (canEnterDeadReckoning(now_ns) && mode_ != InternalMode::kDeadReckoning) {
+        enterDeadReckoning(now_ns);
+      }
+    } else if (mode_ == InternalMode::kWaitingForRtk) {
       if (reliable_rtk) {
         mode_ = InternalMode::kRtkValid;
       } else if (canEnterDeadReckoning(now_ns)) {
@@ -1167,6 +1174,7 @@ private:
 
   InternalMode mode_{InternalMode::kWaitingForRtk};
   AnchorCandidate last_reliable_anchor_candidate_;
+  bool simulated_anchor_initialized_{false};
   std::optional<DeadReckoningAnchor> active_anchor_;
   std::int64_t dr_start_ns_{0};
   std::optional<DeadReckoningResult> last_dr_result_;

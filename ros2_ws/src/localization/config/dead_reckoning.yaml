@@ -10,7 +10,7 @@ dead_reckoning_node:
     # IMU角速度超过该时间未更新即不用于短时后备，单位s。
     imu_timeout_s: 0.1
 
-    # 室内测试用RTK模拟开关；0关闭，1注入固定RTK坐标：
+    # 室内测试用RTK模拟锚点开关；0关闭，1用固定RTK坐标建立锚点并输出ODIN推算坐标：
     # 北纬24°34′26″、东经118°5′22″、高度20m、航迹角北偏东45°。
     # 可运行时切换：ros2 param set /dead_reckoning_node rtk_simulation_enabled 1
     rtk_simulation_enabled: 0

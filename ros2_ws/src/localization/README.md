@@ -158,6 +158,7 @@ psi_absolute = wrap(psi_odin + delta_yaw_anchor)
 `delta_yaw`和平移；只有样本数、基线、残差和尺度范围都满足参数要求时，
 `scale_valid=true`。
 
-室内测试可临时设置 `rtk_simulation_enabled=1`，节点会内部注入北纬24°34′26″、
-东经118°5′22″、高度20m、航迹角北偏东45°的可靠RTK输入。确认融合输出进入RTK模式后，
-再设回 `0`，即可用该模拟坐标作为最后可靠锚点测试ODIN航位推算。
+室内测试可临时设置 `rtk_simulation_enabled=1`，节点会用北纬24°34′26″、
+东经118°5′22″、高度20m、航迹角北偏东45°建立模拟RTK锚点，并直接输出
+ODIN航位推算后的融合经纬高。移动雷达时 `/capture/localization/fix` 应随ODIN里程变化；
+设回 `0` 后恢复真实RTK输入。
