@@ -128,7 +128,7 @@ RTK有效时，节点使用RTK经纬高作为绝对位置，使用RTK航迹角�
 绝对航向，并与ODIN四元数航向相减得到 `delta_yaw`。`delta_yaw` 使用圆周统计，
 不会把359°和1°平均成180°。RTK `track_degrees=0` 被视为合法正北航迹角。
 
-RTK失锁且满足曾有可靠RTK锚点、ODIN有效、`delta_yaw`已可靠等条件后，节点冻结：
+RTK状态无效或失锁且满足曾有可靠RTK锚点、ODIN有效、`delta_yaw`已可靠等条件后，节点冻结：
 
 ```text
 LLH_anchor
@@ -157,3 +157,7 @@ psi_absolute = wrap(psi_odin + delta_yaw_anchor)
 若开启尺度标定，节点用长轨迹RTK/ODIN同步点拟合二维相似变换，同时估计scale、
 `delta_yaw`和平移；只有样本数、基线、残差和尺度范围都满足参数要求时，
 `scale_valid=true`。
+
+室内测试可临时设置 `rtk_simulation_enabled=1`，节点会内部注入北纬24°34′26″、
+东经118°5′22″、高度20m、航迹角北偏东45°的可靠RTK输入。确认融合输出进入RTK模式后，
+再设回 `0`，即可用该模拟坐标作为最后可靠锚点测试ODIN航位推算。

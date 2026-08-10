@@ -7,6 +7,7 @@
 #include "interfaces/msg/localization_status.hpp"
 #include "interfaces/msg/rtk_status.hpp"
 #include "nav_msgs/msg/odometry.hpp"
+#include "rcl_interfaces/msg/set_parameters_result.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/imu.hpp"
 #include "sensor_msgs/msg/nav_sat_fix.hpp"
@@ -35,6 +36,10 @@ namespace
 constexpr double kKnotsToMps = 0.5144444444444445;
 constexpr double kNsToSeconds = 1.0e-9;
 constexpr double kSecondsToNs = 1.0e9;
+constexpr double kSimulatedRtkLatitudeDeg = 24.0 + 34.0 / 60.0 + 26.0 / 3600.0;
+constexpr double kSimulatedRtkLongitudeDeg = 118.0 + 5.0 / 60.0 + 22.0 / 3600.0;
+constexpr double kSimulatedRtkAltitudeM = 20.0;
+constexpr double kSimulatedRtkTrackDeg = 45.0;
 
 std::int64_t toNanoseconds(const builtin_interfaces::msg::Time & stamp) noexcept
 {
@@ -213,6 +218,11 @@ public:
     status_publisher_ = create_publisher<interfaces::msg::LocalizationStatus>(
       localization_status_topic_, reliable_qos);
 
+    parameter_callback_handle_ = add_on_set_parameters_callback(
+      [this](const std::vector<rclcpp::Parameter> & parameters) {
+        return onSetParameters(parameters);
+      });
+
     const auto period = std::chrono::duration<double>(1.0 / output_rate_hz_);
     output_timer_ = create_wall_timer(
       std::chrono::duration_cast<std::chrono::nanoseconds>(period),
@@ -342,6 +352,7 @@ private:
     rtk_timeout_s_ = declare_parameter<double>("rtk_timeout_s", 1.0);
     odometry_timeout_s_ = declare_parameter<double>("odometry_timeout_s", 0.1);
     imu_timeout_s_ = declare_parameter<double>("imu_timeout_s", 0.1);
+    rtk_simulation_enabled_ = declare_parameter<int>("rtk_simulation_enabled", 0);
 
     scale_calibration_enabled_ = declare_parameter<bool>("scale_calibration_enabled", false);
     scale_min_baseline_m_ = declare_parameter<double>("scale_min_baseline_m", 500.0);
@@ -404,6 +415,61 @@ private:
     if (scale_target_baseline_m_ < scale_min_baseline_m_) {
       throw std::invalid_argument("scale_target_baseline_m不能小于scale_min_baseline_m");
     }
+    if (rtk_simulation_enabled_ != 0 && rtk_simulation_enabled_ != 1) {
+      throw std::invalid_argument("rtk_simulation_enabled只能为0或1");
+    }
+  }
+
+  rcl_interfaces::msg::SetParametersResult onSetParameters(
+    const std::vector<rclcpp::Parameter> & parameters)
+  {
+    rcl_interfaces::msg::SetParametersResult result;
+    result.successful = true;
+
+    for (const auto & parameter : parameters) {
+      if (parameter.get_name() != "rtk_simulation_enabled") {
+        continue;
+      }
+      if (parameter.get_type() != rclcpp::ParameterType::PARAMETER_INTEGER) {
+        result.successful = false;
+        result.reason = "rtk_simulation_enabled must be integer 0 or 1";
+        return result;
+      }
+      const int value = parameter.as_int();
+      if (value != 0 && value != 1) {
+        result.successful = false;
+        result.reason = "rtk_simulation_enabled must be 0 or 1";
+        return result;
+      }
+      setRtkSimulationEnabled(value);
+    }
+    return result;
+  }
+
+  void setRtkSimulationEnabled(const int value)
+  {
+    if (rtk_simulation_enabled_ == value) {
+      return;
+    }
+    rtk_simulation_enabled_ = value;
+    if (rtk_simulation_enabled_ == 0) {
+      latest_fix_ = latest_real_fix_;
+      latest_rtk_status_ = latest_real_rtk_status_;
+      last_processed_rtk_stamp_ns_ = 0;
+      latest_heading_observation_source_ =
+        interfaces::msg::LocalizationStatus::HEADING_INVALID;
+      RCLCPP_INFO(get_logger(), "RTK simulation disabled; real RTK input restored");
+      return;
+    }
+
+    recovery_state_ = RecoveryState{};
+    last_recovery_position_error_m_ = 0.0;
+    mode_ = InternalMode::kRtkValid;
+    RCLCPP_INFO(
+      get_logger(),
+      "RTK simulation enabled: lat=%.10f lon=%.10f alt=%.2f track=%.1f deg",
+      kSimulatedRtkLatitudeDeg, kSimulatedRtkLongitudeDeg, kSimulatedRtkAltitudeM,
+      kSimulatedRtkTrackDeg);
   }
 
   void onRtkFix(sensor_msgs::msg::NavSatFix::SharedPtr message)
@@ -413,10 +479,13 @@ private:
       RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000, "收到无效RTK fix时间戳");
       return;
     }
-    latest_fix_.available = true;
-    latest_fix_.stamp_ns = stamp_ns;
-    latest_fix_.status = message->status.status;
-    latest_fix_.llh = Llh{message->latitude, message->longitude, message->altitude};
+    latest_real_fix_.available = true;
+    latest_real_fix_.stamp_ns = stamp_ns;
+    latest_real_fix_.status = message->status.status;
+    latest_real_fix_.llh = Llh{message->latitude, message->longitude, message->altitude};
+    if (rtk_simulation_enabled_ == 0) {
+      latest_fix_ = latest_real_fix_;
+    }
   }
 
   void onRtkStatus(interfaces::msg::RtkStatus::SharedPtr message)
@@ -425,12 +494,64 @@ private:
     if (stamp_ns <= 0) {
       return;
     }
+    latest_real_rtk_status_.available = true;
+    latest_real_rtk_status_.stamp_ns = stamp_ns;
+    latest_real_rtk_status_.rmc_validity = message->rmc_validity;
+    latest_real_rtk_status_.gps_state = message->gps_state;
+    latest_real_rtk_status_.speed_mps = static_cast<double>(message->speed_knots) * kKnotsToMps;
+    latest_real_rtk_status_.track_degrees = message->track_degrees;
+    if (rtk_simulation_enabled_ == 0) {
+      latest_rtk_status_ = latest_real_rtk_status_;
+    }
+  }
+
+  void applyRtkSimulation(const std::int64_t now_ns)
+  {
+    std::int64_t simulation_stamp_ns = now_ns;
+    const auto latest_odom = odom_buffer_.latest();
+    const bool odom_fresh = latest_odom.has_value() &&
+      ageSeconds(now_ns, latest_odom->stamp_ns) <= odometry_timeout_s_;
+    if (odom_fresh) {
+      simulation_stamp_ns = latest_odom->stamp_ns;
+    }
+
+    latest_fix_.available = true;
+    latest_fix_.stamp_ns = simulation_stamp_ns;
+    latest_fix_.status = sensor_msgs::msg::NavSatStatus::STATUS_FIX;
+    latest_fix_.llh =
+      Llh{kSimulatedRtkLatitudeDeg, kSimulatedRtkLongitudeDeg, kSimulatedRtkAltitudeM};
+
     latest_rtk_status_.available = true;
-    latest_rtk_status_.stamp_ns = stamp_ns;
-    latest_rtk_status_.rmc_validity = message->rmc_validity;
-    latest_rtk_status_.gps_state = message->gps_state;
-    latest_rtk_status_.speed_mps = static_cast<double>(message->speed_knots) * kKnotsToMps;
-    latest_rtk_status_.track_degrees = message->track_degrees;
+    latest_rtk_status_.stamp_ns = simulation_stamp_ns;
+    latest_rtk_status_.rmc_validity = static_cast<std::uint8_t>('A');
+    latest_rtk_status_.gps_state = 4U;
+    latest_rtk_status_.speed_mps = std::max(course_min_speed_mps_, 5.0);
+    latest_rtk_status_.track_degrees = kSimulatedRtkTrackDeg;
+    latest_heading_observation_source_ =
+      interfaces::msg::LocalizationStatus::HEADING_RTK_TRACK;
+
+    if (!rtk_origin_llh_.has_value()) {
+      rtk_origin_llh_ = latest_fix_.llh;
+    }
+    if (!odom_fresh) {
+      return;
+    }
+
+    const double absolute_yaw_enu =
+      clockwiseCourseDegreesToEnuYawRad(kSimulatedRtkTrackDeg);
+    const double odin_yaw = yawFromRosQuaternion(latest_odom->orientation_xyzw);
+    if (!std::isfinite(absolute_yaw_enu) || !std::isfinite(odin_yaw)) {
+      return;
+    }
+
+    delta_yaw_rad_ = wrapAngleRad(absolute_yaw_enu - odin_yaw);
+    heading_alignment_valid_ = true;
+    heading_baseline_m_ = std::max(heading_baseline_m_, 1.0);
+    last_reliable_anchor_candidate_ =
+      AnchorCandidate{true, simulation_stamp_ns, latest_fix_.llh, *latest_odom};
+    last_processed_rtk_stamp_ns_ = simulation_stamp_ns;
+    last_absolute_orientation_ =
+      absoluteQuaternionFromOdin(delta_yaw_rad_, latest_odom->orientation_xyzw);
   }
 
   void onOdometry(nav_msgs::msg::Odometry::SharedPtr message)
@@ -674,20 +795,31 @@ private:
   void publishOutput()
   {
     const std::int64_t now_ns = now().nanoseconds();
-    updateCalibrationFromLatestRtk(now_ns);
+    if (rtk_simulation_enabled_ == 1) {
+      applyRtkSimulation(now_ns);
+    } else {
+      updateCalibrationFromLatestRtk(now_ns);
+    }
     const bool reliable_rtk = rtkReliable(now_ns);
 
-    if (mode_ == InternalMode::kWaitingForRtk && reliable_rtk) {
-      mode_ = InternalMode::kRtkValid;
+    if (mode_ == InternalMode::kWaitingForRtk) {
+      if (reliable_rtk) {
+        mode_ = InternalMode::kRtkValid;
+      } else if (canEnterDeadReckoning(now_ns)) {
+        enterDeadReckoning(now_ns);
+      }
     }
-    if (mode_ == InternalMode::kRtkValid && !reliable_rtk &&
-      ageSeconds(now_ns, latest_fix_.stamp_ns) > rtk_timeout_s_)
-    {
+    if (mode_ == InternalMode::kRtkValid && !reliable_rtk) {
       if (canEnterDeadReckoning(now_ns)) {
         enterDeadReckoning(now_ns);
       } else {
         mode_ = InternalMode::kWaitingForRtk;
       }
+    }
+    if (mode_ == InternalMode::kRtkRecovery && !reliable_rtk) {
+      recovery_state_ = RecoveryState{};
+      mode_ = active_anchor_.has_value() ? InternalMode::kDeadReckoning :
+        InternalMode::kWaitingForRtk;
     }
     if (mode_ == InternalMode::kDeadReckoning && reliable_rtk) {
       startRecovery(now_ns);
@@ -720,7 +852,7 @@ private:
     {
       return false;
     }
-    return latest_fix_.stamp_ns > 0 && latest_odom->stamp_ns > 0;
+    return last_reliable_anchor_candidate_.stamp_ns > 0 && latest_odom->stamp_ns > 0;
   }
 
   void enterDeadReckoning(const std::int64_t now_ns)
@@ -977,6 +1109,7 @@ private:
   double rtk_timeout_s_{1.0};
   double odometry_timeout_s_{0.1};
   double imu_timeout_s_{0.1};
+  int rtk_simulation_enabled_{0};
   double course_min_speed_mps_{5.0};
   double course_max_jump_rad_{degreesToRadians(20.0)};
 
@@ -1012,6 +1145,8 @@ private:
 
   LatestFix latest_fix_;
   LatestRtkStatus latest_rtk_status_;
+  LatestFix latest_real_fix_;
+  LatestRtkStatus latest_real_rtk_status_;
   LatestImu latest_imu_;
   HeadingAlignmentEstimator heading_estimator_;
   CourseFromPositionEstimator course_estimator_;
@@ -1049,6 +1184,7 @@ private:
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odometry_publisher_;
   rclcpp::Publisher<interfaces::msg::LocalizationStatus>::SharedPtr status_publisher_;
   rclcpp::TimerBase::SharedPtr output_timer_;
+  rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr parameter_callback_handle_;
 };
 
 }  // namespace localization

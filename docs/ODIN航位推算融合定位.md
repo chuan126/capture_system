@@ -3,7 +3,7 @@
 核对日期：2026-08-10
 
 本文说明 `localization/dead_reckoning_node` 的数学模型、接口和实车验证要点。该功能用于
-RTK失锁后，以最后可靠RTK位置为WGS84锚点，使用ODIN1水平里程计实时输出融合经纬高。
+RTK失锁或RTK状态无效后，以最后可靠RTK位置为WGS84锚点，使用ODIN1水平里程计实时输出融合经纬高。
 
 ## 数学模型
 
@@ -46,7 +46,8 @@ R_n_from_b = Rz(delta_yaw_anchor) * R_o_from_b
 
 ## RTK有效阶段
 
-RTK有效时，`/capture/localization/fix` 直接输出RTK经纬高。节点同时估计ODIN水平系到ENU的
+RTK有效时，`/capture/localization/fix` 直接输出RTK经纬高。RTK不可靠时，包括RMC无效、`gps_state=0`、
+fix/status超时或fix本身不可用，节点切换为ODIN航位推算输出。节点同时估计ODIN水平系到ENU的
 固定航向偏差 `delta_yaw`。
 
 航向来源优先级：
@@ -133,6 +134,10 @@ invalid_reason = NO_VALID_RTK_ANCHOR
 
 不使用NaN作为默认经纬高。
 
+一旦曾经建立过可靠RTK锚点和航向对齐，后续只要RTK不再可靠，融合输出就进入
+`MODE_DEAD_RECKONING`，而不是继续使用无效RTK坐标。若RTK恢复平滑过程中再次失效，
+节点也会回到航位推算输出。
+
 RTK恢复时，节点计算：
 
 ```text
@@ -161,6 +166,31 @@ position_error = norm(position_rtk - position_dr)
 ```
 
 原始RTK topic语义不变，记录器将原始RTK和融合定位分表保存。
+
+## 室内RTK模拟测试
+
+节点提供 `rtk_simulation_enabled` 参数，默认 `0`。运行中设为 `1` 时，节点内部模拟一组可靠RTK输入：
+
+```text
+latitude = 24.5738888889    # 北纬24°34′26″
+longitude = 118.0894444444  # 东经118°5′22″
+altitude = 20.0
+track_degrees = 45.0        # 航迹角北偏东45°
+rmc_validity = 'A'
+gps_state = 4
+```
+
+建议室内测试流程：
+
+```bash
+ros2 param set /dead_reckoning_node rtk_simulation_enabled 1
+# 确认 /capture/localization/status 为 MODE_RTK，heading_alignment_valid=true
+ros2 param set /dead_reckoning_node rtk_simulation_enabled 0
+# 取消模拟RTK后，节点使用最后模拟RTK坐标作为锚点，进入MODE_DEAD_RECKONING
+```
+
+开启模拟时如果ODIN里程计已有新鲜数据，节点会用当前ODIN姿态和模拟航迹角直接建立
+`delta_yaw` 与DR锚点。关闭模拟后不再使用模拟RTK输入，若没有真实可靠RTK，融合输出会切到ODIN推算坐标。
 
 ## 目标机构建
 
