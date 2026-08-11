@@ -5,7 +5,7 @@
 > 当前状态：驱动只发布解析器原始状态和 fix，不输出定位稳定性或进出洞结论。
 
 
-负责RTK串口通信、调用已经验证的NMEA解析器，并把解析器当前输出直接映射为
+负责RTK串口通信、串口自动发现、调用已经验证的NMEA解析器，并把解析器当前输出直接映射为
 ROS 2消息。本包现阶段不进行卫星数、HDOP、解类型、稳定窗口或坐标可信度判断，
 也不负责进出洞判断。
 
@@ -43,17 +43,20 @@ rtk_driver/                                      # RTK ROS 2驱动包根目录
 ├── cmake/                                       # 构建辅助检查
 │   └── 验证GNSS解析器哈希.cmake                 # 防止解析器被误改
 ├── include/rtk_driver/                          # 串口外围公共接口
-│   └── serial_port.hpp                          # 非阻塞串口类声明
+│   ├── serial_port.hpp                          # 非阻塞串口类声明
+│   └── serial_discovery.hpp                     # 稳定路径枚举和自动选择接口
 ├── src/                                         # ROS 2外围实现
 │   ├── serial_port.cpp                          # 串口配置、读取和断开检测
-│   └── rtk_driver_node.cpp                      # 解析器调用和消息直接映射
+│   ├── serial_discovery.cpp                     # by-id优先枚举、歧义筛选和GNSS数据流探测
+│   └── rtk_driver_node.cpp                      # 自动连接、解析器调用和消息直接映射
 ├── config/                                      # 包内默认参数
 │   └── rtk_driver.yaml                          # 串口、frame、Topic和有界读取参数
 ├── launch/                                      # 独立启动入口
 │   └── rtk_driver.launch.py                     # 参数加载与节点启动
 └── test/                                        # 自动化测试
     ├── test_gnss_nmea.cpp                       # 已验证报文和校验错误回放
-    └── test_serial_port.cpp                     # 伪串口读取和断开检测测试
+    ├── test_serial_port.cpp                     # 伪串口读取和断开检测测试
+    └── test_serial_discovery.cpp                # 自动发现候选、匹配和GNSS特征测试
 ```
 
 ## ROS 2接口
@@ -71,8 +74,10 @@ rtk_driver/                                      # RTK ROS 2驱动包根目录
 
 | 参数 | 单位 | 默认值 | 合法范围与失效行为 |
 |---|---|---|---|
-| `device` | 路径 | `/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0` | 非空；打不开时持续重连 |
+| `device` | 路径或 `auto` | `auto` | `auto`时自动发现；显式路径时关闭自动选择并固定使用该设备 |
 | `baud_rate` | bit/s | `115200` | 支持9600、38400、57600、115200、230400；其他值等待连接并报告错误 |
+| `auto_preferred_tokens` | 字符串数组 | 空数组 | 多候选且现场已确认设备身份时，可按 `/dev/serial/by-id` 路径名做唯一筛选；默认不按 USB 转串口芯片型号猜测 |
+| `auto_probe_duration_ms` | ms | `1200` | 100–10000；仅对唯一候选或 `auto_preferred_tokens` 唯一命中的候选短时检测典型 GNSS 文本帧，不替代 NMEA 解析器 |
 | `frame_id` | 字符串 | `rtk_link` | 非空，否则节点拒绝启动 |
 | `reconnect_interval_ms` | ms | `1000` | 100–60000，否则节点拒绝启动 |
 | `read_period_ms` | ms | `10` | 1–1000，否则节点拒绝启动 |
@@ -81,6 +86,23 @@ rtk_driver/                                      # RTK ROS 2驱动包根目录
 | `fix_topic` | Topic | `/capture/rtk/fix` | 非空，否则节点拒绝启动 |
 | `status_topic` | Topic | `/capture/rtk/status` | 非空，否则节点拒绝启动 |
 | `diagnostics_topic` | Topic | `/diagnostics` | 非空，否则节点拒绝启动 |
+
+## 串口自动发现
+
+默认 `device=auto`。自动发现顺序固定为：
+
+1. 优先枚举 `/dev/serial/by-id/`，因此 `ttyUSB0` 变为 `ttyUSB2` 不会影响稳定设备名；
+2. 如果系统没有 by-id 候选，再枚举 `/dev/ttyUSB*` 和 `/dev/ttyACM*`；
+3. 自动模式不会因为“只有一个串口”就直接认定它是 RTK；候选必须在探测窗口内出现 `$GN`、`$GP`、`$BD`、`#BESTPOSA` 等 GNSS 文本起始特征；
+4. 多候选时如果现场配置了 `auto_preferred_tokens`，先做大小写不敏感的唯一匹配，再对该候选做 GNSS 数据确认；默认不配置该偏好，避免把同型号 USB 转串口误认为 RTK；
+5. 多个未知串口且没有唯一设备名偏好时直接拒绝自动选择，不逐个打开未知外设；
+6. 如果仍无法唯一确定，节点拒绝猜测，保持未连接并在 `/diagnostics` 中给出候选和原因。
+
+自动发现不修改 `NMEA0183/gnss_nmea.c` 和 `gnss_nmea.h`，也不使用简化协议解析替代已验证解析器。
+如果设备使用二进制协议、启动后不会持续输出 NMEA/BESTPOS 文本，或现场希望完全固定设备身份，可以直接把 `device` 改为具体的 `/dev/serial/by-id/...` 路径，行为与旧版本固定串口方式一致。
+
+诊断新增 `configured_device`、`active_device`、`auto_discovery`、
+`discovery_candidate_count` 和 `discovery_detail`，便于确认实际选中了哪个设备。
 
 ## 构建、测试和运行
 

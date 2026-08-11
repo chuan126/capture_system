@@ -3,16 +3,38 @@
 核对日期：2026-08-07
 
 ```text
-scripts/                         # 构建和运行脚本
+scripts/                         # 构建、部署和运行脚本
 ├── build/                       # 构建与测试
 │   ├── build.sh                 # 统一构建入口
 │   ├── build_all.sh             # 兼容入口，转发到 build.sh all
 │   ├── build_web.sh             # 兼容入口，转发到 build.sh web
 │   └── test_web.sh              # 兼容入口，转发到 build.sh test
+├── deploy/                      # 新机依赖、双网口、恢复和可选Web服务安装
+│   ├── install.sh               # 环境依赖和双网口配置，不编译不启动节点
+│   ├── configure_network.sh     # capture-lidar/capture-direct、hostname和mDNS
+│   ├── rollback.sh              # 最近一次失败安装事务恢复
+│   ├── clear_config.sh          # 按首次安装前快照撤销环境和网络配置
+│   ├── status.sh                # 真实设备状态检查
+│   ├── verify_deployment.sh     # 配置、网络和可选Web服务验收
+│   └── install_systemd.sh       # 可选安装capture-web.service
 └── operation/                   # 开发运行
     ├── run_lan_preview.sh       # 一键启动完整采集链路
     └── run_web.sh               # 只启动 FastAPI 和 ROS Web 桥
 ```
+
+
+## 新机环境与网络部署
+
+新机预装 Ubuntu 22.04 和 ROS 2 Humble 后执行：
+
+```bash
+sudo bash scripts/deploy/install.sh \
+  --variant development \
+  --lidar-interface eth0 \
+  --direct-interface eth1
+```
+
+接口名必须按新机真实情况填写。该入口不会调用 `build.sh`、不会安装完整 ROS 采集服务，也不会启动 `run_lan_preview.sh`。详细流程见 `docs/deployment/RK3588双网口环境与网络部署.md`。
 
 ## 统一构建入口
 
@@ -60,8 +82,7 @@ bash scripts/build/build.sh distclean              # 连依赖一起清理
 - ROS 2 构建在独立环境中只加载 Humble、厂商驱动和当前业务工作空间，避免终端中旧
   overlay 污染编译；
 - Debug/Release 切换或发现来源不明的旧构建产物时自动清理对应缓存；
-- 默认拒绝在采集系统节点仍运行时重编译 ROS 2。必须在线编译时需要显式设置
-  `ALLOW_BUILD_WHILE_RUNNING=1`；
+- 默认拒绝在本机采集进程仍运行时重编译 ROS 2。`ros2 node list` 发现同一 DDS Domain 的远端 Capture 节点只告警，不再误判为本机进程；必须在线编译时需要显式设置 `ALLOW_BUILD_WHILE_RUNNING=1`；
 - 脚本只检查第一方源码 CRLF，不自动修改源码，也不修改 `third_party` 上游代码。
 
 

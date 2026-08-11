@@ -1,7 +1,12 @@
 rtk_driver_node:
   ros__parameters:
-    device: "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0"
+    # auto 优先使用 /dev/serial/by-id；无法唯一识别时拒绝猜测并持续重试。
+    # 现场也可以改为明确的 /dev/serial/by-id/... 路径以完全关闭自动选择。
+    device: "auto"
     baud_rate: 115200
+    # 多串口且现场已经确认设备身份时，可填入稳定 by-id 名称特征；默认留空，避免按 USB 转串口芯片型号误认设备。
+    # auto_preferred_tokens: []
+    auto_probe_duration_ms: 1200
     frame_id: "rtk_link"
     reconnect_interval_ms: 1000
     read_period_ms: 10

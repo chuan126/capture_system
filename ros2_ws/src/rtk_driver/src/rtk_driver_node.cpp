@@ -13,6 +13,7 @@
 #include "diagnostic_msgs/msg/key_value.hpp"
 #include "interfaces/msg/rtk_status.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include "rtk_driver/serial_discovery.hpp"
 #include "rtk_driver/serial_port.hpp"
 #include "sensor_msgs/msg/nav_sat_fix.hpp"
 #include "sensor_msgs/msg/nav_sat_status.hpp"
@@ -45,9 +46,11 @@ public:
   RtkDriverNode()
   : Node("rtk_driver_node")
   {
-    device_ = declare_parameter<std::string>(
-      "device", "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0");
+    device_ = declare_parameter<std::string>("device", "auto");
     baud_rate_ = declare_parameter<int>("baud_rate", 115200);
+    auto_preferred_tokens_ = declare_parameter<std::vector<std::string>>(
+      "auto_preferred_tokens", std::vector<std::string>{});
+    auto_probe_duration_ms_ = declare_parameter<int>("auto_probe_duration_ms", 1200);
     frame_id_ = declare_parameter<std::string>("frame_id", "rtk_link");
     reconnect_interval_ms_ = declare_parameter<int>("reconnect_interval_ms", 1000);
     read_period_ms_ = declare_parameter<int>("read_period_ms", 10);
@@ -75,7 +78,7 @@ public:
 
     RCLCPP_INFO(
       get_logger(),
-      "RTK驱动已启动：设备=%s，波特率=%d，fix=%s，status=%s",
+      "RTK驱动已启动：设备配置=%s，波特率=%d，fix=%s，status=%s",
       device_.c_str(), baud_rate_, fix_topic_.c_str(), status_topic_.c_str());
   }
 
@@ -87,6 +90,9 @@ private:
     }
     if (frame_id_.empty()) {
       throw std::invalid_argument("参数frame_id不能为空");
+    }
+    if (auto_probe_duration_ms_ < 100 || auto_probe_duration_ms_ > 10000) {
+      throw std::invalid_argument("参数auto_probe_duration_ms必须位于[100, 10000] ms");
     }
     if (fix_topic_.empty() || status_topic_.empty() || diagnostics_topic_.empty()) {
       throw std::invalid_argument("Topic参数不能为空");
@@ -123,18 +129,46 @@ private:
     last_connection_attempt_ = current_time;
     ++connection_attempt_count_;
 
+    if (device_ == "auto") {
+      const auto discovery = discover_rtk_serial_device(
+        baud_rate_, auto_preferred_tokens_, std::chrono::milliseconds(auto_probe_duration_ms_));
+      discovery_candidate_count_ = discovery.candidates.size();
+      last_discovery_detail_ = discovery.detail;
+      if (discovery.device.empty()) {
+        last_serial_error_ = discovery.detail;
+        RCLCPP_WARN_THROTTLE(
+          get_logger(), *get_clock(), 5000,
+          "正在自动发现RTK串口：%s", discovery.detail.c_str());
+        return false;
+      }
+      if (active_device_ != discovery.device) {
+        active_device_ = discovery.device;
+        RCLCPP_INFO(
+          get_logger(), "自动选择RTK串口%s：%s",
+          active_device_.c_str(), discovery.detail.c_str());
+      }
+    } else {
+      active_device_ = device_;
+      discovery_candidate_count_ = 1U;
+      last_discovery_detail_ = "使用显式device参数";
+    }
+
     std::string error_message;
-    if (!serial_port_.open_device(device_, baud_rate_, error_message)) {
+    if (!serial_port_.open_device(active_device_, baud_rate_, error_message)) {
       last_serial_error_ = error_message;
       RCLCPP_WARN_THROTTLE(
         get_logger(), *get_clock(), 5000,
-        "正在等待RTK串口%s：%s", device_.c_str(), error_message.c_str());
+        "正在等待RTK串口%s：%s", active_device_.c_str(), error_message.c_str());
+      if (device_ == "auto") {
+        active_device_.clear();
+      }
       return false;
     }
 
     ++connection_success_count_;
     last_serial_error_.clear();
-    RCLCPP_INFO(get_logger(), "已连接RTK串口%s", device_.c_str());
+    gnss_nmea_init();
+    RCLCPP_INFO(get_logger(), "已连接RTK串口%s", active_device_.c_str());
     return true;
   }
 
@@ -152,6 +186,9 @@ private:
         ++read_error_count_;
         last_serial_error_ = error_message;
         serial_port_.close_device();
+        if (device_ == "auto") {
+          active_device_.clear();
+        }
         RCLCPP_WARN(get_logger(), "RTK串口读取失败，等待重连：%s", error_message.c_str());
         return;
       }
@@ -254,7 +291,7 @@ private:
 
     diagnostic_msgs::msg::DiagnosticStatus status;
     status.name = "rtk_driver/serial";
-    status.hardware_id = device_;
+    status.hardware_id = active_device_.empty() ? device_ : active_device_;
     if (serial_port_.is_open()) {
       status.level = diagnostic_msgs::msg::DiagnosticStatus::OK;
       status.message = "串口已连接";
@@ -263,7 +300,14 @@ private:
       status.message = "串口未连接，正在重试";
     }
 
-    status.values.push_back(make_key_value("device", device_));
+    status.values.push_back(
+      make_key_value("device", active_device_.empty() ? device_ : active_device_));
+    status.values.push_back(make_key_value("configured_device", device_));
+    status.values.push_back(make_key_value("active_device", active_device_));
+    status.values.push_back(make_key_value("auto_discovery", device_ == "auto" ? "true" : "false"));
+    status.values.push_back(
+      make_key_value("discovery_candidate_count", std::to_string(discovery_candidate_count_)));
+    status.values.push_back(make_key_value("discovery_detail", last_discovery_detail_));
     status.values.push_back(make_key_value("baud_rate", std::to_string(baud_rate_)));
     status.values.push_back(
       make_key_value("received_bytes", std::to_string(received_byte_count_)));
@@ -287,6 +331,8 @@ private:
 
   std::string device_;
   int baud_rate_{115200};
+  std::vector<std::string> auto_preferred_tokens_;
+  int auto_probe_duration_ms_{1200};
   std::string frame_id_;
   int reconnect_interval_ms_{1000};
   int read_period_ms_{10};
@@ -300,6 +346,9 @@ private:
   std::vector<std::uint8_t> read_buffer_;
   bool has_attempted_connection_{false};
   std::chrono::steady_clock::time_point last_connection_attempt_{};
+  std::string active_device_;
+  std::size_t discovery_candidate_count_{0U};
+  std::string last_discovery_detail_;
   std::string last_serial_error_;
 
   std::uint64_t received_byte_count_{0U};

@@ -325,10 +325,20 @@ check_disk() {
 
 check_not_running() {
   [[ "${ALLOW_BUILD_WHILE_RUNNING:-0}" == "1" ]] && return
-  local nodes
+
+  local process_pattern local_processes nodes
+  process_pattern='run_lan_preview\.sh|run_ros_stack\.sh|task_manager_node|data_recorder_node|clearance_engine_node|dead_reckoning_node|odometry_timestamp_adapter_node|enu_cloud_transform_node|cloud_visualization_node|rtk_driver_node|system_monitor_node|odin_driver_|odin_hotplug_manager|odin_param_reader|web_.*_bridge'
+  local_processes="$(pgrep -af "${process_pattern}" 2>/dev/null || true)"
+  if [[ -n "${local_processes}" ]]; then
+    printf '%s\n' "${local_processes}" >&2
+    die "检测到本机采集系统进程。请先停止对应前台启动进程，再编译 ROS 2"
+  fi
+
+  # ros2 node list 会发现同一 DDS Domain 内的远端节点，不能据此判断本机正在运行。
+  # 保留该检查作为诊断提示，避免另一台 RK3588 导致本机编译被误拦截。
   nodes="$(ros2 node list 2>/dev/null || true)"
   if grep -Eq '^/(task_manager_node|data_recorder_node|clearance_engine_node|enu_cloud_transform_node|cloud_visualization_node|rtk_driver_node|system_monitor_node)$' <<<"$nodes"; then
-    die "采集系统仍在运行。请先停止 run_lan_preview.sh，再编译 ROS 2"
+    warn "ROS 图中发现 Capture System 节点，但本机未发现对应进程；可能来自同一 ROS_DOMAIN_ID 的远端设备，不阻止本机构建"
   fi
 }
 

@@ -33,11 +33,22 @@ target_include_directories(rtk_serial_port
     $<INSTALL_INTERFACE:include>
 )
 
+add_library(rtk_serial_discovery
+  src/serial_discovery.cpp
+)
+target_include_directories(rtk_serial_discovery
+  PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+)
+target_link_libraries(rtk_serial_discovery PUBLIC rtk_serial_port)
+
 add_executable(rtk_driver_node
   src/rtk_driver_node.cpp
 )
 target_link_libraries(rtk_driver_node
   gnss_nmea
+  rtk_serial_discovery
   rtk_serial_port
 )
 ament_target_dependencies(rtk_driver_node
@@ -49,6 +60,7 @@ ament_target_dependencies(rtk_driver_node
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   target_compile_options(rtk_serial_port PRIVATE -Wall -Wextra -Wpedantic)
+  target_compile_options(rtk_serial_discovery PRIVATE -Wall -Wextra -Wpedantic)
   target_compile_options(rtk_driver_node PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
@@ -56,6 +68,7 @@ install(
   TARGETS
     gnss_nmea
     rtk_serial_port
+    rtk_serial_discovery
     rtk_driver_node
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
@@ -76,6 +89,9 @@ if(BUILD_TESTING)
 
   ament_add_gtest(test_serial_port test/test_serial_port.cpp)
   target_link_libraries(test_serial_port rtk_serial_port util)
+
+  ament_add_gtest(test_serial_discovery test/test_serial_discovery.cpp)
+  target_link_libraries(test_serial_discovery rtk_serial_discovery util)
 
   add_test(
     NAME test_gnss_nmea_immutable

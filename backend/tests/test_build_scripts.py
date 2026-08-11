@@ -86,3 +86,12 @@ def test_all_runs_frontend_typecheck_before_expensive_ros_builds() -> None:
     assert all_block.index("frontend_typecheck") < all_block.index("build_driver")
     assert "npm run typecheck" in source
     assert "请先修复上方错误，再执行耗时的 SDK/ROS 2 构建" in source
+
+
+def test_running_guard_uses_local_processes_and_does_not_block_on_remote_ros_nodes() -> None:
+    source = (BUILD_DIR / "build.sh").read_text()
+    block = source[source.index("check_not_running()") : source.index("mode_state()")]
+    assert "pgrep -af" in block
+    assert "ros2 node list" in block
+    assert "不阻止本机构建" in block
+    assert 'die "采集系统仍在运行' not in block

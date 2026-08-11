@@ -143,6 +143,19 @@ bash scripts/build/build.sh verify                # 只验证已有产物
 旧入口 `scripts/build/build_all.sh release` 和 `scripts/build/build_web.sh` 继续保留，
 内部转发到统一脚本。完整命令见 [工程脚本](scripts/README.md)。
 
+## 新机部署
+
+目标机预装 Ubuntu 22.04 和 ROS 2 Humble 后，先执行环境与双网口准备：
+
+```bash
+sudo bash scripts/deploy/install.sh \
+  --variant development \
+  --lidar-interface <雷达物理网口> \
+  --direct-interface <维护物理网口>
+```
+
+该脚本只安装依赖、RTK 串口权限和双网口系统配置，不编译项目，也不启动节点。失败会自动回滚；需要撤销已成功写入的环境和网络配置时使用 `sudo bash scripts/deploy/clear_config.sh`。详细步骤见 [RK3588 双网口环境与网络部署](docs/deployment/RK3588双网口环境与网络部署.md)。
+
 ## 运行
 
 开发阶段一键启动雷达、RTK、运动补偿、净空算法、系统监控、点云预览和网页服务：
@@ -152,16 +165,16 @@ cd /path/to/capture_system
 scripts/operation/run_lan_preview.sh
 ```
 
-同一局域网内通过以下地址访问：
+现场优先通过固定 mDNS 地址访问：
 
 ```text
-http://<RK3588局域网IP>:8000/
+http://capture-system.local:8000/
 ```
 
-健康检查：
+维护口直连时默认也可使用 `http://192.168.100.1:8000/`。健康检查为：
 
 ```text
-http://<RK3588局域网IP>:8000/api/health
+http://capture-system.local:8000/api/health
 ```
 
 详细步骤见 [局域网网页部署](docs/deployment/局域网网页部署.md)。
