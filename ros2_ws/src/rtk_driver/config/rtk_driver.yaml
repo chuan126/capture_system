@@ -4,8 +4,8 @@ rtk_driver_node:
     # 现场也可以改为明确的 /dev/serial/by-id/... 路径以完全关闭自动选择。
     device: "auto"
     baud_rate: 115200
-    # 多串口且现场已经确认设备身份时，可填入稳定 by-id 名称特征；默认留空，避免按 USB 转串口芯片型号误认设备。
-    # auto_preferred_tokens: []
+    # 多串口且现场已经确认设备身份时，可在现场参数文件中加入 auto_preferred_tokens 字符串数组。
+    # 默认不在 YAML 写空数组，避免 ROS 2 Humble 将 [] 解析为 PARAMETER_NOT_SET；空默认值由 C++ 的 string_array 声明提供。
     auto_probe_duration_ms: 1200
     frame_id: "rtk_link"
     reconnect_interval_ms: 1000

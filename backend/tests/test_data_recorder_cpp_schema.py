@@ -80,7 +80,7 @@ def test_data_recorder_stores_mount_adjusted_clearance_and_keeps_raw_algorithm_v
         / "data_recorder_node.cpp"
     ).read_text(encoding="utf-8")
 
-    assert "VALUES (1, 8, ?, 'recorded'" in source
+    assert "VALUES (1, 9, ?, 'recorded'" in source
     assert "clearance_height = *value + lidar_mount_height_m_" in source
     assert "bind_nullable_double(statement, 5, value);" in source
     assert "bind_nullable_double(statement, 6, clearance_height);" in source
@@ -88,7 +88,7 @@ def test_data_recorder_stores_mount_adjusted_clearance_and_keeps_raw_algorithm_v
     assert "request->clearance_threshold_m < 0.0" in source
 
 
-def test_vehicle_attitude_has_one_display_and_txt_source_without_position_side_effects() -> None:
+def test_vehicle_attitude_and_direction_use_expected_sources_without_position_side_effects() -> None:
     project_root = Path(__file__).resolve().parents[2]
     recorder = (project_root / "ros2_ws/src/data_recorder/src/data_recorder_node.cpp").read_text(
         encoding="utf-8"
@@ -102,9 +102,21 @@ def test_vehicle_attitude_has_one_display_and_txt_source_without_position_side_e
     assert localization_node.count("vehicleAttitudeFromOdinQuaternion(") == 1
     assert "message.vehicle_pitch_deg" in localization_node
     assert "message->vehicle_pitch_deg" in recorder
+    assert "latest_localization_heading_.heading_deg = message->heading_deg" in recorder
     assert "localization_vehicle_pitch_deg" in page
+    assert "localization_heading_deg" in page
+    assert "formatMetric(rtkSnapshot?.localization_vehicle_heading_deg" not in page
     assert "sample.vehicle_pitch_deg" in exporter
     assert "q2att(" not in recorder
+
+    rtk_heading = re.search(
+        r"std::uint8_t currentHeadingSourceForRtk\(.*?\n  std::optional<Output>",
+        localization_node,
+        re.DOTALL,
+    )
+    assert rtk_heading is not None
+    assert "latest_rtk_status_.track_degrees" in rtk_heading.group(0)
+    assert "HEADING_RTK_TRACK" in rtk_heading.group(0)
 
     odometry_handler = re.search(
         r"void on_odometry\(.*?\n  void on_radar_temperature", recorder, re.DOTALL

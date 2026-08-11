@@ -114,7 +114,8 @@ bool HeadingAlignmentEstimator::addObservation(
     observations_.pop_front();
   }
 
-  const HeadingAlignmentState raw_state = state();
+  // 更新滤波器时必须使用当前观测窗口的原始圆均值，不能再次读回上一次滤波结果。
+  const HeadingAlignmentState raw_state = computeState(false);
   if (raw_state.sample_count > 0U) {
     if (!filtered_delta_yaw_rad_.has_value() || options_.filter_alpha <= 0.0) {
       filtered_delta_yaw_rad_ = raw_state.delta_yaw_rad;
@@ -127,6 +128,11 @@ bool HeadingAlignmentEstimator::addObservation(
 }
 
 HeadingAlignmentState HeadingAlignmentEstimator::state() const noexcept
+{
+  return computeState(true);
+}
+
+HeadingAlignmentState HeadingAlignmentEstimator::computeState(const bool apply_filter) const noexcept
 {
   HeadingAlignmentState result;
   result.sample_count = observations_.size();
@@ -145,7 +151,7 @@ HeadingAlignmentState HeadingAlignmentEstimator::state() const noexcept
     baseline += observation.baseline_m;
   }
   result.delta_yaw_rad = std::atan2(sum_sin, sum_cos);
-  if (filtered_delta_yaw_rad_.has_value()) {
+  if (apply_filter && filtered_delta_yaw_rad_.has_value()) {
     result.delta_yaw_rad = *filtered_delta_yaw_rad_;
   }
   result.baseline_m = baseline;

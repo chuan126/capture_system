@@ -1,6 +1,6 @@
 # rtk_driver
 
-核对日期：2026-08-06
+核对日期：2026-08-11
 
 > 当前状态：驱动只发布解析器原始状态和 fix，不输出定位稳定性或进出洞结论。
 
@@ -76,7 +76,7 @@ rtk_driver/                                      # RTK ROS 2驱动包根目录
 |---|---|---|---|
 | `device` | 路径或 `auto` | `auto` | `auto`时自动发现；显式路径时关闭自动选择并固定使用该设备 |
 | `baud_rate` | bit/s | `115200` | 支持9600、38400、57600、115200、230400；其他值等待连接并报告错误 |
-| `auto_preferred_tokens` | 字符串数组 | 空数组 | 多候选且现场已确认设备身份时，可按 `/dev/serial/by-id` 路径名做唯一筛选；默认不按 USB 转串口芯片型号猜测 |
+| `auto_preferred_tokens` | 字符串数组 | C++ typed empty default | 多候选且现场已确认设备身份时，可按 `/dev/serial/by-id` 路径名做唯一筛选；默认 YAML 不写空数组，避免 Humble 把 `[]` 解析为未设置参数 |
 | `auto_probe_duration_ms` | ms | `1200` | 100–10000；仅对唯一候选或 `auto_preferred_tokens` 唯一命中的候选短时检测典型 GNSS 文本帧，不替代 NMEA 解析器 |
 | `frame_id` | 字符串 | `rtk_link` | 非空，否则节点拒绝启动 |
 | `reconnect_interval_ms` | ms | `1000` | 100–60000，否则节点拒绝启动 |
@@ -93,7 +93,7 @@ rtk_driver/                                      # RTK ROS 2驱动包根目录
 
 1. 优先枚举 `/dev/serial/by-id/`，因此 `ttyUSB0` 变为 `ttyUSB2` 不会影响稳定设备名；
 2. 如果系统没有 by-id 候选，再枚举 `/dev/ttyUSB*` 和 `/dev/ttyACM*`；
-3. 自动模式不会因为“只有一个串口”就直接认定它是 RTK；候选必须在探测窗口内出现 `$GN`、`$GP`、`$BD`、`#BESTPOSA` 等 GNSS 文本起始特征；
+3. 自动模式不会因为只有一个串口就直接认定它是 RTK；候选必须在探测窗口内出现当前冻结解析器支持的 RMC、GGA、GSA 或 `#BESTPOSA,` 文本帧。通用 `$GN`/`$GP` 前缀、VTG 等其他 NMEA 类型和 `#BESTPOSB` 不作为设备身份证据；
 4. 多候选时如果现场配置了 `auto_preferred_tokens`，先做大小写不敏感的唯一匹配，再对该候选做 GNSS 数据确认；默认不配置该偏好，避免把同型号 USB 转串口误认为 RTK；
 5. 多个未知串口且没有唯一设备名偏好时直接拒绝自动选择，不逐个打开未知外设；
 6. 如果仍无法唯一确定，节点拒绝猜测，保持未连接并在 `/diagnostics` 中给出候选和原因。
@@ -101,8 +101,8 @@ rtk_driver/                                      # RTK ROS 2驱动包根目录
 自动发现不修改 `NMEA0183/gnss_nmea.c` 和 `gnss_nmea.h`，也不使用简化协议解析替代已验证解析器。
 如果设备使用二进制协议、启动后不会持续输出 NMEA/BESTPOS 文本，或现场希望完全固定设备身份，可以直接把 `device` 改为具体的 `/dev/serial/by-id/...` 路径，行为与旧版本固定串口方式一致。
 
-诊断新增 `configured_device`、`active_device`、`auto_discovery`、
-`discovery_candidate_count` 和 `discovery_detail`，便于确认实际选中了哪个设备。
+诊断包含 `configured_device`、`active_device`、`auto_discovery`、`serial_connected`、
+`discovery_candidate_count`、`discovery_detail`、`received_bytes` 和 `last_serial_error`，可区分配置值、实际设备、发现过程、连接状态和接收字节数。
 
 ## 构建、测试和运行
 
@@ -131,3 +131,7 @@ ros2 topic echo /capture/rtk/status interfaces/msg/RtkStatus
 
 需要在不占用真实RTK设备时验证从串口解析到浏览器显示的完整链路，参见
 [RTK伪串口测试](./伪串口测试.md)。
+
+### Humble 空数组参数说明
+
+默认配置文件有意省略 `auto_preferred_tokens`。ROS 2 Humble 对 YAML 中无元素类型信息的 `[]` 可能产生 `PARAMETER_NOT_SET`，因此空默认值由 C++ 的 `declare_parameter<std::vector<std::string>>(..., std::vector<std::string>{})` 提供。现场需要偏好匹配时再写入实际非空字符串数组，例如 `auto_preferred_tokens: ["field-rtk"]`。不要使用 `auto_preferred_tokens: [""]`。

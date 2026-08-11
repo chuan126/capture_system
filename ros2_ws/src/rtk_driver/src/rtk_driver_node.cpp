@@ -306,6 +306,8 @@ private:
     status.values.push_back(make_key_value("active_device", active_device_));
     status.values.push_back(make_key_value("auto_discovery", device_ == "auto" ? "true" : "false"));
     status.values.push_back(
+      make_key_value("serial_connected", serial_port_.is_open() ? "true" : "false"));
+    status.values.push_back(
       make_key_value("discovery_candidate_count", std::to_string(discovery_candidate_count_)));
     status.values.push_back(make_key_value("discovery_detail", last_discovery_detail_));
     status.values.push_back(make_key_value("baud_rate", std::to_string(baud_rate_)));

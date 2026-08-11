@@ -19,11 +19,6 @@ constexpr double kWgs84E2 = kWgs84F * (2.0 - kWgs84F);
 constexpr double kWgs84Ep2 = (kWgs84A * kWgs84A - kWgs84B * kWgs84B) /
   (kWgs84B * kWgs84B);
 
-double square(const double value) noexcept
-{
-  return value * value;
-}
-
 double normalizeLongitudeDeg(double longitude_deg) noexcept
 {
   if (!std::isfinite(longitude_deg)) {

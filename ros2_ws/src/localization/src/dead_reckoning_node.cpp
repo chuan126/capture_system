@@ -1110,6 +1110,15 @@ private:
   std::uint8_t currentHeadingSourceForRtk(
     const std::int64_t now_ns, double & heading_enu_rad)
   {
+    // RTK位置可靠时，用户方位和地图车向直接采用接收机航迹角；速度、跳变等
+    // 条件仍只约束ODIN航向标定，不能让显示方位悄然切回其他来源。
+    if (latest_rtk_status_.available && isRmcValid(latest_rtk_status_.rmc_validity) &&
+      std::isfinite(latest_rtk_status_.track_degrees))
+    {
+      heading_enu_rad =
+        clockwiseCourseDegreesToEnuYawRad(latest_rtk_status_.track_degrees);
+      return interfaces::msg::LocalizationStatus::HEADING_RTK_TRACK;
+    }
     if (latest_heading_observation_source_ != interfaces::msg::LocalizationStatus::HEADING_INVALID) {
       if (latest_heading_observation_source_ == interfaces::msg::LocalizationStatus::HEADING_RTK_TRACK) {
         heading_enu_rad = clockwiseCourseDegreesToEnuYawRad(latest_rtk_status_.track_degrees);

@@ -26,7 +26,7 @@ def test_playback_fixture_matches_current_task_and_measurement_schemas(tmp_path:
 
     completed = next(task for task in tasks if task.task_id == TASK_COMPLETED)
     history = MeasurementRepository(data_root / "tasks").load_history(completed)
-    assert history.recording_schema_version == 8
+    assert history.recording_schema_version == 9
     assert history.data_origin == "test_fixture"
     assert history.travel_direction == "up"
     assert history.lane_side == "left"

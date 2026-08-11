@@ -241,6 +241,29 @@ TEST(VehicleAttitudeTest, DefaultCmbAndCbmAreExactInverses)
   }
 }
 
+TEST(VehicleAttitudeTest, DefaultMountMapsRightForwardUpAxesIntoOdinBody)
+{
+  const RotationMatrix3d & Cbm = kDefaultVehicleAttitudeMountRotationBm;
+  const double vehicle_axes[3][3]{
+    {1.0, 0.0, 0.0},
+    {0.0, 1.0, 0.0},
+    {0.0, 0.0, 1.0}};
+  const double expected_body_axes[3][3]{
+    {0.0, -1.0, 0.0},  // vehicle right = ODIN -Y
+    {0.0, 0.0, -1.0},  // vehicle forward = ODIN -Z
+    {1.0, 0.0, 0.0}};  // vehicle up = ODIN +X
+
+  for (int axis = 0; axis < 3; ++axis) {
+    double body_axis[3]{};
+    for (int row = 0; row < 3; ++row) {
+      for (int column = 0; column < 3; ++column) {
+        body_axis[row] += Cbm[row * 3 + column] * vehicle_axes[axis][column];
+      }
+      EXPECT_DOUBLE_EQ(body_axis[row], expected_body_axes[axis][row]);
+    }
+  }
+}
+
 TEST(VehicleAttitudeTest, RejectsInvalidMountRotations)
 {
   RotationMatrix3d scaled = kDefaultVehicleAttitudeMountRotationBm;
@@ -258,7 +281,7 @@ TEST(VehicleAttitudeTest, RejectsInvalidMountRotations)
   EXPECT_TRUE(std::isnan(output.pitch_rad));
 }
 
-TEST(VehicleAttitudeTest, ConvertsHorizontalVehicleAtNinetyDegreeOdinInstallation)
+TEST(VehicleAttitudeTest, ConvertsHorizontalVehicleAtConfiguredInstallation)
 {
   expectRecoveredVehicleAttitude(0.0, 0.0, 0.0);
 }

@@ -27,8 +27,8 @@ std::string select_unique_serial_candidate(
   const std::vector<std::string> & candidates,
   const std::vector<std::string> & preferred_tokens);
 
-// 只用于多串口歧义时的设备识别，不替代 NMEA0183 解析器。检测典型 GNSS 文本帧
-// 起始标记，例如 $GN/$GP/$BD 和 NovAtel #BESTPOSA。
+// 只用于串口设备身份确认，不替代 NMEA0183 解析器。仅检测冻结解析器当前支持的
+// RMC、GGA、GSA 和 NovAtel BESTPOSA 报文起始标记，不接受通用 talker 前缀。
 bool contains_gnss_stream_signature(const std::string & data);
 
 // 自动发现 RTK 串口。自动模式始终要求候选在探测窗口内出现 GNSS 文本特征。

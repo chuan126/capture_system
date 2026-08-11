@@ -36,10 +36,14 @@ TEST(SerialDiscovery, UsesPreferredTokenOnlyWhenItIsUnique)
     rtk_driver::select_unique_serial_candidate(candidates, {"usb"}).empty());
 }
 
-TEST(SerialDiscovery, RecognizesCommonGnssTextSignatures)
+TEST(SerialDiscovery, RecognizesOnlySupportedGnssTextSignatures)
 {
+  EXPECT_TRUE(rtk_driver::contains_gnss_stream_signature("noise\r\n$GNRMC,1234"));
   EXPECT_TRUE(rtk_driver::contains_gnss_stream_signature("noise\r\n$GNGGA,1234"));
+  EXPECT_TRUE(rtk_driver::contains_gnss_stream_signature("noise\r\n$GPGSA,A,3"));
   EXPECT_TRUE(rtk_driver::contains_gnss_stream_signature("#BESTPOSA,COM1,0,0"));
+  EXPECT_FALSE(rtk_driver::contains_gnss_stream_signature("$GNVTG,1234"));
+  EXPECT_FALSE(rtk_driver::contains_gnss_stream_signature("#BESTPOSB,COM1,0,0"));
   EXPECT_FALSE(rtk_driver::contains_gnss_stream_signature("debug uart output only"));
 }
 
@@ -114,7 +118,12 @@ TEST(SerialDiscovery, ProbesOnlyUniquelyPreferredCandidate)
   std::thread writer([rtk_master]() {
     constexpr char sample[] = "$GNGGA,123519,4807.038,N,01131.000,E,1,08,0.9,545.4,M,46.9,M,,*47\r\n";
     for (int index = 0; index < 20; ++index) {
-      (void)write(rtk_master, sample, sizeof(sample) - 1U);
+      const auto sample_size = sizeof(sample) - 1U;
+      const auto written = write(rtk_master, sample, sample_size);
+      // 探测结束后从设备会关闭，写端此时停止即可，不能忽略 write 的失败结果。
+      if (written != static_cast<ssize_t>(sample_size)) {
+        break;
+      }
       std::this_thread::sleep_for(std::chrono::milliseconds(30));
     }
   });

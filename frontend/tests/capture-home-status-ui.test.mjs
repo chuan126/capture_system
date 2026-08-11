@@ -12,7 +12,7 @@ const taskCard = taskCardStart >= 0 && taskCardEnd > taskCardStart
   ? page.slice(taskCardStart, taskCardEnd)
   : "";
 const rtkSummary = page.match(/<article className="health-kpi-card health-kpi-card--rtk">([\s\S]*?)<\/article>/)?.[1] ?? "";
-const localizationCard = page.match(/<article className="panel localization-panel">([\s\S]*?)<\/article>\n\n          <article className="panel task-operation-panel">/)?.[1] ?? "";
+const localizationCard = page.match(/<article className="panel localization-panel">([\s\S]*?)<\/article>\r?\n\r?\n          <article className="panel task-operation-panel">/)?.[1] ?? "";
 const taskDialog = page.match(/function TaskCreateDialog\([\s\S]*?\nconst navigation:/)?.[0] ?? "";
 
 test("system overview uses the revised labels and removes diagnostic helper copy", () => {
@@ -38,7 +38,7 @@ test("system overview contains clearance and raw RTK position and removes old su
   assert.doesNotMatch(page, />预留指标二|>预留指标一</);
   assert.match(page, /displayedClearanceHeightM < parsedHeightThreshold/);
   assert.match(css, /health-kpi-card--alert[\s\S]*#c53030/);
-  assert.match(css, /health-kpi-grid[\s\S]*grid-template-columns:\s*minmax\(150px, \.72fr\)/);
+  assert.match(css, /health-kpi-grid[\s\S]*grid-template-columns:\s*minmax\(190px, \.9fr\)/);
   assert.match(css, /health-kpi-card--rtk[\s\S]*grid-column:\s*auto/);
   assert.match(page, /formatMetric\(rtkSnapshot\?\.altitude, 2\)/);
 });
@@ -77,6 +77,9 @@ test("fusion card shows derived LLH and vehicle attitude only", () => {
   assert.match(localizationCard, /\{vehiclePitchText\}/);
   assert.match(localizationCard, /\{vehicleRollText\}/);
   assert.match(localizationCard, /\{vehicleHeadingText\}/);
+  assert.match(page, /rawCoordinateAvailable[\s\S]*rawTrackDeg[\s\S]*localizationHeadingDeg/);
+  assert.match(page, /localization_heading_deg/);
+  assert.doesNotMatch(page, /formatMetric\(rtkSnapshot\?\.localization_vehicle_heading_deg/);
   assert.doesNotMatch(localizationCard, /车辆航向|模式 \/ 航向源|DR时间 \/ 锚点距|水平尺度 \/ 状态|航向偏差|恢复误差/);
   assert.match(css, /fusion-attitude-grid[\s\S]*grid-template-columns:\s*repeat\(3/);
 });

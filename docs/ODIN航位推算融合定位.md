@@ -112,17 +112,18 @@ delta_yaw = atan2(sum(w_k * sin(delta_yaw_k)), sum(w_k * cos(delta_yaw_k)))
 ## 车辆姿态显示与记录
 
 ODIN机体系定义为 `+X` 向上、`+Y` 向车辆左侧、`+Z` 向车辆后方；车辆体系定义为
-`+X` 向前、`+Y` 向左、`+Z` 向上。默认安装矩阵为：
+`+mX` 向右、`+mY` 向前、`+mZ` 向上。默认安装矩阵为：
 
 ```text
-Cmb = [ 0  0 -1; 0 1 0; 1 0 0 ]
-Cbm = [ 0  0  1; 0 1 0; -1 0 0 ]
+Cmb = [ 0 -1  0; 0 0 -1; 1 0 0 ]
+Cbm = [ 0  0  1; -1 0 0; 0 -1 0 ]
 Cnm = Cnb * Cbm
 ```
 
 `vehicle_attitude_mount_rotation_bm` 按行主序配置 `Cbm`。节点启动时检查矩阵有限、正交且
-行列式接近 `+1`，不合法时拒绝启动。`Cnm` 仅经 `m2att` 转成车辆俯仰、横滚和方位，供
-界面与TXT共用；它不作用于DR、ODIN position、ENU、点云、运动补偿或净空计算。
+行列式接近 `+1`，不合法时拒绝启动。`Cnm` 经 `m2att` 转成车辆俯仰和横滚；界面与TXT
+方位统一使用 `LocalizationStatus.heading_deg`：可靠RTK阶段取RTK航迹角，失锁后取ODIN
+航位推算航向。安装矩阵不作用于DR、ODIN position、ENU、点云、运动补偿或净空计算。
 
 ## 尺度标定
 

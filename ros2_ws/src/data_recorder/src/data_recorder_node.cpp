@@ -136,11 +136,11 @@ void bind_nullable_double(
 }
 
 void bind_nullable_int64(
-  sqlite3_stmt * statement, int index, const std::optional<std::int64_t> & value)
+  sqlite3_stmt * statement, int index, bool has_value, std::int64_t value)
 {
-  if (value.has_value()) {
+  if (has_value) {
     check_sqlite(
-      sqlite3_bind_int64(statement, index, *value), sqlite3_db_handle(statement),
+      sqlite3_bind_int64(statement, index, value), sqlite3_db_handle(statement),
       "绑定可空整数失败");
   } else {
     check_sqlite(
@@ -316,6 +316,12 @@ private:
     std::int64_t received_monotonic_ns{0};
     double pitch_deg{0.0};
     double roll_deg{0.0};
+  };
+
+  struct LatestLocalizationHeading
+  {
+    bool available{false};
+    std::int64_t received_monotonic_ns{0};
     double heading_deg{0.0};
   };
 
@@ -730,13 +736,18 @@ private:
     std::lock_guard<std::mutex> lock(mutex_);
     latest_vehicle_attitude_.available = message->vehicle_attitude_valid &&
       std::isfinite(message->vehicle_pitch_deg) &&
-      std::isfinite(message->vehicle_roll_deg) &&
-      std::isfinite(message->vehicle_heading_deg);
+      std::isfinite(message->vehicle_roll_deg);
     if (latest_vehicle_attitude_.available) {
       latest_vehicle_attitude_.received_monotonic_ns = steady_now_ns();
       latest_vehicle_attitude_.pitch_deg = message->vehicle_pitch_deg;
       latest_vehicle_attitude_.roll_deg = message->vehicle_roll_deg;
-      latest_vehicle_attitude_.heading_deg = message->vehicle_heading_deg;
+    }
+    latest_localization_heading_.available = message->valid &&
+      message->heading_source != interfaces::msg::LocalizationStatus::HEADING_INVALID &&
+      std::isfinite(message->heading_deg);
+    if (latest_localization_heading_.available) {
+      latest_localization_heading_.received_monotonic_ns = steady_now_ns();
+      latest_localization_heading_.heading_deg = message->heading_deg;
     }
     if (active_ && database_ != nullptr) {
       try {
@@ -860,8 +871,6 @@ private:
         invalid_reason = "source_unavailable";
       }
 
-      const std::optional<std::int64_t> rtk_timestamp_ns = latest_fix_.available ?
-        std::optional<std::int64_t>(latest_fix_.timestamp_ns) : std::nullopt;
       const std::uint64_t imu_sample_count = imu_accumulator_.count;
       std::optional<double> gyro_x;
       std::optional<double> gyro_y;
@@ -905,6 +914,10 @@ private:
         static_cast<double>(std::max<std::int64_t>(
           0, monotonic_now_ns - latest_vehicle_attitude_.received_monotonic_ns)) / 1'000'000.0 <=
         odometry_snapshot_max_age_ms_;
+      const bool localization_heading_fresh = latest_localization_heading_.available &&
+        static_cast<double>(std::max<std::int64_t>(
+          0, monotonic_now_ns - latest_localization_heading_.received_monotonic_ns)) /
+        1'000'000.0 <= odometry_snapshot_max_age_ms_;
       const bool temperature_fresh = latest_temperature_.available &&
         static_cast<double>(std::max<std::int64_t>(
           0, monotonic_now_ns - latest_temperature_.received_monotonic_ns)) / 1'000'000.0 <=
@@ -944,7 +957,8 @@ private:
       check_sqlite(sqlite3_bind_double(statement, 11, source_age_ms), database_, "绑定源年龄失败");
       check_sqlite(sqlite3_bind_int(statement, 12, repeated ? 1 : 0), database_, "绑定重复标志失败");
       check_sqlite(sqlite3_bind_int(statement, 13, static_cast<int>(repeat_index)), database_, "绑定重复序号失败");
-      bind_nullable_int64(statement, 14, rtk_timestamp_ns);
+      bind_nullable_int64(
+        statement, 14, latest_fix_.available, latest_fix_.timestamp_ns);
       bind_nullable_double(statement, 15, gyro_x);
       bind_nullable_double(statement, 16, gyro_y);
       bind_nullable_double(statement, 17, gyro_z);
@@ -967,8 +981,8 @@ private:
         statement, 27, vehicle_attitude_fresh ?
         std::optional<double>(latest_vehicle_attitude_.roll_deg) : std::nullopt);
       bind_nullable_double(
-        statement, 28, vehicle_attitude_fresh ?
-        std::optional<double>(latest_vehicle_attitude_.heading_deg) : std::nullopt);
+        statement, 28, localization_heading_fresh ?
+        std::optional<double>(latest_localization_heading_.heading_deg) : std::nullopt);
       bind_nullable_double(
         statement, 29, odin_fresh ?
         std::optional<double>(latest_odin_.position_x_m) : std::nullopt);
@@ -1201,7 +1215,7 @@ private:
         "started_at, ended_at, complete, nominal_sample_rate_hz, algorithm_version, "
         "config_version, software_version, lidar_mount_height_m, clearance_threshold_m, "
         "entry_rtk_status, exit_rtk_status) "
-        "VALUES (1, 8, ?, 'recorded', ?, ?, ?, ?, NULL, 0, ?, ?, ?, ?, ?, ?, 'pending', 'not_requested')",
+        "VALUES (1, 9, ?, 'recorded', ?, ?, ?, ?, NULL, 0, ?, ?, ?, ?, ?, ?, 'pending', 'not_requested')",
         -1, &statement, nullptr),
       database_, "准备任务元数据写入失败");
     bind_text(statement, 1, task_id_);
@@ -1841,6 +1855,7 @@ private:
   ImuAccumulator imu_accumulator_;
   LatestOdin latest_odin_;
   LatestVehicleAttitude latest_vehicle_attitude_;
+  LatestLocalizationHeading latest_localization_heading_;
   LatestTemperature latest_temperature_;
 
   rclcpp::Subscription<interfaces::msg::ClearanceResult>::SharedPtr clearance_subscription_;

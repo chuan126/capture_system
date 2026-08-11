@@ -28,7 +28,8 @@ float64 altitude
 # 用户显示用地理航向，单位deg，North=0，East=90，顺时针为正。
 float64 heading_deg
 
-# ODIN四元数按安装矩阵换算得到的车辆三轴姿态，单位deg，仅用于显示和记录。
+# ODIN四元数按安装矩阵换算得到的车辆安装姿态，单位deg。
+# 界面和TXT的车辆方位使用上面的heading_deg；vehicle_heading_deg仅保留协议兼容。
 bool vehicle_attitude_valid
 float64 vehicle_pitch_deg
 float64 vehicle_roll_deg

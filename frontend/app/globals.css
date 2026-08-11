@@ -721,7 +721,7 @@ th { color: #7f8b9e; background: #fafbfd; font-weight: 600; white-space: nowrap;
 }
 .health-overview {
   display: grid;
-  grid-template-columns: minmax(190px, .62fr) minmax(0, 1.38fr);
+  grid-template-columns: minmax(170px, .52fr) minmax(0, 1.48fr);
   align-items: stretch;
   gap: 14px;
   min-width: 0;
@@ -765,7 +765,7 @@ th { color: #7f8b9e; background: #fafbfd; font-weight: 600; white-space: nowrap;
 .health-overview__copy > strong { overflow: hidden; font-size: clamp(19px, 1.18vw, 26px); text-overflow: ellipsis; white-space: nowrap; }
 .health-kpi-grid {
   display: grid;
-  grid-template-columns: minmax(150px, .72fr) minmax(0, 2.28fr);
+  grid-template-columns: minmax(190px, .9fr) minmax(0, 2.1fr);
   gap: 10px;
   min-width: 0;
 }
@@ -1792,7 +1792,7 @@ table {
 
   .dashboard-health-bar { gap: 16px; padding: 16px; }
   .health-overview {
-    grid-template-columns: minmax(210px, .64fr) minmax(0, 1.36fr);
+    grid-template-columns: minmax(180px, .54fr) minmax(0, 1.46fr);
     gap: 16px;
     padding: 15px;
   }
@@ -1959,7 +1959,7 @@ table {
 
 @media (max-width: 1500px) and (min-width: 1181px) {
   .dashboard-health-bar { grid-template-columns: minmax(0, 1.45fr) minmax(500px, 1fr); }
-  .health-overview { grid-template-columns: minmax(200px, .62fr) minmax(0, 1.38fr); padding: 14px; }
+  .health-overview { grid-template-columns: minmax(170px, .52fr) minmax(0, 1.48fr); padding: 14px; }
   .health-kpi-card { padding: 14px; }
   .health-device-card { gap: 9px; padding: 10px 11px; }
   .health-device-card__identity { min-width: 0; padding-right: 9px; }
@@ -1990,7 +1990,7 @@ table {
     overflow: hidden;
   }
   .dashboard-health-bar { grid-template-columns: 1fr; overflow: visible; }
-  .health-overview { grid-template-columns: minmax(180px, .55fr) minmax(0, 1.45fr); }
+  .health-overview { grid-template-columns: minmax(160px, .48fr) minmax(0, 1.52fr); }
   .health-device-grid { grid-template-rows: none; }
   .health-device-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .cloud-stage { min-height: 570px; }

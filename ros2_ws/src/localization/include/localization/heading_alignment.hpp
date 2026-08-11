@@ -53,6 +53,8 @@ private:
     double weight{1.0};
   };
 
+  HeadingAlignmentState computeState(bool apply_filter) const noexcept;
+
   HeadingAlignmentOptions options_;
   std::deque<Observation> observations_;
   std::optional<double> filtered_delta_yaw_rad_;

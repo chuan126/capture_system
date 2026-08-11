@@ -8,11 +8,11 @@ namespace localization
 
 using RotationMatrix3d = std::array<double, 9>;
 
-// C_b<-m: vehicle coordinates (+X forward, +Y left, +Z up) to the installed ODIN body frame.
+// C_b<-m: vehicle coordinates (+X right, +Y forward, +Z up) to the installed ODIN body frame.
 inline constexpr RotationMatrix3d kDefaultVehicleAttitudeMountRotationBm{
   0.0, 0.0, 1.0,
-  0.0, 1.0, 0.0,
-  -1.0, 0.0, 0.0};
+  -1.0, 0.0, 0.0,
+  0.0, -1.0, 0.0};
 
 struct VehicleAttitude
 {

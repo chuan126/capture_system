@@ -637,7 +637,18 @@ function Dashboard({
   const vehicleAttitudeValid = rtkSnapshot?.localization_vehicle_attitude_valid === true;
   const vehiclePitchText = vehicleAttitudeValid ? `${formatMetric(rtkSnapshot?.localization_vehicle_pitch_deg, 2)}°` : "--";
   const vehicleRollText = vehicleAttitudeValid ? `${formatMetric(rtkSnapshot?.localization_vehicle_roll_deg, 2)}°` : "--";
-  const vehicleHeadingText = vehicleAttitudeValid ? `${formatMetric(rtkSnapshot?.localization_vehicle_heading_deg, 2)}°` : "--";
+  const rawTrackDeg = rtkSnapshot?.track_degrees;
+  const localizationHeadingDeg = rtkSnapshot?.localization_heading_deg;
+  const rawTrackValid = rawCoordinateAvailable && typeof rawTrackDeg === "number" && Number.isFinite(rawTrackDeg);
+  const localizationHeadingValid = localizationValid &&
+    rtkSnapshot?.localization_heading_source !== 0 &&
+    typeof localizationHeadingDeg === "number" && Number.isFinite(localizationHeadingDeg);
+  const displayedVehicleHeadingDeg = rawCoordinateAvailable
+    ? rawTrackValid ? rawTrackDeg : null
+    : localizationHeadingValid ? localizationHeadingDeg : null;
+  const vehicleHeadingText = displayedVehicleHeadingDeg === null
+    ? "--"
+    : `${formatMetric(displayedVehicleHeadingDeg, 2)}°`;
   const monitorUnavailable = !systemStreamAvailable;
   const lidarConnected = !monitorUnavailable && isDeviceConnected("lidar", systemSnapshot?.lidar);
   const rtkConnected = !monitorUnavailable && isDeviceConnected("rtk", systemSnapshot?.rtk);

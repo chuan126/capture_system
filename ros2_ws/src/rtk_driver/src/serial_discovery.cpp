@@ -170,8 +170,13 @@ std::string select_unique_serial_candidate(
 
 bool contains_gnss_stream_signature(const std::string & data)
 {
-  static constexpr std::array<const char *, 11> signatures{{
-    "$GN", "$GP", "$GB", "$BD", "$GL", "$GA", "$GQ", "$QZ", "$GI", "#BESTPOSA", "#BESTPOSB"
+  // 设备身份探测只接受当前冻结解析器实际支持的报文类型，避免仅凭 talker
+  // 前缀把输出 VTG/GSV 等其他 NMEA 文本的未知串口误认为 RTK。
+  static constexpr std::array<const char *, 12> signatures{{
+    "$GPRMC,", "$GNRMC,", "$BDRMC,",
+    "$GPGGA,", "$GNGGA,", "$BDGGA,",
+    "$GPGSA,", "$GNGSA,", "$GBGSA,", "$GLGSA,", "$BDGSA,",
+    "#BESTPOSA,"
   }};
   return std::any_of(
     signatures.begin(), signatures.end(),
