@@ -3,6 +3,7 @@
 
 #include "localization/dead_reckoning.hpp"
 #include "localization/geodesy.hpp"
+#include "localization/heading_rigid_alignment.hpp"
 
 #include <optional>
 
@@ -11,10 +12,14 @@ namespace localization
 
 struct RtkPathSimulationOptions
 {
-  int test_mode{1};
+  int test_mode{0};
   Llh point_a{24.5738888889, 118.0894444444, 20.0};
-  Llh point_b{24.5741666667, 118.0897222222, 20.0};
+  Llh point_b{24.5738912, 118.0894349, 20.0};
 };
+
+HeadingRigidAlignmentOptions simulationHeadingFitOptions(
+  const HeadingRigidAlignmentOptions & actual_options,
+  double simulation_path_distance_m) noexcept;
 
 struct SimulatedRtkFix
 {

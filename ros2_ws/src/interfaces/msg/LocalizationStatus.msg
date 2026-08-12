@@ -63,7 +63,7 @@ float64 heading_fit_window_span_m
 float64 heading_error_before_deg
 float64 heading_error_after_deg
 
-# 0=仿真测试，1=正常实车；仿真进度单位%。
+# 0=关闭仿真并使用真实RTK，1=启用仿真测试；仿真进度单位%。
 uint8 simulation_test_mode
 float64 simulation_progress_percent
 

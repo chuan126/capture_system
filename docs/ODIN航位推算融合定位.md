@@ -188,24 +188,27 @@ position_error = norm(position_rtk - position_dr)
 
 ## 室内RTK模拟测试
 
-节点只提供三个仿真配置入口。`simulation_test_mode=1` 为默认真实RTK模式，改为 `0` 并重启
-后，RTK位置由A到B的模拟轨迹替代，ODIN位置、四元数和400 Hz时间戳仍全部来自真实设备：
+节点只提供三个仿真配置入口。`simulation_test_mode=0` 默认关闭仿真并使用真实RTK，改为 `1`
+并重启后，RTK位置由A到B的模拟轨迹替代，ODIN位置、四元数和400 Hz时间戳仍来自真实设备：
 
 ```text
-simulation_test_mode: 0
+simulation_test_mode: 1
 simulation_rtk_point_a: [24.5738888889, 118.0894444444, 20.0]
-simulation_rtk_point_b: [24.5741666667, 118.0897222222, 20.0]
+simulation_rtk_point_b: [24.5738912, 118.0894349, 20.0]
 ```
 
 第一条有效ODIN位置自动成为仿真起点。节点按实际ODIN水平位移与A-B距离的比例生成10 Hz
 模拟LLH，每条消息使用ROS当前时钟；正式定位端仍根据该时间戳从400 Hz缓存前后样本线性插值，
-再进入同一个5 m采样窗口和刚体拟合器。模拟状态的航迹角无效且不参与计算，达到B后保持B并打印
-`SIMULATION REACHED POINT B`。默认A/B约42 m，低于正式100 m有效门限；验证正式有效状态时请
-把B改到距A至少100 m以上。
+再进入同一个刚体拟合器。仿真启用时只在节点内部将采样间距自动调整为A-B距离的1/20、正式
+有效基线调整为A-B距离的90%，并关闭短轨迹粗差剔除；YAML中的实际长轨迹参数不会被修改。
+模拟状态的航迹角无效且不参与计算，达到B后保持B并打印 `SIMULATION REACHED POINT B`。
+默认A-B约1 m，实际ODIN移动约0.9 m且至少取得3个同步样本、质量门限合格后，方位修正生效。
+此后融合栏方位、TXT载体方位和地图小车方位都来自修正后的 `LocalizationStatus.heading_deg`。
 
-人工步骤：设置模式为0并重启；静止确认进度约0%；沿近似直线移动；观察
+人工步骤：设置模式为1并重启；静止确认进度约0%；沿近似直线移动到约1 m；观察
 `simulation_progress_percent`、`heading_fit_sample_count`、`heading_fit_baseline_m`、
-`heading_fit_delta_yaw_deg`、`heading_error_after_deg`；完成后恢复模式1并重启。
+`heading_fit_delta_yaw_deg`、`delta_yaw_deg`、`heading_fit_valid`、`heading_error_after_deg`；
+完成后恢复模式0并重启。
 
 ## 目标机构建
 

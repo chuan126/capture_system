@@ -209,7 +209,7 @@ TEST(OdometryBufferTest, AppliesConfiguredRtkTimeOffsetBeforeInterpolation)
   EXPECT_NEAR(output.position_m.y, 10.0, 1.0e-12);
 }
 
-TEST(RtkPathSimulationTest, NormalModeDoesNotStartSimulation)
+TEST(RtkPathSimulationTest, DisabledModeDoesNotStartSimulation)
 {
   RtkPathSimulation simulation;
   EXPECT_FALSE(simulation.active());
@@ -220,7 +220,7 @@ TEST(RtkPathSimulationTest, NormalModeDoesNotStartSimulation)
 TEST(RtkPathSimulationTest, CapturesOriginAndGeneratesAHalfwayAndClampedB)
 {
   RtkPathSimulationOptions options;
-  options.test_mode = 0;
+  options.test_mode = 1;
   RtkPathSimulation simulation(options);
   ASSERT_TRUE(simulation.captureOdinOrigin(Vector3d{100.0, 200.0, 3.0}));
   EXPECT_FALSE(simulation.captureOdinOrigin(Vector3d{}));
@@ -248,7 +248,7 @@ TEST(RtkPathSimulationTest, CapturesOriginAndGeneratesAHalfwayAndClampedB)
 TEST(RtkPathSimulationTest, TenHertzSimulationUsesFormalFourHundredHertzInterpolationAndFit)
 {
   RtkPathSimulationOptions simulation_options;
-  simulation_options.test_mode = 0;
+  simulation_options.test_mode = 1;
   simulation_options.point_b = enuToLlh(
     simulation_options.point_a, Enu{0.0, 150.0, 0.0});
   RtkPathSimulation simulation(simulation_options);
@@ -289,6 +289,45 @@ TEST(RtkPathSimulationTest, TenHertzSimulationUsesFormalFourHundredHertzInterpol
   EXPECT_NEAR(estimator.state().delta_yaw_rad, degreesToRadians(90.0), 1.0e-5);
   EXPECT_GE(estimator.state().baseline_odin_m, 100.0);
   EXPECT_LE(estimator.sampleCount(), fit_options.max_samples);
+}
+
+TEST(RtkPathSimulationTest, DefaultOneMeterPathProducesValidHeadingCorrection)
+{
+  RtkPathSimulationOptions simulation_options;
+  simulation_options.test_mode = 1;
+  RtkPathSimulation simulation(simulation_options);
+  ASSERT_TRUE(simulation.active());
+  EXPECT_NEAR(simulation.horizontalDistanceM(), 1.0, 0.03);
+  ASSERT_TRUE(simulation.captureOdinOrigin(Vector3d{10.0, 20.0, 0.0}));
+
+  HeadingRigidAlignmentOptions actual_options;
+  const HeadingRigidAlignmentOptions fit_options = simulationHeadingFitOptions(
+    actual_options, simulation.horizontalDistanceM());
+  EXPECT_NEAR(
+    fit_options.valid_baseline_m, 0.9 * simulation.horizontalDistanceM(), 1.0e-12);
+  EXPECT_EQ(fit_options.min_samples, 3U);
+
+  HeadingRigidAlignmentEstimator estimator(fit_options);
+  constexpr std::int64_t start_ns = 1'000'000'000LL;
+  for (std::size_t index = 0; index <= 20U; ++index) {
+    const double distance = simulation.horizontalDistanceM() *
+      static_cast<double>(index) / 20.0;
+    const Vector3d odin_position{10.0 + distance, 20.0, 0.0};
+    const auto simulated_fix = simulation.generate(odin_position);
+    ASSERT_TRUE(simulated_fix.has_value());
+    const Enu simulated_enu = llhToEnu(simulation.pointA(), simulated_fix->llh);
+    estimator.addSample(
+      HeadingFitSample{
+        start_ns + static_cast<std::int64_t>(index) * 100'000'000LL,
+        odin_position.x, odin_position.y,
+        simulated_enu.east_m, simulated_enu.north_m});
+  }
+
+  ASSERT_TRUE(estimator.state().valid);
+  EXPECT_NEAR(
+    estimator.state().delta_yaw_rad,
+    std::atan2(simulation.pointBEnu().north_m, simulation.pointBEnu().east_m), 1.0e-5);
+  EXPECT_GE(estimator.state().baseline_odin_m, fit_options.valid_baseline_m);
 }
 
 TEST(DeadReckoningFreezeTest, LaterHeadingFitsDoNotChangeFrozenAnchor)

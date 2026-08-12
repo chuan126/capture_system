@@ -94,6 +94,11 @@ public:
       static_cast<std::size_t>(declare_parameter<int>("odometry_cache_max_samples", 5000)))
   {
     declareRemainingParameters();
+    if (rtk_path_simulation_.active()) {
+      heading_fit_options_ = simulationHeadingFitOptions(
+        heading_fit_options_, rtk_path_simulation_.horizontalDistanceM());
+      heading_fit_estimator_ = HeadingRigidAlignmentEstimator(heading_fit_options_);
+    }
     validateParameters();
     if (rtk_path_simulation_.active()) {
       rtk_origin_llh_ = rtk_path_simulation_.pointA();
@@ -161,6 +166,13 @@ public:
         rtk_path_simulation_.pointB().altitude_m,
         rtk_path_simulation_.horizontalDistanceM(),
         rtk_path_simulation_.geographicDirectionDeg());
+      RCLCPP_INFO(
+        get_logger(),
+        "Simulation heading fit: spacing=%.3f m, minimum=%.3f m, valid=%.3f m, "
+        "target=%.3f m, minimum samples=%zu",
+        heading_fit_options_.sample_spacing_m, heading_fit_options_.min_baseline_m,
+        heading_fit_options_.valid_baseline_m, heading_fit_options_.target_baseline_m,
+        heading_fit_options_.min_samples);
     }
   }
 
@@ -281,11 +293,11 @@ private:
   RtkPathSimulationOptions declareSimulationOptions()
   {
     RtkPathSimulationOptions options;
-    options.test_mode = declare_parameter<int>("simulation_test_mode", 1);
+    options.test_mode = declare_parameter<int>("simulation_test_mode", 0);
     const auto point_a = declare_parameter<std::vector<double>>(
       "simulation_rtk_point_a", std::vector<double>{24.5738888889, 118.0894444444, 20.0});
     const auto point_b = declare_parameter<std::vector<double>>(
-      "simulation_rtk_point_b", std::vector<double>{24.5741666667, 118.0897222222, 20.0});
+      "simulation_rtk_point_b", std::vector<double>{24.5738912, 118.0894349, 20.0});
     if (point_a.size() != 3U || point_b.size() != 3U) {
       throw std::invalid_argument("simulation_rtk_point_a/B必须各包含纬度、经度、高度3个数");
     }
