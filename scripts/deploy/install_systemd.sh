@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
 
-project_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck disable=SC1091
+source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/common.sh"
+
+project_root="${capture_project_root}"
 service_name="capture-web.service"
 service_path="/etc/systemd/system/${service_name}"
 run_user="${CAPTURE_RUN_USER:-${SUDO_USER:-}}"
@@ -13,6 +16,11 @@ run_group="$(id -gn "${run_user}")"
 
 if [[ "${EUID}" -ne 0 ]]; then
   echo "请使用 sudo bash scripts/deploy/install_systemd.sh 安装服务。" >&2
+  exit 1
+fi
+
+if ! capture_networkmanager_permissions_ready "${run_user}"; then
+  echo "运行用户 ${run_user} 的 NetworkManager 权限未准备完成。请先执行 sudo bash scripts/deploy/install.sh。" >&2
   exit 1
 fi
 
@@ -40,10 +48,6 @@ PrivateTmp=true
 WantedBy=multi-user.target
 EOF
 
-sed "s/@RUN_USER@/${run_user}/g" "${project_root}/system/polkit-1/rules.d/50-capture-networkmanager.rules" > /etc/polkit-1/rules.d/50-capture-networkmanager.rules
-chmod 0644 /etc/polkit-1/rules.d/50-capture-networkmanager.rules
-mkdir -p "${project_root}/runtime/tasks" "${project_root}/runtime/reports" "${project_root}/runtime/dev-tests" "${project_root}/runtime/settings"
-chown -R "${run_user}:${run_group}" "${project_root}/runtime"
 systemctl daemon-reload
 systemctl enable "${service_name}"
 echo "已按当前项目路径安装 ${service_name}: ${project_root}"

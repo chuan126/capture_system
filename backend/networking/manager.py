@@ -48,10 +48,15 @@ class NetworkManagerWifi:
 
     def list_networks(self, *, rescan: bool = False) -> list[WifiNetwork]:
         interface = self._wifi_interface()
+        if rescan:
+            self._request_scan(interface)
         command = [
             "nmcli", "--terse", "--escape", "yes",
             "--fields", "IN-USE,SSID,SIGNAL,SECURITY",
             "device", "wifi", "list",
+            # The explicit rescan above exists to surface authorization failures.
+            # Keep --rescan=yes here so nmcli waits for a fresh NetworkManager scan
+            # instead of immediately returning a stale access-point cache.
             "--rescan", "yes" if rescan else "no",
             "ifname", interface,
         ]
@@ -81,6 +86,18 @@ class NetworkManagerWifi:
             if current is None or item.connected or item.signal > current.signal:
                 strongest[ssid] = item
         return sorted(strongest.values(), key=lambda item: (not item.connected, -item.signal, item.ssid.casefold()))
+
+    def _request_scan(self, interface: str) -> None:
+        result = self._run(["nmcli", "device", "wifi", "rescan", "ifname", interface])
+        if result.returncode == 0:
+            return
+        detail = self._safe_detail(result, "Wi-Fi扫描请求失败")
+        normalized = detail.casefold()
+        if "not authorized" in normalized or "not authorised" in normalized:
+            raise WifiManagerError(
+                "Wi-Fi扫描权限不足，请检查NetworkManager的org.freedesktop.NetworkManager.wifi.scan授权"
+            )
+        raise WifiManagerError(detail)
 
     def connect(self, ssid: str, password: str | None) -> dict[str, object]:
         clean_ssid = self._validate_ssid(ssid)

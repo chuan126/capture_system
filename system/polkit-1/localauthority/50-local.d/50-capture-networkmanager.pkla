@@ -1,0 +1,20 @@
+[Capture System Wi-Fi Scan]
+Identity=unix-user:@RUN_USER@
+Action=org.freedesktop.NetworkManager.wifi.scan
+ResultAny=yes
+ResultInactive=yes
+ResultActive=yes
+
+[Capture System Wi-Fi System Profile]
+Identity=unix-user:@RUN_USER@
+Action=org.freedesktop.NetworkManager.settings.modify.system
+ResultAny=yes
+ResultInactive=yes
+ResultActive=yes
+
+[Capture System Network Control]
+Identity=unix-user:@RUN_USER@
+Action=org.freedesktop.NetworkManager.network-control
+ResultAny=yes
+ResultInactive=yes
+ResultActive=yes

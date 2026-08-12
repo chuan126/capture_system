@@ -81,6 +81,7 @@ else
   rm -f \
     /etc/avahi/services/capture-system.service \
     /etc/polkit-1/rules.d/50-capture-networkmanager.rules \
+    /etc/polkit-1/localauthority/50-local.d/50-capture-networkmanager.pkla \
     /etc/sysctl.d/99-capture-lidar.conf \
     /etc/capture-system/device.env \
     /etc/apt/sources.list.d/nodesource.list \

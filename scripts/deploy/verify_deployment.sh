@@ -79,7 +79,50 @@ if [[ "${mode}" != "identity" ]]; then
     capture_nm_interface_managed "${direct_interface}" && ok "维护口 ${direct_interface} 由 NetworkManager 管理" || fail "维护口 ${direct_interface} 未由 NetworkManager 管理"
   fi
   [[ -f /etc/capture-system/device.env ]] && ok 'device.env 已写入' || fail '/etc/capture-system/device.env 缺失'
-  [[ -f /etc/polkit-1/rules.d/50-capture-networkmanager.rules ]] && ok 'NetworkManager polkit 规则已安装' || fail 'NetworkManager polkit 规则缺失'
+  polkit_rule=/etc/polkit-1/rules.d/50-capture-networkmanager.rules
+  polkit_pkla=/etc/polkit-1/localauthority/50-local.d/50-capture-networkmanager.pkla
+  if [[ -f "${polkit_rule}" || -f "${polkit_pkla}" ]]; then
+    ok 'Capture System NetworkManager polkit 配置已安装'
+    [[ -f "${polkit_rule}" ]] && ok 'polkit JavaScript rules 配置存在'
+    [[ -f "${polkit_pkla}" ]] && ok 'polkit Local Authority pkla 配置存在'
+  else
+    fail 'Capture System NetworkManager polkit 配置缺失'
+  fi
+
+  complete_policy=0
+  for policy_file in "${polkit_rule}" "${polkit_pkla}"; do
+    [[ -f "${policy_file}" ]] || continue
+    policy_complete=1
+    while IFS= read -r action; do
+      [[ -n "${action}" ]] || continue
+      grep -Fq "${action}" "${policy_file}" || policy_complete=0
+    done < <(capture_networkmanager_required_actions)
+    if (( policy_complete )); then
+      complete_policy=1
+      ok "polkit 配置包含三个必需 NetworkManager action：${policy_file}"
+    else
+      warn "polkit 配置不是当前完整权限模板：${policy_file}"
+    fi
+  done
+  (( complete_policy )) || fail '未找到包含三个必需 NetworkManager action 的 Capture System polkit 配置'
+
+  run_user="${CAPTURE_RUN_USER:-$(capture_state_get run_user "${SUDO_USER:-${USER:-}}")}"
+  if [[ -n "${run_user}" && "${run_user}" != "root" ]] && id "${run_user}" >/dev/null 2>&1; then
+    permissions="$(capture_networkmanager_permissions_for_user "${run_user}" 2>/dev/null || true)"
+    if [[ -n "${permissions}" ]]; then
+      while IFS= read -r action; do
+        [[ -n "${action}" ]] || continue
+        permission_value="$(capture_networkmanager_permission_value "${permissions}" "${action}")"
+        [[ "${permission_value}" == "yes" ]] \
+          && ok "运行用户 ${run_user} 的 ${action}=yes" \
+          || fail "运行用户 ${run_user} 的 ${action}=${permission_value:-unknown}，后台 Wi-Fi 功能权限不足"
+      done < <(capture_networkmanager_required_actions)
+    else
+      warn '当前执行身份无法实测 Capture System 运行用户的 NetworkManager 权限'
+    fi
+  else
+    warn '无法确定有效的 Capture System 普通运行用户，未实测 NetworkManager 权限'
+  fi
   [[ -f /etc/sysctl.d/99-capture-lidar.conf ]] && ok '雷达 sysctl 配置已安装' || fail '雷达 sysctl 配置缺失'
 
   lidar_profile_addresses=""

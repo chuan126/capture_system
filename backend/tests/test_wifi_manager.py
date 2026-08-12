@@ -29,15 +29,64 @@ def test_wifi_scan_deduplicates_ssid_and_marks_security(monkeypatch) -> None:
     manager = NetworkManagerWifi()
     responses = iter([
         completed("wlan0:wifi\n"),
+        completed(),
         completed(":Lab:45:WPA2\n*:Current:70:WPA2\n:Lab:80:WPA2\n:Open:20:--\n"),
     ])
-    monkeypatch.setattr(manager, "_run", lambda *args, **kwargs: next(responses))
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        return next(responses)
+
+    monkeypatch.setattr(manager, "_run", fake_run)
     networks = manager.list_networks(rescan=True)
     assert [(item.ssid, item.signal, item.secured, item.connected) for item in networks] == [
         ("Current", 70, True, True),
         ("Lab", 80, True, False),
         ("Open", 20, False, False),
     ]
+    assert calls[1] == ["nmcli", "device", "wifi", "rescan", "ifname", "wlan0"]
+    assert calls[2][-5:] == ["list", "--rescan", "yes", "ifname", "wlan0"]
+
+
+def test_wifi_rescan_surfaces_polkit_authorization_failure(monkeypatch) -> None:
+    manager = NetworkManagerWifi()
+    responses = iter([
+        completed("wlan0:wifi\n"),
+        completed(stderr="Error: org.freedesktop.NetworkManager.wifi.scan request failed: not authorized", returncode=1),
+    ])
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        return next(responses)
+
+    monkeypatch.setattr(manager, "_run", fake_run)
+    with pytest.raises(WifiManagerError) as error:
+        manager.list_networks(rescan=True)
+    assert "wifi.scan" in str(error.value)
+    assert len(calls) == 2
+    assert calls[-1] == ["nmcli", "device", "wifi", "rescan", "ifname", "wlan0"]
+
+
+def test_wifi_cached_list_does_not_request_active_scan(monkeypatch) -> None:
+    manager = NetworkManagerWifi()
+    responses = iter([
+        completed("wlan0:wifi\n"),
+        completed("*:Current:70:WPA2\n"),
+    ])
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        return next(responses)
+
+    monkeypatch.setattr(manager, "_run", fake_run)
+    networks = manager.list_networks(rescan=False)
+    assert [item.ssid for item in networks] == ["Current"]
+    assert len(calls) == 2
+    assert "rescan" not in calls[0]
+    assert calls[1][-5:] == ["list", "--rescan", "no", "ifname", "wlan0"]
 
 
 def test_wifi_password_is_not_exposed_in_error(monkeypatch, tmp_path: Path) -> None:

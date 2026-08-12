@@ -1,6 +1,6 @@
 # 系统集成
 
-核对日期：2026-08-08
+核对日期：2026-08-11
 
 > 当前运行主要使用前台脚本。完整 systemd 开机自启、升级和回滚尚未完成现场验收。
 
@@ -8,9 +8,11 @@
 
 ```text
 system/                                      # 操作系统级集成配置根目录
-├── polkit-1/                                # 最小系统权限规则
-│   └── rules.d/                             # polkit JavaScript 规则目录
-│       └── 50-capture-networkmanager.rules  # 由安装脚本为实际 Web 服务用户授予 NetworkManager 连接权限
+├── polkit-1/                                # NetworkManager 最小权限模板
+│   ├── rules.d/                             # JavaScript Authority 模板
+│   │   └── 50-capture-networkmanager.rules
+│   └── localauthority/50-local.d/           # Local Authority 模板
+│       └── 50-capture-networkmanager.pkla
 ├── systemd/                                 # systemd 服务单元目录
 │   └── capture-web.service                  # FastAPI 与静态前端服务
 └── sysctl.d/                                # 内核参数目录
@@ -40,10 +42,43 @@ sysctl net.core.rmem_default net.core.rmem_max net.core.netdev_max_backlog
 
 ## NetworkManager 最小权限
 
-前端 Wi-Fi 功能通过 FastAPI 调用 `nmcli`。仓库中的 polkit 文件包含运行用户占位符，不能直接复制到 `/etc`。在项目根目录执行：
+前端 Wi-Fi 功能通过 FastAPI 调用 `nmcli`。部署脚本不提升 Web 服务为 root，而是为实际运行用户配置 NetworkManager 所需的三个 action：
+
+```text
+org.freedesktop.NetworkManager.wifi.scan
+org.freedesktop.NetworkManager.settings.modify.system
+org.freedesktop.NetworkManager.network-control
+```
+
+`wifi.scan` 用于主动扫描，`settings.modify.system` 用于当前实现创建 system-wide Wi-Fi connection profile，`network-control` 用于连接激活控制。AIO-3588JQ 的 Firefly Ubuntu 22.04 实机已经分别确认前两项与扫描、profile 创建之间的权限关系；`network-control` 已确认可以通过 Local Authority 授权为 `yes`，真实 Wi-Fi 切换仍应在独立维护链路下验收。当前实现没有证据需要 `settings.modify.own`，因此默认模板不授权该 action。
+
+仓库同时保留 JavaScript `.rules` 和 Local Authority `.pkla` 模板。`scripts/deploy/install.sh` 会根据当前 polkit authority 选择首选格式，并以运行用户实际执行 `nmcli general permissions` 的结果为最终判据；如果首选格式没有使三个 action 全部变成 `yes`，再尝试兼容格式。Firefly AIO-3588JQ 的 polkit 0.105 Local Authority 实机应使用：
+
+```text
+/etc/polkit-1/localauthority/50-local.d/50-capture-networkmanager.pkla
+```
+
+JavaScript Authority 系统使用：
+
+```text
+/etc/polkit-1/rules.d/50-capture-networkmanager.rules
+```
+
+两个模板都包含 `@RUN_USER@`，不能直接原样复制到 `/etc`。统一环境部署入口仍为：
+
+```bash
+sudo bash scripts/deploy/install.sh --variant customer
+```
+
+可选 `capture-web.service` 安装使用：
 
 ```bash
 sudo bash scripts/deploy/install_systemd.sh
 ```
 
-安装脚本会把当前项目真实路径和实际 Web 服务用户写入 systemd 服务，同时将 polkit 规则中的用户占位符替换为该用户。规则只放行 NetworkManager 的 `network-control`、`settings.modify.system` 和 `settings.modify.own`，不允许任意 root 命令。删除 `/etc/polkit-1/rules.d/50-capture-networkmanager.rules` 即可回滚该授权。
+`install_systemd.sh` 不负责写入 polkit 配置，只检查环境部署已经使三个必需 action 生效；权限不足时要求先执行 `install.sh`。该脚本也不创建、不递归改属主 `<project_root>/runtime`。正式数据目录仍由业务运行过程按项目既有规则使用。
+
+`verify_deployment.sh --configured-only` 会检查项目 polkit 配置，并直接验证实际运行用户的三个 NetworkManager action 是否全部为 `yes`。文件存在但实际权限仍为 `auth` 或 `no` 时，部署验证失败。
+
+`settings.modify.system` 可以修改 system-wide NetworkManager connection，权限范围大于单一 Wi-Fi profile。当前项目保持现有架构，但运行用户应限制为设备专用账户，并避免把普通交互账户无必要地复用为长期 Web 服务账户。
+

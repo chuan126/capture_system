@@ -199,13 +199,8 @@ fi
 
 log '安装雷达 UDP 内核参数和 NetworkManager 最小权限'
 install -m 0644 "${project_root}/system/sysctl.d/99-capture-lidar.conf" /etc/sysctl.d/99-capture-lidar.conf
-install -d -m 0755 /etc/polkit-1/rules.d
-sed "s/@RUN_USER@/${run_user}/g" \
-  "${project_root}/system/polkit-1/rules.d/50-capture-networkmanager.rules" \
-  > /etc/polkit-1/rules.d/50-capture-networkmanager.rules
-chmod 0644 /etc/polkit-1/rules.d/50-capture-networkmanager.rules
 sysctl --system >/dev/null
-systemctl restart polkit.service >/dev/null 2>&1 || true
+capture_install_networkmanager_polkit "${run_user}"
 
 web_port="$(awk -F= '$1=="UVICORN_PORT" {gsub(/[[:space:]]/, "", $2); print $2}' "${project_root}/config/network/web.env" | tail -n1)"
 web_port="${web_port:-8000}"

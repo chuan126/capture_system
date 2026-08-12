@@ -66,6 +66,23 @@ if command -v nmcli >/dev/null 2>&1; then
   done
 fi
 
+section 'POLKIT'
+polkit_run_user="$(capture_state_get run_user "${SUDO_USER:-${USER:-}}")"
+kv 'run user' "${polkit_run_user:-unknown}"
+kv 'authority preference' "$(capture_detect_polkit_authority 2>/dev/null || echo unknown)"
+kv 'rules policy' "$([[ -f /etc/polkit-1/rules.d/50-capture-networkmanager.rules ]] && echo present || echo missing)"
+kv 'pkla policy' "$([[ -f /etc/polkit-1/localauthority/50-local.d/50-capture-networkmanager.pkla ]] && echo present || echo missing)"
+if [[ -n "${polkit_run_user}" ]] && id "${polkit_run_user}" >/dev/null 2>&1 && command -v nmcli >/dev/null 2>&1; then
+  permissions="$(capture_networkmanager_permissions_for_user "${polkit_run_user}" 2>/dev/null || true)"
+  while IFS= read -r action; do
+    [[ -n "${action}" ]] || continue
+    value="$(capture_networkmanager_permission_value "${permissions}" "${action}")"
+    kv "${action}" "${value:-unavailable}"
+  done < <(capture_networkmanager_required_actions)
+else
+  kv 'effective permissions' 'unavailable'
+fi
+
 section 'IP ADDRESSES'
 ip -br -4 address 2>/dev/null || true
 

@@ -13,13 +13,14 @@ import subprocess
 import sys
 from typing import Any
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 SYSTEMD_FILES = [
     "/etc/systemd/system/capture-web.service",
 ]
 ENVIRONMENT_NETWORK_FILES = [
     "/etc/avahi/services/capture-system.service",
     "/etc/polkit-1/rules.d/50-capture-networkmanager.rules",
+    "/etc/polkit-1/localauthority/50-local.d/50-capture-networkmanager.pkla",
     "/etc/sysctl.d/99-capture-lidar.conf",
     "/etc/capture-system/device.env",
     "/etc/apt/sources.list.d/nodesource.list",
@@ -118,6 +119,15 @@ def current_hostname() -> str:
     return output(["hostnamectl", "--static"]) or output(["hostname"]) or "unknown"
 
 
+def supplement_snapshot_files(snapshot: dict[str, Any], backup_dir: Path, file_paths: list[str]) -> None:
+    files = snapshot.setdefault("files", {})
+    if not isinstance(files, dict):
+        raise ValueError("状态快照 files 字段格式无效")
+    for raw_path in file_paths:
+        if raw_path not in files:
+            files[raw_path] = backup_file(Path(raw_path), backup_dir)
+
+
 def user_groups(user: str) -> list[str]:
     if not user:
         return []
@@ -171,6 +181,10 @@ def cmd_snapshot(args: argparse.Namespace) -> int:
     baseline = existing.get("baseline")
     if not isinstance(baseline, dict):
         baseline = make_snapshot(backup_dir / "baseline", PROJECT_FILES, args.run_user)
+    else:
+        # 兼容旧 schema。新增受管文件无法追溯首次安装前状态时，
+        # 以本次升级前的当前状态补齐基线，避免 clear_config.sh 误删未知的既有配置。
+        supplement_snapshot_files(baseline, backup_dir / "baseline-extension", PROJECT_FILES)
     payload = {
         "schema_version": SCHEMA_VERSION,
         "project_root": str(Path(args.project_root).resolve()),

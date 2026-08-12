@@ -20,6 +20,85 @@ def test_environment_installer_is_dual_port_dependency_and_network_only() -> Non
     assert 'scripts/deploy/install_systemd.sh' not in installer
     assert "install.sh 未执行编译" in installer
 
+def test_networkmanager_polkit_templates_grant_only_required_actions() -> None:
+    rule = read("system/polkit-1/rules.d/50-capture-networkmanager.rules")
+    pkla = read("system/polkit-1/localauthority/50-local.d/50-capture-networkmanager.pkla")
+    common = read("scripts/deploy/common.sh")
+    installer = read("scripts/deploy/install.sh")
+    systemd_installer = read("scripts/deploy/install_systemd.sh")
+    required = [
+        "org.freedesktop.NetworkManager.wifi.scan",
+        "org.freedesktop.NetworkManager.settings.modify.system",
+        "org.freedesktop.NetworkManager.network-control",
+    ]
+    assert 'subject.user !== "@RUN_USER@"' in rule
+    assert "Identity=unix-user:@RUN_USER@" in pkla
+    for action in required:
+        assert action in rule
+        assert action in pkla
+        assert action in common
+    assert "org.freedesktop.NetworkManager.settings.modify.own" not in rule
+    assert "org.freedesktop.NetworkManager.settings.modify.own" not in pkla
+    assert 'capture_install_networkmanager_polkit "${run_user}"' in installer
+    assert 'capture_networkmanager_permissions_ready "${run_user}"' in systemd_installer
+    assert 'capture_install_networkmanager_polkit "${run_user}"' not in systemd_installer
+
+
+def test_deployment_verifier_checks_all_effective_wifi_permissions() -> None:
+    verifier = read("scripts/deploy/verify_deployment.sh")
+    common = read("scripts/deploy/common.sh")
+    for action in [
+        "org.freedesktop.NetworkManager.wifi.scan",
+        "org.freedesktop.NetworkManager.settings.modify.system",
+        "org.freedesktop.NetworkManager.network-control",
+    ]:
+        assert action in common
+    assert "capture_networkmanager_permissions_for_user" in verifier
+    assert "capture_networkmanager_required_actions" in verifier
+    assert 'permission_value' in verifier
+    assert '后台 Wi-Fi 功能权限不足' in verifier
+    assert "50-capture-networkmanager.pkla" in verifier
+
+
+def test_polkit_authority_detection_prefers_local_authority_log(tmp_path) -> None:
+    import os
+    import subprocess
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    journalctl = bin_dir / "journalctl"
+    journalctl.write_text(
+        '#!/usr/bin/env bash\n'
+        'echo "Loading rules from directory /etc/polkit-1/rules.d"\n'
+        "printf '%s\n' \"Using authority implementation \\`local' version \\`0.105'\"\n",
+        encoding="utf-8",
+    )
+    journalctl.chmod(0o755)
+    env = os.environ.copy()
+    env["PATH"] = f"{bin_dir}:{env['PATH']}"
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            f'source "{ROOT / "scripts/deploy/common.sh"}"; capture_detect_polkit_authority',
+        ],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0
+    assert result.stdout.strip() == "pkla"
+
+
+def test_deployment_state_tracks_both_polkit_formats() -> None:
+    source = read("scripts/deploy/deployment_state.py")
+    clear = read("scripts/deploy/clear_config.sh")
+    assert 'SCHEMA_VERSION = 4' in source
+    assert '/etc/polkit-1/rules.d/50-capture-networkmanager.rules' in source
+    assert '/etc/polkit-1/localauthority/50-local.d/50-capture-networkmanager.pkla' in source
+    assert 'supplement_snapshot_files(baseline' in source
+    assert '/etc/polkit-1/localauthority/50-local.d/50-capture-networkmanager.pkla' in clear
 
 def test_rosdep_uses_same_user_cache_for_update_and_root_install() -> None:
     installer = read("scripts/deploy/install.sh")
@@ -74,6 +153,9 @@ def test_status_includes_network_and_rtk_serial_facts() -> None:
         "/dev/serial/by-id",
         "dialout membership",
         "runtime",
+        "POLKIT",
+        "authority preference",
+        "capture_networkmanager_required_actions",
     ]:
         assert token in status
 
@@ -84,6 +166,10 @@ def test_optional_systemd_installer_remains_web_only() -> None:
     assert "run_web.sh" in installer
     assert "capture-ros.service" not in installer
     assert "capture-system.target" not in installer
+    assert 'capture_networkmanager_permissions_ready "${run_user}"' in installer
+    assert 'capture_install_networkmanager_polkit "${run_user}"' not in installer
+    assert 'mkdir -p "${project_root}/runtime' not in installer
+    assert 'chown -R "${run_user}:${run_group}" "${project_root}/runtime"' not in installer
 
 
 def test_installer_preflight_and_download_order_precede_network_changes() -> None:
@@ -172,3 +258,84 @@ def test_deployment_state_tracks_and_restores_dialout_membership() -> None:
     assert '["gpasswd", "-d", run_user, "dialout"]' in source
     assert '--component user-groups' in rollback
     assert '--component user-groups' in clear
+
+
+def test_snapshot_file_supplement_preserves_existing_entries_and_adds_new_path(tmp_path) -> None:
+    import importlib.util
+
+    path = ROOT / "scripts/deploy/deployment_state.py"
+    spec = importlib.util.spec_from_file_location("capture_deployment_state_supplement_test", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    existing = tmp_path / "existing.conf"
+    existing.write_text("current\n", encoding="utf-8")
+    snapshot = {
+        "files": {
+            "/already/tracked": {"exists": False, "backup": None, "mode": None},
+        }
+    }
+    module.supplement_snapshot_files(snapshot, tmp_path / "backup", ["/already/tracked", str(existing)])
+
+    assert snapshot["files"]["/already/tracked"] == {
+        "exists": False,
+        "backup": None,
+        "mode": None,
+    }
+    added = snapshot["files"][str(existing)]
+    assert added["exists"] is True
+    assert Path(added["backup"]).read_text(encoding="utf-8") == "current\n"
+
+
+def test_polkit_authority_detection_uses_jammy_polkitd_pkla_provide(tmp_path) -> None:
+    import os
+    import subprocess
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    journalctl = bin_dir / "journalctl"
+    journalctl.write_text('#!/usr/bin/env bash\nexit 0\n', encoding="utf-8")
+    journalctl.chmod(0o755)
+    dpkg_query = bin_dir / "dpkg-query"
+    dpkg_query.write_text(
+        '#!/usr/bin/env bash\n'
+        'if [[ "$*" == *" polkitd" ]]; then echo "polkitd-pkla (= 0.105-33ubuntu0.1)"; exit 0; fi\n'
+        'exit 1\n',
+        encoding="utf-8",
+    )
+    dpkg_query.chmod(0o755)
+    env = os.environ.copy()
+    env["PATH"] = f"{bin_dir}:{env['PATH']}"
+    result = subprocess.run(
+        ["bash", "-c", f'source "{ROOT / "scripts/deploy/common.sh"}"; capture_detect_polkit_authority'],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0
+    assert result.stdout.strip() == "pkla"
+
+
+def test_polkit_authority_detection_defaults_to_rules_without_local_evidence(tmp_path) -> None:
+    import os
+    import subprocess
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for name in ["journalctl", "dpkg-query"]:
+        stub = bin_dir / name
+        stub.write_text('#!/usr/bin/env bash\nexit 1\n', encoding="utf-8")
+        stub.chmod(0o755)
+    env = os.environ.copy()
+    env["PATH"] = f"{bin_dir}:{env['PATH']}"
+    result = subprocess.run(
+        ["bash", "-c", f'source "{ROOT / "scripts/deploy/common.sh"}"; capture_detect_polkit_authority'],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0
+    assert result.stdout.strip() == "rules"

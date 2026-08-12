@@ -54,7 +54,7 @@ FastAPI 是浏览器访问 RK3588 的唯一 HTTP 和 WebSocket 入口。当前�
 
 正式前端通过同源 FastAPI 调用 NetworkManager。浏览器不执行 `nmcli`，连接成功后只显示 NetworkManager 当前确认的真实 SSID。连接密码不写入任务数据库、任务事件、开发 MCAP、浏览器存储或普通日志。后端使用权限为 `0600` 的临时 `passwd-file` 把密码交给 `nmcli connection up`，命令完成后删除临时文件。
 
-Web 服务继续以 `cat` 用户运行。systemd 部署需要安装 `system/polkit-1/rules.d/50-capture-networkmanager.rules`，只授权 NetworkManager 网络控制和连接配置操作。NetworkManager、无线网卡或权限不可用时，接口返回真实不可用状态，不生成模拟网络。
+Web 服务以部署时确定的普通运行用户启动，不固定用户名。systemd 部署需要安装 `system/polkit-1/rules.d/50-capture-networkmanager.rules`，只授权 NetworkManager 网络控制、Wi-Fi 主动扫描和连接配置操作。主动扫描先显式执行 `nmcli device wifi rescan` 检查授权，再读取强制刷新的 AP 列表；授权失败时接口返回明确错误，不把旧扫描缓存误报为新的扫描结果。NetworkManager、无线网卡或权限不可用时，接口返回真实不可用状态，不生成模拟网络。
 
 ## 4. 实时桥行为
 

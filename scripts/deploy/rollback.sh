@@ -18,7 +18,7 @@ usage() {
   -h, --help                       显示帮助
 
 回滚目标为 /etc/capture-system/install_state.json 中最近一次 install.sh 开始前的状态。
-仅恢复 hostname、环境/网络配置文件、capture-lidar/capture-direct、NetworkManager/Avahi 及运行用户 dialout 状态。
+仅恢复 hostname、环境/网络配置文件、polkit 授权、capture-lidar/capture-direct、NetworkManager/Avahi 及运行用户 dialout 状态。
 不会删除 runtime、正式数据、构建产物，也不会修改 Capture System systemd 单元。
 USAGE
 }
