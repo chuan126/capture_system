@@ -27,14 +27,17 @@ localization/                                      # 定位与局部水平姿态
 │       ├── attitude_transform.hpp                 # ROS顺序校验及雷达点转换适配接口
 │       ├── dead_reckoning.hpp                     # ODIN锚点航位推算和陀螺积分纯数学接口
 │       ├── geodesy.hpp                            # WGS84 LLH/ECEF/ENU坐标转换接口
-│       ├── heading_alignment.hpp                  # RTK航迹、RTK位置航向和delta_yaw圆周统计接口
+│       ├── heading_alignment.hpp                  # 航向角度与RTK状态工具接口
+│       ├── heading_rigid_alignment.hpp            # RTK/ODIN长轨迹二维刚体拟合接口
+│       ├── odometry_buffer.hpp                    # RTK时刻ODIN插值缓存接口
+│       ├── rtk_path_simulation.hpp                # 真实ODIN驱动的A→B模拟RTK接口
 │       └── similarity_alignment.hpp               # 二维相似变换尺度和旋转联合估计接口
 ├── src/                                           # 算法实现和ROS适配节点目录
 │   ├── attitude_transform.cpp                     # 四元数校验、换轴和雷达点转换实现
 │   ├── dead_reckoning.cpp                         # ODIN相对位移到锚点ENU/LLH的航位推算实现
 │   ├── dead_reckoning_node.cpp                    # 订阅RTK/ODIN/IMU并发布融合定位的ROS 2节点
 │   ├── geodesy.cpp                                # WGS84坐标正反转换实现
-│   ├── heading_alignment.cpp                      # 航向wrap、RTK位置航向窗口和圆周统计实现
+│   ├── heading_alignment.cpp                      # 航向wrap和单位转换实现
 │   └── similarity_alignment.cpp                   # 二维相似变换最小二乘实现
 └── test/                                          # 核心算法单元测试目录
     ├── test_attitude_matrix.cpp                   # 顺序、重力方向、换轴和无效输入测试
@@ -124,11 +127,11 @@ colcon test-result --all --verbose
 /capture/localization/odometry
 ```
 
-RTK有效时，节点使用RTK经纬高作为绝对位置，使用RTK航迹角或RTK长基线位置轨迹估计
-绝对航向。ODIN四元数把配置的车辆前向轴 `vehicle_forward_axis_body` 旋转到ODIN水平系，
-再与RTK航向单位向量通过 `atan2(cross, dot)` 求 `delta_yaw`；核心对齐不读取Euler yaw。
-`delta_yaw` 使用圆周统计，不会把359°和1°平均成180°。RTK `track_degrees=0`
-被视为合法正北航迹角。正式默认车辆前向轴为 `[0,0,-1]`，适配ODIN镜头朝天安装。
+RTK有效时，节点使用RTK经纬高作为绝对位置。每条10 Hz RTK按
+`t_sync=t_rtk_header+rtk_time_offset_s` 从400 Hz ODIN缓存中线性插值位置，再按5 m间距加入
+固定容量窗口。窗口内两条轨迹分别去质心，以单位尺度二维刚体拟合
+`delta_yaw=atan2(B,A)`。RTK `track_degrees` 只用于原始诊断和融合方位不可用时的显示回退，
+ODIN四元数继续用于车辆姿态，但两者都不参与 `delta_yaw` 拟合。
 
 RTK状态无效或失锁且满足曾有可靠RTK锚点、ODIN有效、`delta_yaw`已可靠等条件后，节点冻结：
 
@@ -160,8 +163,8 @@ R_n_from_b = Rz(delta_yaw_anchor) * R_o_from_b
 `Cnm = Cnb * Cbm` 换算车辆矩阵，最后调用 `m2att`。车辆体系为 `+mX` 向右、`+mY`
 向前、`+mZ` 向上，默认 `Cbm=[0,0,1; -1,0,0; 0,-1,0]`，参数名为
 `vehicle_attitude_mount_rotation_bm`。启动时校验其正交性和行列式；该矩阵不进入ODIN位置、
-航位推算、运动补偿、点云或净空计算。界面和TXT方位使用 `heading_deg`，可靠RTK阶段采用
-RTK航迹角，失锁后采用ODIN航位推算航向。`vehicle_forward_axis_body` 仍是独立的航向对齐参数。
+航位推算、运动补偿、点云或净空计算。融合栏、地图和TXT方位统一优先使用
+`LocalizationStatus.heading_deg`，由拟合后的 `delta_yaw` 与ODIN实时姿态得到。
 
 DR期间ODIN短时超时后，节点保持最后位置，并用IMU角速度对完整四元数做最多
 `gyro_fallback_max_duration_s`的桥接，航向来源标记为`HEADING_IMU_GYRO`。IMU超时或达到
@@ -171,7 +174,7 @@ DR期间ODIN短时超时后，节点保持最后位置，并用IMU角速度对�
 `scale_status=SCALE_DISABLED`，且不阻塞航向对齐或进入DR。仅当模式为1时，节点用长轨迹
 RTK/ODIN同步点拟合二维相似变换；只有样本数、基线、残差和尺度范围都满足要求时应用尺度。
 
-室内测试可临时设置 `rtk_simulation_enabled=1`，节点会用北纬24°34′26″、
-东经118°5′22″、高度20m、航迹角北偏东45°建立模拟RTK锚点，并直接输出
-融合经纬高。未收到ODIN时先输出模拟坐标；收到ODIN后进入ODIN航位推算。移动雷达时
-`/capture/localization/fix` 应随ODIN里程变化；设回 `0` 后恢复真实RTK输入。
+室内测试将 `simulation_test_mode` 设为 `0` 并重启。节点记录第一条真实ODIN位置，以其水平
+位移进度在 `simulation_rtk_point_a` 到 `simulation_rtk_point_b` 之间生成10 Hz模拟RTK；模拟
+RTK仍按其ROS时间戳走正式ODIN插值、5 m采样和刚体拟合。设回默认值 `1` 并重启即恢复真实RTK。
+默认A/B水平距离约42 m，只能验证采样和临时拟合；要验证正式有效状态，A/B应至少相距100 m。

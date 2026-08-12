@@ -148,6 +148,11 @@ test("RealtimeAmap component contains WGS-84 to GCJ-02 conversion", async () => 
   assert.match(component, /segment\.source === "fusion" \? "#f2c94c" : "#176bff"/);
   assert.match(component, /当前为融合定位结果/);
   assert.match(component, /浅黄色轨迹由RTK锚点和ODIN航位推算得到/);
+  assert.match(component, /snapshot\?\.localization_valid === true/);
+  assert.match(component, /snapshot\.localization_heading_source !== 0/);
+  assert.match(component, /: rawRtkValid && typeof snapshot\?\.track_degrees/);
+  assert.match(component, /if \(headingDeg !== null\) marker\.setAngle/);
+  assert.doesNotMatch(component, /setAngle\?\.\(headingDeg \?\? 0\)/);
   assert.doesNotMatch(component, /localStorage|NEXT_PUBLIC_AMAP/);
   assert.match(component, /地图设置/);
   assert.match(component, /security_js_code/);

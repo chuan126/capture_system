@@ -8,7 +8,6 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(interfaces REQUIRED)
 find_package(nav_msgs REQUIRED)
-find_package(rcl_interfaces REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 
@@ -36,6 +35,9 @@ target_link_libraries(localization_attitude_transform PUBLIC attitude_matrix)
 add_library(localization_dead_reckoning_core
   src/geodesy.cpp
   src/heading_alignment.cpp
+  src/heading_rigid_alignment.cpp
+  src/odometry_buffer.cpp
+  src/rtk_path_simulation.cpp
   src/similarity_alignment.cpp
   src/dead_reckoning.cpp
 )
@@ -54,7 +56,7 @@ target_link_libraries(
   localization_dead_reckoning_core
   localization_attitude_transform
 )
-ament_target_dependencies(dead_reckoning_node interfaces nav_msgs rcl_interfaces rclcpp sensor_msgs)
+ament_target_dependencies(dead_reckoning_node interfaces nav_msgs rclcpp sensor_msgs)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   target_compile_options(attitude_matrix PRIVATE -Wall -Wextra -Wpedantic)
@@ -99,6 +101,12 @@ if(BUILD_TESTING)
     test/test_dead_reckoning_math.cpp
   )
   target_link_libraries(test_dead_reckoning_math localization_dead_reckoning_core)
+
+  ament_add_gtest(
+    test_heading_rigid_alignment
+    test/test_heading_rigid_alignment.cpp
+  )
+  target_link_libraries(test_heading_rigid_alignment localization_dead_reckoning_core)
 endif()
 
 ament_export_include_directories(include)

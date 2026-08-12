@@ -39,42 +39,6 @@ TEST(HeadingMathTest, RtkTrackZeroDegreesIsValidNorth)
   EXPECT_NEAR(enuYawRadToClockwiseCourseDegrees(yaw_enu), 0.0, 1.0e-12);
 }
 
-TEST(HeadingMathTest, PositionCourseRequiresLongEnoughBaseline)
-{
-  CourseEstimatorOptions options;
-  options.min_speed_mps = 5.0;
-  options.min_baseline_m = 30.0;
-  options.max_baseline_m = 200.0;
-  options.max_window_s = 30.0;
-  CourseFromPositionEstimator estimator(options);
-
-  ASSERT_TRUE(estimator.addSample(CoursePositionSample{1'000'000'000LL, 0.0, 0.0, 10.0}));
-  ASSERT_TRUE(estimator.addSample(CoursePositionSample{2'000'000'000LL, 10.0, 0.0, 10.0}));
-  EXPECT_FALSE(estimator.estimate().valid);
-
-  ASSERT_TRUE(estimator.addSample(CoursePositionSample{3'000'000'000LL, 35.0, 0.0, 10.0}));
-  const CourseEstimate estimate = estimator.estimate();
-  ASSERT_TRUE(estimate.valid);
-  EXPECT_NEAR(estimate.yaw_enu_rad, 0.0, 1.0e-12);
-  EXPECT_GE(estimate.baseline_m, 30.0);
-}
-
-TEST(HeadingMathTest, CircularMeanDoesNotAverageThroughOneEightyDegrees)
-{
-  HeadingAlignmentOptions options;
-  options.min_samples = 2U;
-  options.min_distance_m = 0.0;
-  options.max_std_rad = degreesToRadians(5.0);
-  options.filter_alpha = 0.0;
-  HeadingAlignmentEstimator estimator(options);
-  ASSERT_TRUE(estimator.addObservation(degreesToRadians(359.0), 10.0));
-  ASSERT_TRUE(estimator.addObservation(degreesToRadians(1.0), 10.0));
-
-  const HeadingAlignmentState state = estimator.state();
-  ASSERT_TRUE(state.valid);
-  EXPECT_NEAR(wrapAngleRad(state.delta_yaw_rad), 0.0, degreesToRadians(0.01));
-}
-
 TEST(DeadReckoningMathTest, RosQuaternionYawUsesXyzwOrder)
 {
   const Quaterniond yaw_ninety{0.0, 0.0, std::sin(degreesToRadians(45.0)), std::cos(degreesToRadians(45.0))};

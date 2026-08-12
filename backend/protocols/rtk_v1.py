@@ -60,6 +60,18 @@ class RtkSnapshot:
     localization_scale_fit_residual_m: float | None = None
     localization_heading_baseline_m: float | None = None
     localization_heading_alignment_reason: str | None = None
+    localization_heading_fit_sample_count: int | None = None
+    localization_heading_fit_baseline_m: float | None = None
+    localization_heading_fit_rmse_m: float | None = None
+    localization_heading_fit_p95_residual_m: float | None = None
+    localization_heading_fit_inlier_ratio: float | None = None
+    localization_heading_fit_delta_yaw_deg: float | None = None
+    localization_heading_fit_valid: bool | None = None
+    localization_heading_fit_window_span_m: float | None = None
+    localization_heading_error_before_deg: float | None = None
+    localization_heading_error_after_deg: float | None = None
+    localization_simulation_test_mode: int | None = None
+    localization_simulation_progress_percent: float | None = None
     localization_distance_from_anchor_m: float | None = None
     localization_dr_duration_s: float | None = None
     localization_rtk_age_s: float | None = None
@@ -135,6 +147,36 @@ def with_localization_status(snapshot: RtkSnapshot, message: object) -> RtkSnaps
         localization_heading_baseline_m=float(getattr(message, "heading_baseline_m")),
         localization_heading_alignment_reason=str(
             getattr(message, "heading_alignment_reason")
+        ),
+        localization_heading_fit_sample_count=int(
+            getattr(message, "heading_fit_sample_count")
+        ),
+        localization_heading_fit_baseline_m=float(
+            getattr(message, "heading_fit_baseline_m")
+        ),
+        localization_heading_fit_rmse_m=float(getattr(message, "heading_fit_rmse_m")),
+        localization_heading_fit_p95_residual_m=float(
+            getattr(message, "heading_fit_p95_residual_m")
+        ),
+        localization_heading_fit_inlier_ratio=float(
+            getattr(message, "heading_fit_inlier_ratio")
+        ),
+        localization_heading_fit_delta_yaw_deg=float(
+            getattr(message, "heading_fit_delta_yaw_deg")
+        ),
+        localization_heading_fit_valid=bool(getattr(message, "heading_fit_valid")),
+        localization_heading_fit_window_span_m=float(
+            getattr(message, "heading_fit_window_span_m")
+        ),
+        localization_heading_error_before_deg=float(
+            getattr(message, "heading_error_before_deg")
+        ),
+        localization_heading_error_after_deg=float(
+            getattr(message, "heading_error_after_deg")
+        ),
+        localization_simulation_test_mode=int(getattr(message, "simulation_test_mode")),
+        localization_simulation_progress_percent=float(
+            getattr(message, "simulation_progress_percent")
         ),
         localization_distance_from_anchor_m=float(
             getattr(message, "distance_from_anchor_m")

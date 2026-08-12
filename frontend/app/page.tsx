@@ -643,9 +643,9 @@ function Dashboard({
   const localizationHeadingValid = localizationValid &&
     rtkSnapshot?.localization_heading_source !== 0 &&
     typeof localizationHeadingDeg === "number" && Number.isFinite(localizationHeadingDeg);
-  const displayedVehicleHeadingDeg = rawCoordinateAvailable
-    ? rawTrackValid ? rawTrackDeg : null
-    : localizationHeadingValid ? localizationHeadingDeg : null;
+  const displayedVehicleHeadingDeg = localizationHeadingValid
+    ? localizationHeadingDeg
+    : rawTrackValid ? rawTrackDeg : null;
   const vehicleHeadingText = displayedVehicleHeadingDeg === null
     ? "--"
     : `${formatMetric(displayedVehicleHeadingDeg, 2)}°`;

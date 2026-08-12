@@ -79,6 +79,7 @@ test("fusion card shows derived LLH and vehicle attitude only", () => {
   assert.match(localizationCard, /\{vehicleHeadingText\}/);
   assert.match(page, /rawCoordinateAvailable[\s\S]*rawTrackDeg[\s\S]*localizationHeadingDeg/);
   assert.match(page, /localization_heading_deg/);
+  assert.match(page, /displayedVehicleHeadingDeg = localizationHeadingValid/);
   assert.doesNotMatch(page, /formatMetric\(rtkSnapshot\?\.localization_vehicle_heading_deg/);
   assert.doesNotMatch(localizationCard, /车辆航向|模式 \/ 航向源|DR时间 \/ 锚点距|水平尺度 \/ 状态|航向偏差|恢复误差/);
   assert.match(css, /fusion-attitude-grid[\s\S]*grid-template-columns:\s*repeat\(3/);

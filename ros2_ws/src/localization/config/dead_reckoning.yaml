@@ -10,10 +10,12 @@ dead_reckoning_node:
     # IMU角速度超过该时间未更新即不用于短时后备，单位s。
     imu_timeout_s: 0.1
 
-    # 室内测试用RTK模拟锚点开关；0关闭，1用固定RTK坐标建立锚点并输出ODIN推算坐标：
-    # 北纬24°34′26″、东经118°5′22″、高度20m、航迹角北偏东45°。
-    # 可运行时切换：ros2 param set /dead_reckoning_node rtk_simulation_enabled 1
-    rtk_simulation_enabled: 1
+    # 0=使用真实ODIN和A→B模拟RTK测试；1=正常使用真实RTK。修改后需重启节点。
+    simulation_test_mode: 1
+    # [latitude_deg, longitude_deg, altitude_m]；默认北纬24°34′26″、东经118°05′22″、20m。
+    simulation_rtk_point_a: [24.5738888889, 118.0894444444, 20.0]
+    # [latitude_deg, longitude_deg, altitude_m]；默认北纬24°34′27″、东经118°05′23″、20m。
+    simulation_rtk_point_b: [24.5741666667, 118.0897222222, 20.0]
 
     # 车辆前进方向在ODIN机体系中的单位向量；当前镜头朝天安装时车辆前向对应机体系-Z轴。
     # 若实车直行诊断持续提示方向相反，只修改此YAML为[0.0, 0.0, 1.0]，程序不会自动翻转。
@@ -36,35 +38,38 @@ dead_reckoning_node:
     # ODIN里程计有限缓存时长，单位s；用于RTK时刻插值。
     odometry_cache_duration_s: 60.0
     # ODIN插值两端样本允许的最大时间间隔，单位s。
-    odometry_interpolation_max_gap_s: 0.2
+    odometry_interpolation_max_gap_s: 0.02
     # ODIN缓存最大样本数，防止无界内存增长。
     odometry_cache_max_samples: 5000
 
-    # 允许在RTK航迹角无效时，通过RTK位置长基线估计航向。
-    course_from_position_enabled: true
-    # 航迹角观测最低车速，单位m/s。
-    course_min_speed_mps: 5.0
-    # RTK位置航向估计最小水平基线，单位m；实车可调到50、100或更长。
-    course_min_baseline_m: 30.0
-    # RTK位置航向估计最大水平基线，单位m。
-    course_max_baseline_m: 200.0
-    # RTK位置航向估计窗口最大时长，单位s。
-    course_max_window_s: 30.0
-    # 相邻航向观测允许的最大突跳，单位deg。
-    course_max_jump_deg: 20.0
-    # RTK位置窗口最大样本数。
-    course_max_samples: 300
-
-    # delta_yaw圆周统计最少观测数。
-    heading_alignment_min_samples: 10
-    # delta_yaw观测累计最小运动距离，单位m。
-    heading_alignment_min_distance_m: 50.0
-    # delta_yaw圆周标准差最大允许值，单位deg。
-    heading_alignment_max_std_deg: 5.0
-    # delta_yaw一阶滤波系数；0表示不用历史滤波，1表示完全采用新值。
-    heading_filter_alpha: 0.1
-    # delta_yaw观测缓存最大样本数。
-    heading_alignment_max_samples: 200
+    # RTK消息时间到同步查询时间的补偿：t_sync=t_rtk_header+offset，单位s。
+    rtk_time_offset_s: 0.0
+    # RTK/ODIN长轨迹二维刚体拟合：按ODIN水平位移稀疏采样，单位m。
+    heading_fit_sample_spacing_m: 5.0
+    # 固定容量FIFO窗口点数。
+    heading_fit_max_samples: 100
+    # 产生内部临时角度所需最少同步点数。
+    heading_fit_min_samples: 3
+    # 小于该基线只计算临时角度，单位m。
+    heading_fit_min_baseline_m: 50.0
+    # 达到该基线且质量合格后正式置为有效，单位m。
+    heading_fit_valid_baseline_m: 100.0
+    # 理想目标轨迹跨度，仅用于诊断，单位m。
+    heading_fit_target_baseline_m: 500.0
+    # ODIN基线/RTK基线允许范围。
+    heading_baseline_ratio_min: 0.7
+    heading_baseline_ratio_max: 1.3
+    # 刚体拟合RMSE与P95残差上限，单位m。
+    heading_fit_max_rmse_m: 15.0
+    heading_fit_max_p95_residual_m: 25.0
+    # 两遍MAD粗差剔除及内点比例门限。
+    heading_fit_outlier_rejection_enabled: true
+    heading_fit_outlier_min_threshold_m: 20.0
+    heading_fit_outlier_mad_multiplier: 3.0
+    heading_fit_min_inlier_ratio: 0.7
+    # delta_yaw圆周一阶滤波系数及单次更新最大跳变，角度单位deg。
+    heading_fit_filter_alpha: 0.1
+    heading_fit_max_update_jump_deg: 5.0
 
     # ODIN水平尺度标定模式：0关闭且固定使用1.0；1启用长轨迹自动标定。
     scale_calibration_mode: 0

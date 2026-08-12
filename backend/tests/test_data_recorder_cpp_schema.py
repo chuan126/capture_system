@@ -108,6 +108,9 @@ def test_vehicle_attitude_and_direction_use_expected_sources_without_position_si
     assert "formatMetric(rtkSnapshot?.localization_vehicle_heading_deg" not in page
     assert "sample.vehicle_pitch_deg" in exporter
     assert "q2att(" not in recorder
+    assert "fitHeadingRigid2d" in (
+        project_root / "ros2_ws/src/localization/src/heading_rigid_alignment.cpp"
+    ).read_text(encoding="utf-8")
 
     rtk_heading = re.search(
         r"std::uint8_t currentHeadingSourceForRtk\(.*?\n  std::optional<Output>",
@@ -115,8 +118,19 @@ def test_vehicle_attitude_and_direction_use_expected_sources_without_position_si
         re.DOTALL,
     )
     assert rtk_heading is not None
+    assert "heading_alignment_valid_" in rtk_heading.group(0)
     assert "latest_rtk_status_.track_degrees" in rtk_heading.group(0)
     assert "HEADING_RTK_TRACK" in rtk_heading.group(0)
+
+    calibration = re.search(
+        r"void updateCalibrationFromLatestRtk\(.*?\n  void trimCalibrationPairs",
+        localization_node,
+        re.DOTALL,
+    )
+    assert calibration is not None
+    assert "heading_fit_estimator_.addSample" in calibration.group(0)
+    assert "latest_rtk_status_.track_degrees" not in calibration.group(0)
+    assert "orientation_xyzw" not in calibration.group(0)
 
     odometry_handler = re.search(
         r"void on_odometry\(.*?\n  void on_radar_temperature", recorder, re.DOTALL

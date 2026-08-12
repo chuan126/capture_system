@@ -51,6 +51,18 @@ export type RtkSnapshot = {
   localization_scale_fit_residual_m: number | null;
   localization_heading_baseline_m: number | null;
   localization_heading_alignment_reason: string | null;
+  localization_heading_fit_sample_count: number | null;
+  localization_heading_fit_baseline_m: number | null;
+  localization_heading_fit_rmse_m: number | null;
+  localization_heading_fit_p95_residual_m: number | null;
+  localization_heading_fit_inlier_ratio: number | null;
+  localization_heading_fit_delta_yaw_deg: number | null;
+  localization_heading_fit_valid: boolean | null;
+  localization_heading_fit_window_span_m: number | null;
+  localization_heading_error_before_deg: number | null;
+  localization_heading_error_after_deg: number | null;
+  localization_simulation_test_mode: number | null;
+  localization_simulation_progress_percent: number | null;
   localization_distance_from_anchor_m: number | null;
   localization_dr_duration_s: number | null;
   localization_rtk_age_s: number | null;
@@ -138,6 +150,17 @@ export function parseRtkText(text: string): RtkTextMessage {
     "localization_scale_baseline_m",
     "localization_scale_fit_residual_m",
     "localization_heading_baseline_m",
+    "localization_heading_fit_sample_count",
+    "localization_heading_fit_baseline_m",
+    "localization_heading_fit_rmse_m",
+    "localization_heading_fit_p95_residual_m",
+    "localization_heading_fit_inlier_ratio",
+    "localization_heading_fit_delta_yaw_deg",
+    "localization_heading_fit_window_span_m",
+    "localization_heading_error_before_deg",
+    "localization_heading_error_after_deg",
+    "localization_simulation_test_mode",
+    "localization_simulation_progress_percent",
     "localization_distance_from_anchor_m",
     "localization_dr_duration_s",
     "localization_rtk_age_s",
@@ -153,6 +176,7 @@ export function parseRtkText(text: string): RtkTextMessage {
     "localization_valid",
     "localization_vehicle_attitude_valid",
     "localization_heading_alignment_valid",
+    "localization_heading_fit_valid",
     "localization_scale_valid",
   ] as const;
   if (booleanFields.some((field) => value[field] !== null && typeof value[field] !== "boolean")) {

@@ -51,6 +51,22 @@ float64 heading_baseline_m
 
 string heading_alignment_reason
 
+# RTK/ODIN长轨迹二维刚体拟合诊断。
+uint32 heading_fit_sample_count
+float64 heading_fit_baseline_m
+float64 heading_fit_rmse_m
+float64 heading_fit_p95_residual_m
+float64 heading_fit_inlier_ratio
+float64 heading_fit_delta_yaw_deg
+bool heading_fit_valid
+float64 heading_fit_window_span_m
+float64 heading_error_before_deg
+float64 heading_error_after_deg
+
+# 0=仿真测试，1=正常实车；仿真进度单位%。
+uint8 simulation_test_mode
+float64 simulation_progress_percent
+
 float64 distance_from_anchor_m
 float64 dr_duration_s
 

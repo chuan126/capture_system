@@ -403,7 +403,14 @@ export default function RealtimeAmap({
     const source: TrackSource = fusedFix ? "fusion" : "rtk";
     const latitude = fusedFix ? snapshot.localization_latitude : snapshot?.latitude;
     const longitude = fusedFix ? snapshot.localization_longitude : snapshot?.longitude;
-    const headingDeg = fusedFix ? snapshot.localization_heading_deg : snapshot?.track_degrees;
+    const localizationHeading = snapshot?.localization_heading_deg;
+    const headingDeg = snapshot?.localization_valid === true &&
+      snapshot.localization_heading_source !== 0 &&
+      typeof localizationHeading === "number" && Number.isFinite(localizationHeading)
+      ? localizationHeading
+      : rawRtkValid && typeof snapshot?.track_degrees === "number" && Number.isFinite(snapshot.track_degrees)
+        ? snapshot.track_degrees
+        : null;
     const hasPosition = fusedFix || rawRtkValid;
 
     if (
@@ -425,7 +432,7 @@ export default function RealtimeAmap({
         setPosition?: (position: [number, number]) => void;
       };
       marker.setPosition?.(gcj);
-      marker.setAngle?.(headingDeg ?? 0);
+      if (headingDeg !== null) marker.setAngle?.(headingDeg);
     } else {
       const markerElement = document.createElement("div");
       markerElement.className = "amap-vehicle-marker";
@@ -441,9 +448,9 @@ export default function RealtimeAmap({
         });
         map.add?.(marker);
         markerRef.current = marker;
-        (marker as { setAngle?: (angle: number) => void }).setAngle?.(
-          headingDeg ?? 0,
-        );
+        if (headingDeg !== null) {
+          (marker as { setAngle?: (angle: number) => void }).setAngle?.(headingDeg);
+        }
       }
     }
 

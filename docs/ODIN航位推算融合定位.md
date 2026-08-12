@@ -50,14 +50,13 @@ RTK有效时，`/capture/localization/fix` 直接输出RTK经纬高。RTK不可�
 fix/status超时或fix本身不可用，节点切换为ODIN航位推算输出。节点同时估计ODIN水平系到ENU的
 固定航向偏差 `delta_yaw`。
 
-航向来源优先级：
+显示航向来源优先级：
 
 ```text
-1. RTK track_degrees，RMC有效、速度达标、无异常突跳
-2. RTK位置长基线轨迹
-3. 已对齐的ODIN四元数航向
-4. IMU陀螺短时后备
-5. INVALID
+1. 长轨迹刚体拟合对齐后的ODIN车辆绝对方位
+2. 融合方位尚未有效时，临时回退RTK track_degrees
+3. DR期间IMU陀螺短时后备
+4. INVALID
 ```
 
 DR过程中ODIN四元数或里程计Topic短时中断时，节点保持最后一个ODIN位置，并使用
@@ -73,41 +72,27 @@ psi_enu = wrap(pi / 2 - course_rtk)
 
 `track_degrees=0` 是合法正北航迹角，不作为无效值处理。
 
-当RTK航迹角不可用时，节点维护有限RTK位置窗口，只在水平基线达到
-`course_min_baseline_m` 后计算：
+RTK航迹角不参与正式 `delta_yaw`。正式链路在每个RTK时间戳执行：
 
 ```text
-course_rtk = atan2(delta_E, delta_N)
-psi_enu = wrap(pi / 2 - course_rtk)
+t_sync = t_rtk_header + rtk_time_offset_s
+p_odin(t_sync) = (1-alpha) * p_odin(t0) + alpha * p_odin(t1)
 ```
 
 ## 航向对齐
 
-当前镜头朝天安装的正式默认值为：
+同步点按ODIN水平位移5 m稀疏采样并保持100点FIFO窗口。中心化后计算：
 
 ```text
-vehicle_forward_axis_body = [0, 0, -1]
+A = sum(x_o * E + y_o * N)
+B = sum(x_o * N - y_o * E)
+delta_yaw = atan2(B, A)
 ```
 
-每个可靠航向观测先构造RTK ENU单位向量 `f_n`，并用同步ODIN四元数计算车辆前向
-水平单位向量 `f_o`，再计算：
-
-```text
-dot = f_o.x * f_n.x + f_o.y * f_n.y
-cross = f_o.x * f_n.y - f_o.y * f_n.x
-delta_yaw_sample = atan2(cross, dot)
-```
-
-因此接近90°安装时不依赖Euler yaw奇异位置。前向投影模长低于
-`heading_projection_min_norm` 时拒绝该样本并写入诊断原因。
-
-节点对多个样本做圆周统计：
-
-```text
-delta_yaw = atan2(sum(w_k * sin(delta_yaw_k)), sum(w_k * cos(delta_yaw_k)))
-```
-
-只有样本数、运动距离和圆周标准差满足参数要求后，`heading_alignment_valid=true`。
+拟合使用单位尺度，平移仅用于残差评价，不替换DR锚点。两遍拟合以MAD门限剔除粗差，
+再检查样本数、100 m有效基线、ODIN/RTK基线比、RMSE、P95残差和内点比例。
+`delta_yaw` 用圆周差一阶滤波，单次跳变超过门限时拒绝该次更新。ODIN position直接进入
+二维拟合，不乘实时姿态或安装矩阵；四元数仍保留用于车辆姿态和点云原有链路。
 
 ## 车辆姿态显示与记录
 
@@ -122,8 +107,8 @@ Cnm = Cnb * Cbm
 
 `vehicle_attitude_mount_rotation_bm` 按行主序配置 `Cbm`。节点启动时检查矩阵有限、正交且
 行列式接近 `+1`，不合法时拒绝启动。`Cnm` 经 `m2att` 转成车辆俯仰和横滚；界面与TXT
-方位统一使用 `LocalizationStatus.heading_deg`：可靠RTK阶段取RTK航迹角，失锁后取ODIN
-航位推算航向。安装矩阵不作用于DR、ODIN position、ENU、点云、运动补偿或净空计算。
+方位统一使用 `LocalizationStatus.heading_deg`，由长轨迹 `delta_yaw` 与ODIN实时姿态得到。
+安装矩阵不作用于DR、ODIN position、ENU、点云、运动补偿或净空计算。
 
 ## 尺度标定
 
@@ -203,31 +188,24 @@ position_error = norm(position_rtk - position_dr)
 
 ## 室内RTK模拟测试
 
-节点提供 `rtk_simulation_enabled` 参数，默认 `0`。运行中设为 `1` 时，节点内部用一组固定RTK坐标建立
-室内测试锚点，并直接输出ODIN航位推算后的融合经纬高：
+节点只提供三个仿真配置入口。`simulation_test_mode=1` 为默认真实RTK模式，改为 `0` 并重启
+后，RTK位置由A到B的模拟轨迹替代，ODIN位置、四元数和400 Hz时间戳仍全部来自真实设备：
 
 ```text
-latitude = 24.5738888889    # 北纬24°34′26″
-longitude = 118.0894444444  # 东经118°5′22″
-altitude = 20.0
-track_degrees = 45.0        # 航迹角北偏东45°
-rmc_validity = 'A'
-gps_state = 4
+simulation_test_mode: 0
+simulation_rtk_point_a: [24.5738888889, 118.0894444444, 20.0]
+simulation_rtk_point_b: [24.5741666667, 118.0897222222, 20.0]
 ```
 
-建议室内测试流程：
+第一条有效ODIN位置自动成为仿真起点。节点按实际ODIN水平位移与A-B距离的比例生成10 Hz
+模拟LLH，每条消息使用ROS当前时钟；正式定位端仍根据该时间戳从400 Hz缓存前后样本线性插值，
+再进入同一个5 m采样窗口和刚体拟合器。模拟状态的航迹角无效且不参与计算，达到B后保持B并打印
+`SIMULATION REACHED POINT B`。默认A/B约42 m，低于正式100 m有效门限；验证正式有效状态时请
+把B改到距A至少100 m以上。
 
-```bash
-ros2 param set /dead_reckoning_node rtk_simulation_enabled 1
-# 未收到ODIN时先输出模拟坐标；收到ODIN后切到MODE_DEAD_RECKONING
-# 移动雷达，观察 /capture/localization/fix 经纬高随ODIN里程变化
-ros2 param set /dead_reckoning_node rtk_simulation_enabled 0
-# 设回0后取消模拟锚点，节点恢复使用真实RTK输入
-```
-
-开启模拟后，节点会立即输出模拟坐标，避免上位机空白。如果ODIN里程计已有数据，节点会用当前ODIN位置作为
-`p_o_anchor`，用当前ODIN姿态和模拟航迹角直接建立 `delta_yaw`，随后固定该锚点进行DR输出。模拟模式下允许
-ODIN header时间与ROS当前时间不同步；若要重新选择室内起点，先设为 `0`，再设回 `1`。
+人工步骤：设置模式为0并重启；静止确认进度约0%；沿近似直线移动；观察
+`simulation_progress_percent`、`heading_fit_sample_count`、`heading_fit_baseline_m`、
+`heading_fit_delta_yaw_deg`、`heading_error_after_deg`；完成后恢复模式1并重启。
 
 ## 目标机构建
 
@@ -252,7 +230,7 @@ ros2 launch bringup task_control.launch.py data_root:=/home/cat/Project/capture_
 ## 实车验证步骤
 
 1. 在开阔路段确认 `/capture/rtk/fix`、`/capture/rtk/status` 和 `/capture/odometry/high_rate` 时间戳连续。
-2. 以稳定车速直行至少 `course_min_baseline_m`，观察 `heading_alignment_valid` 是否变为true。
+2. 以稳定车速行驶至少 `heading_fit_valid_baseline_m`，观察 `heading_fit_valid` 是否变为true。
 3. 若开启尺度标定，行驶至少 `scale_min_baseline_m`，确认 `scale_valid`、残差和尺度范围。
 4. 进入RTK遮挡路段，确认模式从RTK切换到 `MODE_DEAD_RECKONING`。
 5. 洞内检查 `/capture/localization/fix` 经纬高连续变化，`distance_from_anchor_m` 与里程趋势一致。
@@ -262,15 +240,23 @@ ros2 launch bringup task_control.launch.py data_root:=/home/cat/Project/capture_
 ## 需实车标定的参数
 
 ```text
-course_min_speed_mps
-course_min_baseline_m
-course_max_baseline_m
-course_max_window_s
-course_max_jump_deg
-heading_alignment_min_samples
-heading_alignment_min_distance_m
-heading_alignment_max_std_deg
-heading_filter_alpha
+rtk_time_offset_s
+heading_fit_sample_spacing_m
+heading_fit_max_samples
+heading_fit_min_samples
+heading_fit_min_baseline_m
+heading_fit_valid_baseline_m
+heading_fit_target_baseline_m
+heading_baseline_ratio_min
+heading_baseline_ratio_max
+heading_fit_max_rmse_m
+heading_fit_max_p95_residual_m
+heading_fit_outlier_rejection_enabled
+heading_fit_outlier_min_threshold_m
+heading_fit_outlier_mad_multiplier
+heading_fit_min_inlier_ratio
+heading_fit_filter_alpha
+heading_fit_max_update_jump_deg
 vehicle_forward_axis_body
 heading_projection_min_norm
 forward_axis_motion_validation_enabled
