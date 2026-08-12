@@ -174,8 +174,10 @@ DR期间ODIN短时超时后，节点保持最后位置，并用IMU角速度对�
 `scale_status=SCALE_DISABLED`，且不阻塞航向对齐或进入DR。仅当模式为1时，节点用长轨迹
 RTK/ODIN同步点拟合二维相似变换；只有样本数、基线、残差和尺度范围都满足要求时应用尺度。
 
-室内测试将 `simulation_test_mode` 设为 `1` 并重启。节点记录第一条真实ODIN位置，以其水平
-位移进度在 `simulation_rtk_point_a` 到 `simulation_rtk_point_b` 之间生成10 Hz模拟RTK。默认
+室内测试将 `simulation_test_mode` 设为 `1` 并重启。真实RTK可以始终无效；节点把第一条真实
+ODIN位置强制对应A点，以其水平位移进度在A到B之间生成10 Hz有效模拟RTK。模拟Fix复用当前
+ODIN样本时间戳，不依赖ROS墙钟与ODIN设备时钟同域。默认
 A/B水平距离约1 m；仿真启用时，方位拟合采样间距和有效基线根据该距离自动缩短，移动约0.9 m
 且拟合质量合格后开始输出修正方位。设回默认值 `0` 并重启即关闭仿真、恢复真实RTK和长轨迹
-拟合参数。融合栏、TXT载体方位和地图小车方位均使用同一 `LocalizationStatus.heading_deg`。
+拟合参数。融合栏收到首帧ODIN后即显示A点坐标；完成修正后，融合栏、TXT载体方位和地图小车
+方位均使用同一 `LocalizationStatus.heading_deg`。

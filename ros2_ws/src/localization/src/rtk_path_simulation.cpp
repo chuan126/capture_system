@@ -20,7 +20,7 @@ HeadingRigidAlignmentOptions simulationHeadingFitOptions(
   // The simulation is a short functional check. Keep the real long-track profile untouched.
   options.sample_spacing_m = std::clamp(simulation_path_distance_m / 20.0, 0.02, 5.0);
   options.max_samples = std::max<std::size_t>(options.max_samples, 20U);
-  options.min_samples = 3U;
+  options.min_samples = 2U;
   options.min_baseline_m = 0.25 * simulation_path_distance_m;
   options.valid_baseline_m = 0.90 * simulation_path_distance_m;
   options.target_baseline_m = simulation_path_distance_m;

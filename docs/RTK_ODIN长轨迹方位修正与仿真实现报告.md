@@ -60,7 +60,8 @@
 23. 自动测试源码：覆盖0/正负90/180度、任意平移/不同原点、5至10 m噪声、粗差、固定窗口、
     5 m采样、50/100 m有效性、400/10 Hz插值、时间偏移、异常间隔、严格时间戳、尺度固定、
     ODIN position不乘姿态、DR冻结及仿真正式链路。当前Windows无ROS 2/C++编译器，故这些GTest
-    需在目标机执行；本机已通过Python协议5项、Node源码31项、地图回归1项和TypeScript类型检查。
+    需在目标机执行；本机已通过Python协议/源码8项、Node源码31项、地图源码7项和TypeScript
+    类型检查。地图渲染测试因当前没有预构建的 `frontend/dist/server/index.js` 未执行成功。
 24. 边界确认：未修改 `motion_compensation`、`clearance_engine`、RANSAC、点云ROI、风机高度；
     `third_party/odin_ros_driver` 的 `git status` 为空，本次没有任何修改。
 
@@ -74,25 +75,26 @@
    重启节点可重新开始，不增加reset接口。
 6. A作为局部ENU原点，项目现有WGS84函数把B转成ENU；启动日志输出A、B、水平距离和地理方向。
 7. 进度为 `lambda=clamp(hypot(x-x0,y-y0)/L_AB,0,1)`，不使用配置速度或持续时间。
-8. 10 Hz ROS定时器记录当前ROS时刻；下一条400 Hz真实ODIN到达并形成前后包围样本后，按该时刻
-   插值ODIN并生成模拟LLH。
-9. 模拟RTK使用定时器记录的ROS Clock纳秒时间，不复用ODIN消息时间戳。
-10. 正式定位随后根据同一模拟RTK时间戳再次独立调用ODIN缓存插值；仿真器不把同步ODIN位置传给
-    拟合器。
-11. 模拟RTK只替换LLH和最小有效状态；`track_degrees=0`、RMC标记无航迹，正式拟合不读取它。
+8. 每条真实ODIN到达时按本机接收时间做10 Hz节流，首帧立即生成A点；不使用ROS墙钟请求一个
+   尚未进入ODIN缓存的未来时刻，避免请求持续被覆盖而永远无法生成模拟Fix。
+9. 模拟RTK复用当前ODIN样本时间戳，因此不受设备时钟与ROS系统时钟是否同域影响。
+10. 正式定位根据同一模拟RTK时间戳从ODIN缓存精确取得同一帧；仿真器不把ODIN位置旁路传给拟合器。
+11. 模拟RTK替换LLH并明确标记Fix与RMC有效，但不提供伪造航迹角；方位拟合不读取航迹角。
 12. 模拟点与真实RTK点都进入同一个 `updateCalibrationFromLatestRtk` 和
     `HeadingRigidAlignmentEstimator`，不存在 `simulation_delta_yaw`。
 13. ODIN position、四元数和时间戳全部来自 `/capture/odometry/high_rate` 真实设备输出。
-14. 模式互斥：仿真模式的真实RTK回调只保存诊断副本，不写入正式 `latest_fix/status`；真实模式不
-    创建仿真定时器。模式修改后要求重启。
+14. 模式互斥：仿真模式的真实RTK回调只保存诊断副本，不写入正式 `latest_fix/status`；真实RTK
+    可以一直无效，模拟A-B坐标仍由ODIN独立驱动。模式修改后要求重启。
 15. 关闭仿真的实际使用模式默认值明确为0。
 16. 到达B后模拟坐标保持B，只打印一次 `SIMULATION REACHED POINT B`。
 17. 可观察：仿真模式/进度、样本数、基线、拟合角、RMSE、P95、内点率、有效性、修正前后方向误差。
 18. 用户仿真配置仅有模式、A、B三个入口，没有速度、噪声、延迟、真值角等额外参数。
 19. 仿真模式根据A-B距离自动使用约0.05 m采样间距、约0.25 m初始门限和约0.9 m有效门限；
-    这些覆盖值只存在于仿真节点实例，不修改实际长轨迹YAML配置。
+    仿真允许A/B两个端点完成拟合。这些覆盖值只存在于仿真节点实例，不修改实际长轨迹YAML配置。
 20. 人工步骤：YAML设模式1和A/B；重启ODIN与正式定位；静止观察进度约0%；沿近似直线移动；
     观察进度、样本、基线、拟合角和修正后误差；到B确认100%；结束后恢复模式0并重启。
+21. 上位机融合栏使用融合状态流的 `localization_valid`；其中前端 `rtk.connection` 仅表示网页
+    WebSocket连接，不代表物理RTK串口或原始RTK有效性。
 
 ## 目标机构建
 

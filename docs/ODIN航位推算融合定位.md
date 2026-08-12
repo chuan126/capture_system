@@ -197,13 +197,15 @@ simulation_rtk_point_a: [24.5738888889, 118.0894444444, 20.0]
 simulation_rtk_point_b: [24.5738912, 118.0894349, 20.0]
 ```
 
-第一条有效ODIN位置自动成为仿真起点。节点按实际ODIN水平位移与A-B距离的比例生成10 Hz
-模拟LLH，每条消息使用ROS当前时钟；正式定位端仍根据该时间戳从400 Hz缓存前后样本线性插值，
-再进入同一个刚体拟合器。仿真启用时只在节点内部将采样间距自动调整为A-B距离的1/20、正式
+仿真模式完全忽略真实RTK是否有效：第一条有效ODIN位置强制对应A点，之后按实际ODIN水平位移
+与A-B距离的比例生成10 Hz模拟LLH，移动约1 m时强制对应B点。模拟Fix使用该ODIN样本自身的
+时间戳并标记为有效，随即以同一时间戳从ODIN缓存取得同一帧进入正式刚体拟合器，不再用ROS
+墙钟等待未来ODIN样本。仿真启用时只在节点内部将采样间距自动调整为A-B距离的1/20、正式
 有效基线调整为A-B距离的90%，并关闭短轨迹粗差剔除；YAML中的实际长轨迹参数不会被修改。
-模拟状态的航迹角无效且不参与计算，达到B后保持B并打印 `SIMULATION REACHED POINT B`。
-默认A-B约1 m，实际ODIN移动约0.9 m且至少取得3个同步样本、质量门限合格后，方位修正生效。
-此后融合栏方位、TXT载体方位和地图小车方位都来自修正后的 `LocalizationStatus.heading_deg`。
+模拟状态不提供伪造航迹角，航迹角不参与方位拟合；达到B后保持B并打印 `SIMULATION REACHED POINT B`。
+默认A-B约1 m，实际ODIN移动约0.9 m且A/B两个端点样本质量合格后，方位修正生效。
+上位机融合栏不再要求物理RTK设备有效：收到第一帧ODIN后就显示A点坐标。方位修正生效后，融合栏
+方位、TXT载体方位和地图小车方位都来自修正后的 `LocalizationStatus.heading_deg`。
 
 人工步骤：设置模式为1并重启；静止确认进度约0%；沿近似直线移动到约1 m；观察
 `simulation_progress_percent`、`heading_fit_sample_count`、`heading_fit_baseline_m`、

@@ -30,8 +30,6 @@
 #include <utility>
 #include <vector>
 
-using namespace std::chrono_literals;
-
 namespace localization
 {
 namespace
@@ -132,10 +130,6 @@ public:
     output_timer_ = create_wall_timer(
       std::chrono::duration_cast<std::chrono::nanoseconds>(period),
       [this]() {publishOutput();});
-    if (rtk_path_simulation_.active()) {
-      simulation_timer_ = create_wall_timer(100ms, [this]() {requestSimulatedRtk();});
-    }
-
     RCLCPP_INFO(
       get_logger(),
       "ODIN航位推算节点已启动：fix=%s status=%s odom=%s output=%s",
@@ -505,26 +499,24 @@ private:
     }
   }
 
-  void requestSimulatedRtk()
+  bool simulatedRtkDue(const std::int64_t received_ns) const noexcept
   {
-    pending_simulation_stamp_ns_ = now().nanoseconds();
+    constexpr std::int64_t kSimulationPeriodNs = 100'000'000LL;
+    return last_simulated_rtk_received_ns_ <= 0 ||
+           received_ns - last_simulated_rtk_received_ns_ >= kSimulationPeriodNs;
   }
 
-  void generatePendingSimulatedRtk()
+  void generateSimulatedRtk(const OdomSample & odin_sample, const std::int64_t received_ns)
   {
-    if (!pending_simulation_stamp_ns_.has_value()) {
+    if (!simulatedRtkDue(received_ns)) {
       return;
     }
-    OdomSample synchronized_odin;
-    if (!odom_buffer_.interpolate(*pending_simulation_stamp_ns_, synchronized_odin)) {
-      return;
-    }
-    const auto simulated = rtk_path_simulation_.generate(synchronized_odin.position_m);
+    const auto simulated = rtk_path_simulation_.generate(odin_sample.position_m);
     if (!simulated.has_value()) {
       return;
     }
-    const std::int64_t simulation_stamp_ns = *pending_simulation_stamp_ns_;
-    pending_simulation_stamp_ns_.reset();
+    const std::int64_t simulation_stamp_ns = odin_sample.stamp_ns;
+    last_simulated_rtk_received_ns_ = received_ns;
     latest_fix_.available = true;
     latest_fix_.stamp_ns = simulation_stamp_ns;
     latest_fix_.status = sensor_msgs::msg::NavSatStatus::STATUS_FIX;
@@ -532,11 +524,12 @@ private:
 
     latest_rtk_status_.available = true;
     latest_rtk_status_.stamp_ns = simulation_stamp_ns;
-    latest_rtk_status_.rmc_validity = static_cast<std::uint8_t>('V');
+    latest_rtk_status_.rmc_validity = static_cast<std::uint8_t>('A');
     latest_rtk_status_.gps_state = 4U;
     latest_rtk_status_.speed_mps = 0.0;
     latest_rtk_status_.track_degrees = 0.0;
     simulation_progress_ratio_ = simulated->progress_ratio;
+    updateCalibrationFromLatestRtk(received_ns);
     if (simulated->reached_point_b && !simulation_reached_logged_) {
       RCLCPP_INFO(get_logger(), "SIMULATION REACHED POINT B");
       simulation_reached_logged_ = true;
@@ -545,10 +538,11 @@ private:
 
   void onOdometry(nav_msgs::msg::Odometry::SharedPtr message)
   {
+    const std::int64_t received_ns = now().nanoseconds();
     OdomSample sample;
     sample.stamp_ns = toNanoseconds(message->header.stamp);
     if (sample.stamp_ns <= 0) {
-      sample.stamp_ns = now().nanoseconds();
+      sample.stamp_ns = received_ns;
     }
     sample.position_m = Vector3d{
       message->pose.pose.position.x,
@@ -564,13 +558,14 @@ private:
         get_logger(), *get_clock(), 5000, "丢弃时间戳乱序或非有限的ODIN里程计样本");
       return;
     }
+    last_odom_received_ns_ = received_ns;
     if (rtk_path_simulation_.active()) {
       if (rtk_path_simulation_.captureOdinOrigin(sample.position_m)) {
         RCLCPP_INFO(
           get_logger(), "仿真已记录真实ODIN起点：[%.3f, %.3f, %.3f] m",
           sample.position_m.x, sample.position_m.y, sample.position_m.z);
       }
-      generatePendingSimulatedRtk();
+      generateSimulatedRtk(sample, received_ns);
     }
     validateForwardAxisMotion(sample);
     last_absolute_orientation_ =
@@ -653,14 +648,19 @@ private:
 
   bool rtkReliable(const std::int64_t now_ns) const noexcept
   {
+    const double fix_age_s = rtk_path_simulation_.active() ?
+      ageSeconds(now_ns, last_simulated_rtk_received_ns_) :
+      ageSeconds(now_ns, latest_fix_.stamp_ns);
+    const double status_age_s = rtk_path_simulation_.active() ?
+      ageSeconds(now_ns, last_simulated_rtk_received_ns_) :
+      ageSeconds(now_ns, latest_rtk_status_.stamp_ns);
     if (!rawFixUsable() || !latest_rtk_status_.available ||
-      ageSeconds(now_ns, latest_fix_.stamp_ns) > rtk_timeout_s_ ||
-      ageSeconds(now_ns, latest_rtk_status_.stamp_ns) > rtk_timeout_s_)
+      fix_age_s > rtk_timeout_s_ || status_age_s > rtk_timeout_s_)
     {
       return false;
     }
     return latest_rtk_status_.gps_state > 0U &&
-           (rtk_path_simulation_.active() || isRmcValid(latest_rtk_status_.rmc_validity));
+           isRmcValid(latest_rtk_status_.rmc_validity);
   }
 
   void updateCalibrationFromLatestRtk(const std::int64_t now_ns)
@@ -677,7 +677,8 @@ private:
     if (!isFinite(rtk_enu)) {
       return;
     }
-    const auto sync_stamp = applyRtkTimeOffsetNs(latest_fix_.stamp_ns, rtk_time_offset_s_);
+    const auto sync_stamp = applyRtkTimeOffsetNs(
+      latest_fix_.stamp_ns, rtk_path_simulation_.active() ? 0.0 : rtk_time_offset_s_);
     if (!sync_stamp.has_value()) {
       heading_alignment_reason_ = "INVALID_RTK_SYNC_TIME";
       return;
@@ -903,7 +904,7 @@ private:
     }
     const auto latest_odom = odom_buffer_.latest();
     if (heading_alignment_valid_ && latest_odom.has_value() &&
-      ageSeconds(now_ns, latest_odom->stamp_ns) <= odometry_timeout_s_)
+      odometryUsable(now_ns, *latest_odom))
     {
       output.orientation = absoluteQuaternionFromOdin(delta_yaw_rad_, latest_odom->orientation_xyzw);
     } else {
@@ -920,7 +921,7 @@ private:
   {
     const auto latest_odom = odom_buffer_.latest();
     if (heading_alignment_valid_ && latest_odom.has_value() &&
-      ageSeconds(now_ns, latest_odom->stamp_ns) <= odometry_timeout_s_)
+      odometryUsable(now_ns, *latest_odom))
     {
       const Quaterniond absolute_orientation = absoluteQuaternionFromOdin(
         delta_yaw_rad_, latest_odom->orientation_xyzw);
@@ -931,7 +932,8 @@ private:
         return interfaces::msg::LocalizationStatus::HEADING_ODIN;
       }
     }
-    if (latest_rtk_status_.available && isRmcValid(latest_rtk_status_.rmc_validity) &&
+    if (!rtk_path_simulation_.active() && latest_rtk_status_.available &&
+      isRmcValid(latest_rtk_status_.rmc_validity) &&
       std::isfinite(latest_rtk_status_.track_degrees))
     {
       heading_enu_rad = clockwiseCourseDegreesToEnuYawRad(latest_rtk_status_.track_degrees);
@@ -946,7 +948,7 @@ private:
     if (!gyro_fallback_enabled_ || !last_dr_result_.has_value() ||
       !last_dr_result_->valid || !last_absolute_orientation_.has_value() ||
       !latest_odom.has_value() ||
-      ageSeconds(now_ns, latest_odom->stamp_ns) >
+      odometryAgeSeconds(now_ns, *latest_odom) >
       odometry_timeout_s_ + gyro_fallback_max_duration_s_ ||
       !latest_imu_.available || ageSeconds(now_ns, latest_imu_.stamp_ns) > imu_timeout_s_)
     {
@@ -1052,7 +1054,7 @@ private:
     output.enu = blended;
     const auto latest_odom = odom_buffer_.latest();
     if (heading_alignment_valid_ && latest_odom.has_value() &&
-      ageSeconds(now_ns, latest_odom->stamp_ns) <= odometry_timeout_s_)
+      odometryUsable(now_ns, *latest_odom))
     {
       output.orientation = absoluteQuaternionFromOdin(delta_yaw_rad_, latest_odom->orientation_xyzw);
     } else {
@@ -1161,18 +1163,29 @@ private:
     message.simulation_progress_percent = 100.0 * simulation_progress_ratio_;
     message.distance_from_anchor_m = output.distance_from_anchor_m;
     message.dr_duration_s = output.dr_duration_s;
-    message.rtk_age_s = statusAgeSeconds(now_ns, latest_fix_.stamp_ns);
+    message.rtk_age_s = rtk_path_simulation_.active() ?
+      statusAgeSeconds(now_ns, last_simulated_rtk_received_ns_) :
+      statusAgeSeconds(now_ns, latest_fix_.stamp_ns);
     message.odometry_age_s =
-      latest_odom.has_value() ? statusAgeSeconds(now_ns, latest_odom->stamp_ns) : -1.0;
+      latest_odom.has_value() ? odometryAgeSeconds(now_ns, *latest_odom) : -1.0;
     message.imu_age_s = statusAgeSeconds(now_ns, latest_imu_.stamp_ns);
     message.position_difference_to_rtk_m = output.position_difference_to_rtk_m;
     message.invalid_reason = output.valid ? "NONE" : output.invalid_reason;
     status_publisher_->publish(message);
   }
 
+  double odometryAgeSeconds(
+    const std::int64_t now_ns, const OdomSample & odom) const noexcept
+  {
+    return rtk_path_simulation_.active() ?
+      statusAgeSeconds(now_ns, last_odom_received_ns_) :
+      statusAgeSeconds(now_ns, odom.stamp_ns);
+  }
+
   bool odometryUsable(const std::int64_t now_ns, const OdomSample & odom) const noexcept
   {
-    return ageSeconds(now_ns, odom.stamp_ns) <= odometry_timeout_s_;
+    const double age_s = odometryAgeSeconds(now_ns, odom);
+    return age_s >= 0.0 && age_s <= odometry_timeout_s_;
   }
 
   double output_rate_hz_{10.0};
@@ -1248,7 +1261,8 @@ private:
   AnchorCandidate last_reliable_anchor_candidate_;
   double simulation_progress_ratio_{0.0};
   bool simulation_reached_logged_{false};
-  std::optional<std::int64_t> pending_simulation_stamp_ns_;
+  std::int64_t last_simulated_rtk_received_ns_{0};
+  std::int64_t last_odom_received_ns_{0};
   std::optional<DeadReckoningAnchor> active_anchor_;
   std::int64_t dr_start_ns_{0};
   std::optional<DeadReckoningResult> last_dr_result_;
@@ -1267,7 +1281,6 @@ private:
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odometry_publisher_;
   rclcpp::Publisher<interfaces::msg::LocalizationStatus>::SharedPtr status_publisher_;
   rclcpp::TimerBase::SharedPtr output_timer_;
-  rclcpp::TimerBase::SharedPtr simulation_timer_;
 };
 
 }  // namespace localization

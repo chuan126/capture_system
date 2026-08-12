@@ -305,20 +305,19 @@ TEST(RtkPathSimulationTest, DefaultOneMeterPathProducesValidHeadingCorrection)
     actual_options, simulation.horizontalDistanceM());
   EXPECT_NEAR(
     fit_options.valid_baseline_m, 0.9 * simulation.horizontalDistanceM(), 1.0e-12);
-  EXPECT_EQ(fit_options.min_samples, 3U);
+  EXPECT_EQ(fit_options.min_samples, 2U);
 
   HeadingRigidAlignmentEstimator estimator(fit_options);
   constexpr std::int64_t start_ns = 1'000'000'000LL;
-  for (std::size_t index = 0; index <= 20U; ++index) {
-    const double distance = simulation.horizontalDistanceM() *
-      static_cast<double>(index) / 20.0;
+  for (std::size_t index = 0; index <= 1U; ++index) {
+    const double distance = simulation.horizontalDistanceM() * static_cast<double>(index);
     const Vector3d odin_position{10.0 + distance, 20.0, 0.0};
     const auto simulated_fix = simulation.generate(odin_position);
     ASSERT_TRUE(simulated_fix.has_value());
     const Enu simulated_enu = llhToEnu(simulation.pointA(), simulated_fix->llh);
     estimator.addSample(
       HeadingFitSample{
-        start_ns + static_cast<std::int64_t>(index) * 100'000'000LL,
+        start_ns + static_cast<std::int64_t>(index) * 1'000'000'000LL,
         odin_position.x, odin_position.y,
         simulated_enu.east_m, simulated_enu.north_m});
   }
