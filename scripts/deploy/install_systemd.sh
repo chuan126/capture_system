@@ -24,10 +24,17 @@ if ! capture_networkmanager_permissions_ready "${run_user}"; then
   exit 1
 fi
 
+if systemctl is-enabled --quiet capture-system.service 2>/dev/null; then
+  echo "capture-system.service 已启用，不能同时安装并启用 Web-only capture-web.service。" >&2
+  echo "如需关闭完整开机自启，请用 build.sh --autostart off 后执行 apply_autostart.sh。" >&2
+  exit 1
+fi
+
 cat >"${service_path}" <<EOF
 [Unit]
 Description=Capture System LAN Web Service
 After=network.target
+Conflicts=capture-system.service
 
 [Service]
 Type=simple

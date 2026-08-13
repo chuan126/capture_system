@@ -36,7 +36,13 @@ enu_cloud_transform_node:
 
     # 点云与里程计回调独立处理，等待队列增加到5帧。
     pending_cloud_limit: 5
-    processing_period_ms: 2
+
+    # AIO-3588JQ实机A/B/C表明10 ms已获得绝大多数空轮询CPU收益；允许范围[1, 100] ms。
+    # 本参数仅在节点启动时读取，修改后需要重启节点或capture-system.service。
+    processing_poll_interval_ms: 10
+
+    # 复用系统现有原始诊断入口；ENU明细直接从该Topic读取。
+    diagnostics_topic: /diagnostics
 
     # 姿态覆盖率达到75%时，转换器本身会发布含NaN的部分点云。
     # 低于75%的帧默认丢弃，不把稀疏点云送入净空检测。

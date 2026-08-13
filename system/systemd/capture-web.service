@@ -2,6 +2,7 @@
 # 请运行 sudo bash scripts/deploy/install_systemd.sh，由安装脚本写入当前项目真实路径和运行用户。
 [Unit]
 Description=Capture System LAN Web Service
+Conflicts=capture-system.service
 
 [Service]
 Type=simple

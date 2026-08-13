@@ -52,3 +52,33 @@ r_n,i = R_n<-b(t_i) r_l,i + p_n(t_i) - p_n(t_0)
 - 支持点云和里程计时间偏移标定。
 
 60 km/h时约94 ms扫描内车辆位移约1.57 m。默认单帧最大平移门限为2.5 m，用于拒绝里程计短时跳变。
+
+## 处理轮询与运行诊断
+
+`processing_poll_interval_ms`控制`processPendingClouds`的轮询周期，单位为毫秒，合法
+范围为`[1, 100]`，正式默认值为`10`。该参数只在节点启动时读取；修改配置后必须重启
+节点或`capture-system.service`。AIO-3588JQ实机单变量对照中，2、10、20 ms对应的ENU
+进程平均CPU分别约为35.5%、27.1%、26.9%。10 ms已经获得绝大多数空轮询收益，20 ms
+相比10 ms几乎没有新增CPU收益，因此当前采用10 ms。10 ms会增加一定处理等待时间，
+不能解释为零延迟优化；实机稳定窗口内raw/output时间戳配对完整，未出现持续drop或持续
+姿态插值失败。
+
+节点每秒向现有原始`/diagnostics`入口发布
+`motion_compensation/enu_cloud_transform`。当前`system_monitor`只从该入口提取RTK状态，
+不会把ENU明细透传到`/capture/system/diagnostics`，因此维护流程应直接读取`/diagnostics`。
+统计使用原子累计量，不保存逐帧历史：
+
+- `pending_cloud_count`是发布诊断时的当前队列深度；`pending_cloud_max_count`是进程启动
+  后观测到的最大深度。
+- `clouds_received_total`在点云订阅回调收到消息时累计。
+- `clouds_processed_total`只累计完成正常补偿点云构造并调用publish的帧。
+- `clouds_dropped_total`累计队列溢出、无效点云布局或未进入正常输出的转换失败帧；等待
+  位姿的帧不计drop。
+- `pose_wait_count`是处理轮询发现PoseBuffer尚未初始化或尚未覆盖当前帧尾部时的检查
+  次数，不等于唯一等待帧数。
+- `interpolation_failure_count`累计`REFERENCE_POSE_NOT_COVERED`、
+  `NO_POINT_POSE_COVERED`和`INSUFFICIENT_POSE_COVERAGE`结果；该计数不改变原错误处理。
+- `queue_wait_ms_last/mean/max`使用`steady_clock`，定义为点云进入pending队列到该帧
+  具备姿态覆盖并真正开始处理的本机等待时间。
+- `processing_time_ms_last/mean/max`使用`steady_clock`，只统计正常输出帧从开始解析到
+  完成输出构造及publish调用的本机处理时间。

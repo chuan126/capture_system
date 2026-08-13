@@ -20,6 +20,14 @@ class _TopicState:
     timestamps: deque[float] = field(default_factory=lambda: deque(maxlen=256))
     extra: dict[str, object] = field(default_factory=dict)
 
+    def reset(self) -> None:
+        self.received_count = 0
+        self.last_received_monotonic = None
+        self.last_received_ns = None
+        self.last_sensor_stamp_ns = None
+        self.timestamps.clear()
+        self.extra = {}
+
     def update(self, message: object, extra: dict[str, object] | None = None) -> None:
         now_monotonic = time.monotonic()
         self.received_count += 1
@@ -72,12 +80,15 @@ def _finite_or_none(value: object) -> float | None:
 class DevTelemetryBridge:
     """Development-only ROS topic counters and latest diagnostic values."""
 
-    def __init__(self) -> None:
+    def __init__(self, idle_timeout_seconds: float = 3.0) -> None:
         self._thread: threading.Thread | None = None
         self._started = threading.Event()
         self._stop_requested = threading.Event()
         self._executor: object | None = None
         self._lock = threading.Lock()
+        self._lifecycle_lock = threading.Lock()
+        self._idle_timeout_seconds = max(0.1, float(idle_timeout_seconds))
+        self._idle_deadline_monotonic: float | None = None
         self.error: str | None = None
         self._states = {
             "raw_cloud": _TopicState("raw_cloud", "/capture/lidar/points_raw", "sensor_msgs/msg/PointCloud2"),
@@ -90,33 +101,65 @@ class DevTelemetryBridge:
             "recording_status": _TopicState("recording_status", "/capture/recording/status", "interfaces/msg/RecordingStatus"),
         }
 
+    @property
+    def active(self) -> bool:
+        thread = self._thread
+        return bool(thread is not None and thread.is_alive() and self._started.is_set() and self.error is None)
+
     def start(self, timeout_seconds: float = 3.0) -> bool:
-        if self._thread is not None:
-            return self.error is None
-        self._thread = threading.Thread(target=self._run, name="dev-telemetry-ros", daemon=True)
-        self._thread.start()
-        if not self._started.wait(timeout_seconds):
+        """启动持续诊断桥；主要供测试或显式生命周期管理使用。"""
+        return self._ensure_started(timeout_seconds=timeout_seconds, idle_deadline=None)
+
+    def touch(self, timeout_seconds: float = 3.0) -> bool:
+        """为开发页面续租诊断桥；页面停止轮询后自动释放高频ROS订阅。"""
+        deadline = time.monotonic() + self._idle_timeout_seconds
+        return self._ensure_started(timeout_seconds=timeout_seconds, idle_deadline=deadline)
+
+    def _ensure_started(self, *, timeout_seconds: float, idle_deadline: float | None) -> bool:
+        with self._lifecycle_lock:
+            self._idle_deadline_monotonic = idle_deadline
+            if self._thread is not None and self._thread.is_alive():
+                started_event = self._started
+            else:
+                self._started.clear()
+                self._stop_requested.clear()
+                self.error = None
+                with self._lock:
+                    for state in self._states.values():
+                        state.reset()
+                self._thread = threading.Thread(target=self._run, name="dev-telemetry-ros", daemon=True)
+                self._thread.start()
+                started_event = self._started
+
+        if not started_event.wait(timeout_seconds):
             self.error = "开发诊断ROS桥启动超时"
             return False
         return self.error is None
 
     def stop(self, timeout_seconds: float = 3.0) -> None:
-        self._stop_requested.set()
-        executor = self._executor
+        with self._lifecycle_lock:
+            self._idle_deadline_monotonic = None
+            self._stop_requested.set()
+            executor = self._executor
+            thread = self._thread
         if executor is not None:
             try:
                 executor.wake()
             except Exception:
                 pass
-        if self._thread is not None:
-            self._thread.join(timeout_seconds)
+        if thread is not None:
+            thread.join(timeout_seconds)
+        with self._lifecycle_lock:
+            if self._thread is thread and (thread is None or not thread.is_alive()):
+                self._thread = None
+                self._started.clear()
 
     def snapshot(self) -> dict[str, object]:
         now_monotonic = time.monotonic()
         with self._lock:
             topics = {key: state.to_dict(now_monotonic) for key, state in self._states.items()}
         return {
-            "bridge_available": self._started.is_set() and self.error is None,
+            "bridge_available": self.active,
             "bridge_error": self.error,
             "emitted_at_ns": time.time_ns(),
             "topics": topics,
@@ -251,6 +294,9 @@ class DevTelemetryBridge:
             self._started.set()
             while not self._stop_requested.is_set():
                 executor.spin_once(timeout_sec=0.1)
+                deadline = self._idle_deadline_monotonic
+                if deadline is not None and time.monotonic() >= deadline:
+                    break
         except Exception as exception:
             self.error = f"{type(exception).__name__}: {exception}"
             self._started.set()

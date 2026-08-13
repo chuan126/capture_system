@@ -244,8 +244,9 @@ echo "雷达口：${CAPTURE_LIDAR_INTERFACE} ${CAPTURE_LIDAR_HOST_IPV4}/24 -> ${
 echo "维护口：${CAPTURE_DIRECT_INTERFACE} ${CAPTURE_DIRECT_IPV4}/24，NetworkManager shared/DHCP"
 echo
 echo "install.sh 未执行编译，也未启动任何 Capture System 节点。"
-echo "下一步构建：bash scripts/build/build.sh all --release --variant ${variant}"
+echo "下一步构建：bash scripts/build/build.sh all --release --variant ${variant} --autostart off"
 echo "构建后前台启动：bash scripts/operation/run_lan_preview.sh"
+echo "如需完整开机自启：构建时改用 --autostart on，然后执行 sudo bash scripts/deploy/apply_autostart.sh"
 echo "接好雷达和维护网线后的网络实测：sudo bash scripts/deploy/verify_deployment.sh --network-only"
 echo "状态检查：sudo bash scripts/deploy/status.sh"
 echo "清除本次部署配置：sudo bash scripts/deploy/clear_config.sh"

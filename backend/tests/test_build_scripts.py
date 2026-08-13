@@ -95,3 +95,20 @@ def test_running_guard_uses_local_processes_and_does_not_block_on_remote_ros_nod
     assert "ros2 node list" in block
     assert "不阻止本机构建" in block
     assert 'die "采集系统仍在运行' not in block
+
+
+def test_build_autostart_is_metadata_not_system_mutation() -> None:
+    source = (BUILD_DIR / "build.sh").read_text()
+    assert "--autostart MODE" in source
+    assert "CAPTURE_AUTOSTART_DESIRED" in source
+    assert 'write_build_metadata' in source
+    assert 'systemctl enable capture-system.service' not in source
+    assert 'sudo systemctl' not in source
+    assert 'apply_autostart.sh' in source
+
+
+def test_build_guard_explains_how_to_stop_autostart_before_ros_rebuild() -> None:
+    source = (BUILD_DIR / "build.sh").read_text()
+    assert 'systemctl is-active --quiet capture-system.service' in source
+    assert 'scripts/operation/stop_capture_system.sh' in source
+    assert '不会关闭下次开机自启' in source

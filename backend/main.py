@@ -80,6 +80,8 @@ def create_app(
     clearance_bridge_factory: Callable[..., ClearanceBridge] = ClearanceBridge,
     task_control_bridge_factory: Callable[..., TaskControlBridge] = TaskControlBridge,
     devtools_enabled: bool | None = None,
+    dev_telemetry_bridge_factory: Callable[[], object] | None = None,
+    dev_raw_cloud_bridge_factory: Callable[..., object] | None = None,
 ) -> FastAPI:
     site_directory = (static_dir or resolve_static_dir()).resolve()
     if data_root is not None:
@@ -125,7 +127,8 @@ def create_app(
         from backend.devtools.telemetry_bridge import DevTelemetryBridge
         from backend.devtools.system_metrics import SystemMetricsSampler
 
-        dev_telemetry_bridge = DevTelemetryBridge()
+        telemetry_factory = dev_telemetry_bridge_factory or DevTelemetryBridge
+        dev_telemetry_bridge = telemetry_factory()
         dev_raw_cloud_hub = CloudPreviewHub()
         dev_parameter_bridge = DevParameterBridge()
         dev_parameter_service = DevParameterService(bridge=dev_parameter_bridge)
@@ -166,19 +169,18 @@ def create_app(
             # 实时监视仍可启动，但任务接口会明确返回503，不能退化为浏览器临时任务。
             LOGGER.error("%s", error)
 
-        bridge: CloudPreviewBridge | None = None
         rtk_bridge: RtkBridge | None = None
         system_status_bridge: SystemStatusBridge | None = None
         clearance_bridge: ClearanceBridge | None = None
         task_control_bridge: TaskControlBridge | None = None
-        active_dev_raw_cloud_bridge = None
+        application.state.cloud_preview_bridge_lock = asyncio.Lock()
+        application.state.dev_raw_cloud_bridge_lock = asyncio.Lock()
         if start_ros_bridge:
             loop = asyncio.get_running_loop()
-            bridge = bridge_factory(
+            application.state.cloud_preview_bridge_factory = lambda: bridge_factory(
                 lambda frame: loop.call_soon_threadsafe(hub.publish, frame)
             )
-            started = bridge.start()
-            hub.set_ros_availability(started, bridge.error)
+            hub.set_ros_availability(False, "等待点云预览客户端")
             rtk_bridge = rtk_bridge_factory(
                 lambda snapshot: loop.call_soon_threadsafe(rtk_hub.publish, snapshot)
             )
@@ -205,15 +207,14 @@ def create_app(
             if development_tools_enabled and dev_parameter_bridge is not None and dev_parameter_service is not None:
                 dev_parameter_bridge.start()
                 dev_parameter_service.start()
-            if development_tools_enabled and dev_telemetry_bridge is not None and dev_raw_cloud_hub is not None:
+            if development_tools_enabled and dev_raw_cloud_hub is not None:
                 from backend.devtools.raw_cloud_bridge import DevRawCloudPreviewBridge
 
-                dev_telemetry_bridge.start()
-                active_dev_raw_cloud_bridge = DevRawCloudPreviewBridge(
+                raw_factory = dev_raw_cloud_bridge_factory or DevRawCloudPreviewBridge
+                application.state.dev_raw_cloud_bridge_factory = lambda: raw_factory(
                     lambda frame: loop.call_soon_threadsafe(dev_raw_cloud_hub.publish, frame)
                 )
-                raw_started = active_dev_raw_cloud_bridge.start()
-                dev_raw_cloud_hub.set_ros_availability(raw_started, active_dev_raw_cloud_bridge.error)
+                dev_raw_cloud_hub.set_ros_availability(False, "等待开发点云预览客户端")
         else:
             if development_tools_enabled and dev_parameter_bridge is not None and dev_parameter_service is not None:
                 dev_parameter_bridge.start()
@@ -225,8 +226,10 @@ def create_app(
         try:
             yield
         finally:
-            if bridge is not None:
-                bridge.stop()
+            cloud_preview_bridge = application.state.cloud_preview_bridge
+            if cloud_preview_bridge is not None:
+                cloud_preview_bridge.stop()
+                application.state.cloud_preview_bridge = None
             if rtk_bridge is not None:
                 rtk_bridge.stop()
             if system_status_bridge is not None:
@@ -235,8 +238,10 @@ def create_app(
                 clearance_bridge.stop()
             if task_control_bridge is not None:
                 task_control_bridge.stop()
+            active_dev_raw_cloud_bridge = application.state.dev_raw_cloud_bridge
             if active_dev_raw_cloud_bridge is not None:
                 active_dev_raw_cloud_bridge.stop()
+                application.state.dev_raw_cloud_bridge = None
             if dev_telemetry_bridge is not None:
                 dev_telemetry_bridge.stop()
             if dev_parameter_service is not None:
@@ -252,6 +257,9 @@ def create_app(
         lifespan=lifespan,
     )
     application.state.cloud_preview_hub = hub
+    application.state.cloud_preview_bridge = None
+    application.state.cloud_preview_bridge_factory = None
+    application.state.cloud_preview_bridge_lock = None
     application.state.rtk_hub = rtk_hub
     application.state.system_status_hub = system_status_hub
     application.state.clearance_hub = clearance_hub
@@ -264,7 +272,11 @@ def create_app(
     application.state.capture_version = resolve_version()
     application.state.devtools_enabled = development_tools_enabled
     application.state.dev_telemetry_bridge = dev_telemetry_bridge
+    application.state.dev_ros_bridge_enabled = start_ros_bridge
     application.state.dev_raw_cloud_hub = dev_raw_cloud_hub
+    application.state.dev_raw_cloud_bridge = None
+    application.state.dev_raw_cloud_bridge_factory = None
+    application.state.dev_raw_cloud_bridge_lock = None
     application.state.dev_recording_manager = dev_recording_manager
     application.state.dev_parameter_service = dev_parameter_service
     application.state.dev_system_metrics = dev_system_metrics

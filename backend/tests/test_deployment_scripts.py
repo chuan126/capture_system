@@ -94,7 +94,7 @@ def test_polkit_authority_detection_prefers_local_authority_log(tmp_path) -> Non
 def test_deployment_state_tracks_both_polkit_formats() -> None:
     source = read("scripts/deploy/deployment_state.py")
     clear = read("scripts/deploy/clear_config.sh")
-    assert 'SCHEMA_VERSION = 4' in source
+    assert 'SCHEMA_VERSION = 5' in source
     assert '/etc/polkit-1/rules.d/50-capture-networkmanager.rules' in source
     assert '/etc/polkit-1/localauthority/50-local.d/50-capture-networkmanager.pkla' in source
     assert 'supplement_snapshot_files(baseline' in source
@@ -339,3 +339,88 @@ def test_polkit_authority_detection_defaults_to_rules_without_local_evidence(tmp
     )
     assert result.returncode == 0
     assert result.stdout.strip() == "rules"
+
+
+def test_full_autostart_is_explicit_build_metadata_plus_apply_step() -> None:
+    build = read("scripts/build/build.sh")
+    apply = read("scripts/deploy/apply_autostart.sh")
+    service = read("system/systemd/capture-system.service")
+    assert "--autostart MODE" in build
+    assert "CAPTURE_AUTOSTART_DESIRED" in build
+    assert "capture-system.service" in apply
+    assert 'systemctl enable "${service_name}"' in apply
+    assert 'systemctl disable "${service_name}"' in apply
+    assert "capture-web.service" in apply
+    assert "本脚本没有启动或停止当前业务实例" in apply
+    assert "ExecStart=@PROJECT_ROOT@/scripts/operation/run_lan_preview.sh" in service
+    assert "ExecStartPre=@PROJECT_ROOT@/scripts/operation/check_autostart_ready.sh" in service
+    assert "Restart=on-failure" in service
+    assert "RestartPreventExitStatus=75" in service
+    assert "Conflicts=capture-web.service" in service
+
+
+def test_full_autostart_service_is_tracked_by_state_status_clear_and_verify() -> None:
+    state = read("scripts/deploy/deployment_state.py")
+    status = read("scripts/deploy/status.sh")
+    clear = read("scripts/deploy/clear_config.sh")
+    verify = read("scripts/deploy/verify_deployment.sh")
+    assert '/etc/systemd/system/capture-system.service' in state
+    assert 'capture-system.service' in state
+    assert 'extend-managed-state' in state
+    assert 'capture-system.service' in status
+    assert 'build autostart desired' in status
+    assert '--autostart-only' in verify
+    assert '--expect-autostart' in verify
+    assert 'capture-system.service' in verify
+    assert '--component systemd-files' in clear
+    assert '--component capture-services' in clear
+
+
+def test_web_only_systemd_installer_conflicts_with_full_service() -> None:
+    installer = read("scripts/deploy/install_systemd.sh")
+    template = read("system/systemd/capture-web.service")
+    assert "Conflicts=capture-system.service" in installer
+    assert "Conflicts=capture-system.service" in template
+    assert "systemctl is-enabled --quiet capture-system.service" in installer
+
+
+def test_autostart_apply_does_not_create_or_delete_runtime_data() -> None:
+    apply = read("scripts/deploy/apply_autostart.sh")
+    forbidden = [
+        'mkdir -p "${project_root}/runtime',
+        'rm -rf "${project_root}/runtime',
+        'rm -f "${project_root}/runtime',
+    ]
+    for token in forbidden:
+        assert token not in apply
+
+
+def test_stop_script_stops_current_service_without_disabling_autostart() -> None:
+    stop = read("scripts/operation/stop_capture_system.sh")
+    assert 'systemctl stop "${service_name}"' in stop
+    assert "systemctl disable" not in stop
+    assert "下一次开机仍按现有自启配置启动" in stop
+
+
+def test_full_runtime_has_shared_instance_lock_and_unexpected_zero_exit_is_failure() -> None:
+    runtime = read("scripts/operation/run_lan_preview.sh")
+    assert "capture-system.lock" in runtime
+    assert "flock -n 8" in runtime
+    assert "exit 75" in runtime
+    assert "if (( child_status == 0 ))" in runtime
+    assert "child_status=1" in runtime
+
+
+def test_scripts_readme_documents_common_autostart_and_rebuild_commands() -> None:
+    readme = read("scripts/README.md")
+    for token in [
+        "--autostart on",
+        "--autostart off",
+        "sudo bash scripts/deploy/apply_autostart.sh",
+        "sudo bash scripts/operation/stop_capture_system.sh",
+        "sudo systemctl start capture-system.service",
+        "journalctl -u capture-system.service -f",
+        "verify_deployment.sh --autostart-only",
+        "verify_deployment.sh --expect-autostart",
+    ]:
+        assert token in readme

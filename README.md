@@ -116,10 +116,10 @@ bash scripts/build/build.sh all --release
 
 ```bash
 # 客户交付
-bash scripts/build/build.sh all --release --variant customer
+bash scripts/build/build.sh all --release --variant customer --autostart off
 
 # 开发调试，包含“测试”页面与 /api/dev、/ws/dev
-bash scripts/build/build.sh all --release --variant development
+bash scripts/build/build.sh all --release --variant development --autostart off
 ```
 
 开发测试工具说明见 `docs/development/devtools.md`。
@@ -178,6 +178,21 @@ http://capture-system.local:8000/api/health
 ```
 
 详细步骤见 [局域网网页部署](docs/deployment/局域网网页部署.md)。
+
+需要完整开机自启时，在构建命令中选择 `--autostart on`，构建成功后再显式应用 systemd 配置：
+
+```bash
+bash scripts/build/build.sh all --release --variant customer --autostart on
+sudo bash scripts/deploy/apply_autostart.sh
+```
+
+构建过程本身不会修改 systemd。开机自启实例运行时需要改代码，应先执行：
+
+```bash
+sudo bash scripts/operation/stop_capture_system.sh
+```
+
+该命令只停止当前实例，不会关闭下次开机自启。完整命令见 [工程脚本](scripts/README.md)。
 
 ## 工程目录
 

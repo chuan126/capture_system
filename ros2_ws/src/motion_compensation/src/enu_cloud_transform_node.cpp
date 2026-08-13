@@ -1,6 +1,12 @@
 #include "motion_compensation/enu_cloud_transformer.hpp"
+#include "motion_compensation/enu_processing_diagnostics.hpp"
 
 #include <builtin_interfaces/msg/time.hpp>
+#include <diagnostic_msgs/msg/diagnostic_array.hpp>
+#include <diagnostic_msgs/msg/diagnostic_status.hpp>
+#include <diagnostic_msgs/msg/key_value.hpp>
+#include <rcl_interfaces/msg/integer_range.hpp>
+#include <rcl_interfaces/msg/parameter_descriptor.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp/create_timer.hpp>
@@ -14,11 +20,14 @@
 #include <cstdint>
 #include <deque>
 #include <functional>
+#include <iomanip>
 #include <memory>
 #include <mutex>
 #include <limits>
+#include <sstream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace motion_compensation
@@ -40,6 +49,27 @@ bool hasFloat32Field(const sensor_msgs::msg::PointCloud2 & message, const std::s
     });
 }
 
+diagnostic_msgs::msg::KeyValue diagnosticValue(
+  const std::string & key, const std::string & value)
+{
+  diagnostic_msgs::msg::KeyValue item;
+  item.key = key;
+  item.value = value;
+  return item;
+}
+
+std::string milliseconds(const double value)
+{
+  std::ostringstream stream;
+  stream << std::fixed << std::setprecision(3) << value;
+  return stream.str();
+}
+
+bool isInterpolationFailure(const std::string & reason) noexcept
+{
+  return reason == "REFERENCE_POSE_NOT_COVERED" || reason == "NO_POINT_POSE_COVERED" ||
+         reason == "INSUFFICIENT_POSE_COVERAGE";
+}
 
 }  // namespace
 
@@ -66,10 +96,22 @@ public:
     output_frame_id_ = declare_parameter<std::string>("output_frame_id", "lidar_local_enu");
 
     const int pending_cloud_limit = declare_parameter<int>("pending_cloud_limit", 5);
-    const int processing_period_ms = declare_parameter<int>("processing_period_ms", 2);
-    if (pending_cloud_limit <= 0 || processing_period_ms <= 0 || output_frame_id_.empty()) {
+    rcl_interfaces::msg::ParameterDescriptor poll_interval_descriptor;
+    poll_interval_descriptor.description = "ENU pending点云处理轮询周期，单位ms；修改后需重启节点";
+    poll_interval_descriptor.read_only = true;
+    rcl_interfaces::msg::IntegerRange poll_interval_range;
+    poll_interval_range.from_value = kMinimumProcessingPollIntervalMs;
+    poll_interval_range.to_value = kMaximumProcessingPollIntervalMs;
+    poll_interval_range.step = 1;
+    poll_interval_descriptor.integer_range = {poll_interval_range};
+    processing_poll_interval_ms_ = declare_parameter<std::int64_t>(
+      "processing_poll_interval_ms", kDefaultProcessingPollIntervalMs,
+      poll_interval_descriptor);
+    validateProcessingPollIntervalMs(processing_poll_interval_ms_);
+    diagnostics_topic_ = declare_parameter<std::string>("diagnostics_topic", "/diagnostics");
+    if (pending_cloud_limit <= 0 || output_frame_id_.empty() || diagnostics_topic_.empty()) {
       throw std::invalid_argument(
-              "pending_cloud_limit和processing_period_ms必须为正数，output_frame_id不能为空");
+              "pending_cloud_limit必须为正数，output_frame_id和diagnostics_topic不能为空");
     }
     pending_cloud_limit_ = static_cast<std::size_t>(pending_cloud_limit);
     allowed_partial_tail_ns_ = nonnegativeSecondsToNanoseconds(
@@ -83,6 +125,8 @@ public:
 
     output_publisher_ = create_publisher<sensor_msgs::msg::PointCloud2>(
       output_topic_, rclcpp::QoS(rclcpp::KeepLast(5)).reliable().durability_volatile());
+    diagnostics_publisher_ = create_publisher<diagnostic_msgs::msg::DiagnosticArray>(
+      diagnostics_topic_, rclcpp::QoS(rclcpp::KeepLast(5)).reliable().durability_volatile());
 
     odometry_callback_group_ = create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
     cloud_callback_group_ = create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
@@ -103,16 +147,19 @@ public:
       cloud_options);
 
     processing_timer_ = rclcpp::create_wall_timer(
-      std::chrono::milliseconds(processing_period_ms),
+      std::chrono::milliseconds(processing_poll_interval_ms_),
       std::bind(&EnuCloudTransformNode::processPendingClouds, this),
       processing_callback_group_, get_node_base_interface().get(),
       get_node_timers_interface().get());
+    diagnostics_timer_ = create_wall_timer(
+      std::chrono::seconds(1), [this]() {publishDiagnostics();});
 
     RCLCPP_INFO(
       get_logger(),
-      "ENU点云转换已启动：cloud=%s odom=%s output=%s frame=%s；逐点旋转和平移补偿已启用",
+      "ENU点云转换已启动：cloud=%s odom=%s output=%s frame=%s poll=%ldms；"
+      "逐点旋转和平移补偿已启用",
       input_topic_.c_str(), odometry_topic_.c_str(), output_topic_.c_str(),
-      output_frame_id_.c_str());
+      output_frame_id_.c_str(), static_cast<long>(processing_poll_interval_ms_));
   }
 
 private:
@@ -176,21 +223,25 @@ private:
 
   void cloudCallback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr message)
   {
-    sensor_msgs::msg::PointCloud2::ConstSharedPtr dropped;
+    diagnostics_.recordCloudReceived();
+    const auto enqueued_at = EnuProcessingDiagnostics::Clock::now();
+    PendingCloud dropped;
     {
       std::lock_guard<std::mutex> lock(pending_clouds_mutex_);
       if (pending_clouds_.size() >= pending_cloud_limit_) {
         dropped = pending_clouds_.front();
         pending_clouds_.pop_front();
+        diagnostics_.recordCloudDropped();
       }
-      pending_clouds_.push_back(message);
+      pending_clouds_.push_back(PendingCloud{message, enqueued_at});
+      diagnostics_.observePendingCloudCount(pending_clouds_.size());
     }
-    if (dropped) {
+    if (dropped.message) {
       RCLCPP_WARN_THROTTLE(
         get_logger(), *get_clock(), 5000,
         "ENU点云等待队列已满，丢弃最旧点云但不发布空点云");
       if (publish_empty_on_failure_) {
-        publishEmptyCloud(*dropped);
+        publishEmptyCloud(*dropped.message);
       }
     }
   }
@@ -237,8 +288,14 @@ private:
   void processPendingClouds()
   {
     std::lock_guard<std::mutex> queue_lock(pending_clouds_mutex_);
-    while (!pending_clouds_.empty() && transformer_->initialized()) {
-      const auto message = pending_clouds_.front();
+    while (!pending_clouds_.empty()) {
+      if (!transformer_->initialized()) {
+        diagnostics_.recordPoseWait();
+        return;
+      }
+      const auto pending = pending_clouds_.front();
+      const auto message = pending.message;
+      const auto processing_started_at = EnuProcessingDiagnostics::Clock::now();
       std::vector<TimedRadarPoint> raw_points;
       std::int64_t cloud_stamp_ns = 0;
       std::int64_t last_point_stamp_ns = 0;
@@ -249,7 +306,9 @@ private:
         if (publish_empty_on_failure_) {
           publishEmptyCloud(*message);
         }
+        diagnostics_.recordCloudDropped();
         pending_clouds_.pop_front();
+        diagnostics_.observePendingCloudCount(pending_clouds_.size());
         continue;
       }
 
@@ -257,14 +316,19 @@ private:
       if (newest_pose_stamp_ns < last_point_stamp_ns &&
         last_point_stamp_ns - newest_pose_stamp_ns > allowed_partial_tail_ns_)
       {
+        diagnostics_.recordPoseWait();
         return;
       }
 
+      diagnostics_.observeQueueWait(processing_started_at - pending.enqueued_at);
       std::vector<EnuPoint> enu_points;
       std::string invalid_reason;
       TransformStatistics statistics;
       const bool fully_qualified = transformer_->transform(
         cloud_stamp_ns, raw_points, enu_points, invalid_reason, &statistics);
+      if (!fully_qualified && isInterpolationFailure(invalid_reason)) {
+        diagnostics_.recordInterpolationFailure();
+      }
       const bool can_publish_partial =
         publish_partial_cloud_ && statistics.transformed_point_count > 0U &&
         enu_points.size() == raw_points.size();
@@ -278,7 +342,9 @@ private:
         if (publish_empty_on_failure_) {
           publishEmptyCloud(*message);
         }
+        diagnostics_.recordCloudDropped();
         pending_clouds_.pop_front();
+        diagnostics_.observePendingCloudCount(pending_clouds_.size());
         continue;
       }
 
@@ -296,8 +362,49 @@ private:
       }
 
       publishCloud(*message, enu_points);
+      diagnostics_.recordCloudProcessed();
+      diagnostics_.observeProcessingTime(
+        EnuProcessingDiagnostics::Clock::now() - processing_started_at);
       pending_clouds_.pop_front();
+      diagnostics_.observePendingCloudCount(pending_clouds_.size());
     }
+  }
+
+  void publishDiagnostics()
+  {
+    const auto snapshot = diagnostics_.snapshot();
+    diagnostic_msgs::msg::DiagnosticArray array;
+    array.header.stamp = now();
+    diagnostic_msgs::msg::DiagnosticStatus status;
+    status.name = "motion_compensation/enu_cloud_transform";
+    status.hardware_id = "RK3588";
+    status.level = snapshot.pending_cloud_count >= pending_cloud_limit_ ?
+      diagnostic_msgs::msg::DiagnosticStatus::WARN :
+      diagnostic_msgs::msg::DiagnosticStatus::OK;
+    status.message = status.level == diagnostic_msgs::msg::DiagnosticStatus::OK ?
+      "ENU点云处理正常" : "ENU点云等待队列已满";
+    status.values = {
+      diagnosticValue(
+        "processing_poll_interval_ms", std::to_string(processing_poll_interval_ms_)),
+      diagnosticValue("pending_cloud_count", std::to_string(snapshot.pending_cloud_count)),
+      diagnosticValue(
+        "pending_cloud_max_count", std::to_string(snapshot.pending_cloud_max_count)),
+      diagnosticValue(
+        "clouds_received_total", std::to_string(snapshot.clouds_received_total)),
+      diagnosticValue(
+        "clouds_processed_total", std::to_string(snapshot.clouds_processed_total)),
+      diagnosticValue("clouds_dropped_total", std::to_string(snapshot.clouds_dropped_total)),
+      diagnosticValue("pose_wait_count", std::to_string(snapshot.pose_wait_count)),
+      diagnosticValue(
+        "interpolation_failure_count", std::to_string(snapshot.interpolation_failure_count)),
+      diagnosticValue("queue_wait_ms_last", milliseconds(snapshot.queue_wait_ms_last)),
+      diagnosticValue("queue_wait_ms_mean", milliseconds(snapshot.queue_wait_ms_mean)),
+      diagnosticValue("queue_wait_ms_max", milliseconds(snapshot.queue_wait_ms_max)),
+      diagnosticValue("processing_time_ms_last", milliseconds(snapshot.processing_time_ms_last)),
+      diagnosticValue("processing_time_ms_mean", milliseconds(snapshot.processing_time_ms_mean)),
+      diagnosticValue("processing_time_ms_max", milliseconds(snapshot.processing_time_ms_max))};
+    array.status.push_back(std::move(status));
+    diagnostics_publisher_->publish(std::move(array));
   }
 
   void publishCloud(
@@ -347,22 +454,33 @@ private:
   std::string odometry_topic_;
   std::string output_topic_;
   std::string output_frame_id_;
+  std::string diagnostics_topic_;
   std::size_t pending_cloud_limit_{5U};
+  std::int64_t processing_poll_interval_ms_{kDefaultProcessingPollIntervalMs};
   std::int64_t allowed_partial_tail_ns_{15000000LL};
   std::int64_t odometry_time_offset_ns_{0};
   std::int64_t cloud_time_offset_ns_{0};
   bool publish_partial_cloud_{false};
   bool publish_empty_on_failure_{false};
 
+  struct PendingCloud
+  {
+    sensor_msgs::msg::PointCloud2::ConstSharedPtr message;
+    EnuProcessingDiagnostics::Clock::time_point enqueued_at{};
+  };
+
+  EnuProcessingDiagnostics diagnostics_;
   std::mutex pending_clouds_mutex_;
-  std::deque<sensor_msgs::msg::PointCloud2::ConstSharedPtr> pending_clouds_;
+  std::deque<PendingCloud> pending_clouds_;
   rclcpp::CallbackGroup::SharedPtr odometry_callback_group_;
   rclcpp::CallbackGroup::SharedPtr cloud_callback_group_;
   rclcpp::CallbackGroup::SharedPtr processing_callback_group_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odometry_subscription_;
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr cloud_subscription_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr output_publisher_;
+  rclcpp::Publisher<diagnostic_msgs::msg::DiagnosticArray>::SharedPtr diagnostics_publisher_;
   rclcpp::TimerBase::SharedPtr processing_timer_;
+  rclcpp::TimerBase::SharedPtr diagnostics_timer_;
 };
 
 }  // namespace motion_compensation

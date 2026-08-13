@@ -119,14 +119,17 @@ TEST(EnuCloudTransformerTest, KeepsVendorZeroPointInvalidDuringMotion)
   ASSERT_TRUE(transformer.addPose(pose(1000000000LL, 0.0)));
   ASSERT_TRUE(transformer.addPose(pose(1010000000LL, 1.0)));
 
-  const std::vector<TimedRadarPoint> input{{0.0F, 0.0F, 0.0F, 0.005F}};
+  const std::vector<TimedRadarPoint> input{
+    {0.0F, 0.0F, 0.0F, 0.005F},
+    {1.0F, 0.0F, 0.0F, 0.005F}};
   std::vector<EnuPoint> output;
   std::string reason;
   ASSERT_TRUE(transformer.transform(1000000000LL, input, output, reason)) << reason;
-  ASSERT_EQ(output.size(), 1U);
+  ASSERT_EQ(output.size(), 2U);
   EXPECT_FLOAT_EQ(output[0].east, 0.0F);
   EXPECT_FLOAT_EQ(output[0].north, 0.0F);
   EXPECT_FLOAT_EQ(output[0].up, 0.0F);
+  EXPECT_FLOAT_EQ(output[1].east, 1.0F);
 }
 
 

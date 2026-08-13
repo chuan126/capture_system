@@ -13,9 +13,10 @@ import subprocess
 import sys
 from typing import Any
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 SYSTEMD_FILES = [
     "/etc/systemd/system/capture-web.service",
+    "/etc/systemd/system/capture-system.service",
 ]
 ENVIRONMENT_NETWORK_FILES = [
     "/etc/avahi/services/capture-system.service",
@@ -28,7 +29,7 @@ ENVIRONMENT_NETWORK_FILES = [
 ]
 PROJECT_FILES = SYSTEMD_FILES + ENVIRONMENT_NETWORK_FILES
 TRANSACTION_FILES = PROJECT_FILES
-CAPTURE_UNITS = ["capture-web.service"]
+CAPTURE_UNITS = ["capture-web.service", "capture-system.service"]
 GENERIC_SERVICES = ["NetworkManager.service", "avahi-daemon.service"]
 PROFILES = ["capture-lidar", "capture-direct"]
 PROFILE_PROPERTIES = [
@@ -127,6 +128,14 @@ def supplement_snapshot_files(snapshot: dict[str, Any], backup_dir: Path, file_p
         if raw_path not in files:
             files[raw_path] = backup_file(Path(raw_path), backup_dir)
 
+def supplement_snapshot_units(snapshot: dict[str, Any], units: list[str]) -> None:
+    capture_units = snapshot.setdefault("capture_units", {})
+    if not isinstance(capture_units, dict):
+        raise ValueError("状态快照 capture_units 字段格式无效")
+    for unit in units:
+        if unit not in capture_units:
+            capture_units[unit] = unit_state(unit)
+
 
 def user_groups(user: str) -> list[str]:
     if not user:
@@ -185,6 +194,7 @@ def cmd_snapshot(args: argparse.Namespace) -> int:
         # 兼容旧 schema。新增受管文件无法追溯首次安装前状态时，
         # 以本次升级前的当前状态补齐基线，避免 clear_config.sh 误删未知的既有配置。
         supplement_snapshot_files(baseline, backup_dir / "baseline-extension", PROJECT_FILES)
+        supplement_snapshot_units(baseline, CAPTURE_UNITS)
     payload = {
         "schema_version": SCHEMA_VERSION,
         "project_root": str(Path(args.project_root).resolve()),
@@ -200,6 +210,26 @@ def cmd_snapshot(args: argparse.Namespace) -> int:
     }
     atomic_write(state_file, payload)
     print(transaction_id)
+    return 0
+
+
+def cmd_extend_managed_state(args: argparse.Namespace) -> int:
+    path = Path(args.state_file)
+    if not path.exists():
+        return 0
+    state = load_state(path)
+    baseline = state.get("baseline")
+    if not isinstance(baseline, dict):
+        print("部署状态文件缺少 baseline 快照", file=sys.stderr)
+        return 1
+    extension_id = dt.datetime.now().strftime("%Y%m%dT%H%M%S") + f"-{os.getpid()}"
+    backup_dir = path.parent / "backups" / "managed-extension" / extension_id
+    backup_dir.mkdir(parents=True, exist_ok=False, mode=0o700)
+    supplement_snapshot_files(baseline, backup_dir, PROJECT_FILES)
+    supplement_snapshot_units(baseline, CAPTURE_UNITS)
+    state["schema_version"] = SCHEMA_VERSION
+    state["updated_at"] = dt.datetime.now(dt.timezone.utc).isoformat()
+    atomic_write(path, state)
     return 0
 
 
@@ -436,6 +466,10 @@ def build_parser() -> argparse.ArgumentParser:
     snapshot.add_argument("--variant", required=True)
     snapshot.add_argument("--capture-hostname", required=True)
     snapshot.set_defaults(func=cmd_snapshot)
+
+    extend = sub.add_parser("extend-managed-state")
+    extend.add_argument("--state-file", required=True)
+    extend.set_defaults(func=cmd_extend_managed_state)
 
     mark = sub.add_parser("mark")
     mark.add_argument("--state-file", required=True)

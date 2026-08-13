@@ -21,6 +21,8 @@ LOG_DIR="${PROJECT_ROOT}/.build-logs"
 COMMAND="all"
 BUILD_TYPE="Release"
 VARIANT="customer"
+AUTOSTART=""
+AUTOSTART_EXPLICIT=0
 CLEAN_FIRST=0
 FORCE_DEPS=0
 JOBS=""
@@ -69,6 +71,7 @@ usage() {
   scripts/build/build.sh doctor
   scripts/build/build.sh all --release
   scripts/build/build.sh all --release --variant development
+  scripts/build/build.sh all --release --variant customer --autostart on
   scripts/build/build.sh all --release --clean
   scripts/build/build.sh workspace --release
   scripts/build/build.sh web
@@ -80,6 +83,7 @@ usage() {
   --jobs N        并行度，默认 min(CPU 核心数, 2)
   --force-deps    强制重新安装 Python/npm 依赖
   --variant NAME  构建变体：customer（默认）或 development
+  --autostart MODE 开机自启目标：on 或 off；新项目默认 off，未指定时保留已有构建目标
   -h, --help      显示帮助
 
 命令说明
@@ -97,6 +101,10 @@ usage() {
 
 环境变量
   ALLOW_BUILD_WHILE_RUNNING=1  允许系统运行时编译 ROS 2，不推荐
+
+开机自启
+  --autostart 只记录构建期目标，不修改 systemd。
+  构建完成后执行 sudo bash scripts/deploy/apply_autostart.sh 才会应用到下次开机。
 
 变体说明
   customer      不编译测试工作台组件，不注册 /api/dev 与 /ws/dev
@@ -127,6 +135,13 @@ parse_args() {
         VARIANT="$1"
         ;;
       --variant=*) VARIANT="${1#*=}" ;;
+      --autostart)
+        shift
+        (( $# > 0 )) || die "--autostart 缺少值"
+        AUTOSTART="$1"
+        AUTOSTART_EXPLICIT=1
+        ;;
+      --autostart=*) AUTOSTART="${1#*=}"; AUTOSTART_EXPLICIT=1 ;;
       --jobs)
         shift
         (( $# > 0 )) || die "--jobs 缺少数值"
@@ -142,6 +157,19 @@ parse_args() {
     customer|development) ;;
     *) die "--variant 只能是 customer 或 development，当前为 ${VARIANT}" ;;
   esac
+
+  if (( AUTOSTART_EXPLICIT )); then
+    case "$AUTOSTART" in
+      on|off) ;;
+      *) die "--autostart 只能是 on 或 off，当前为 ${AUTOSTART}" ;;
+    esac
+  else
+    AUTOSTART="$(awk -F= '$1=="CAPTURE_AUTOSTART_DESIRED" {print $2}' "${STATE_DIR}/build.env" 2>/dev/null | tail -n1 || true)"
+    case "$AUTOSTART" in
+      on|off) ;;
+      *) AUTOSTART="off" ;;
+    esac
+  fi
 
 }
 
@@ -327,11 +355,15 @@ check_not_running() {
   [[ "${ALLOW_BUILD_WHILE_RUNNING:-0}" == "1" ]] && return
 
   local process_pattern local_processes nodes
+  if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet capture-system.service 2>/dev/null; then
+    die "检测到 capture-system.service 正在运行。请先执行 sudo bash scripts/operation/stop_capture_system.sh；该命令只停止当前实例，不会关闭下次开机自启"
+  fi
+
   process_pattern='run_lan_preview\.sh|run_ros_stack\.sh|task_manager_node|data_recorder_node|clearance_engine_node|dead_reckoning_node|odometry_timestamp_adapter_node|enu_cloud_transform_node|cloud_visualization_node|rtk_driver_node|system_monitor_node|odin_driver_|odin_hotplug_manager|odin_param_reader|web_.*_bridge'
   local_processes="$(pgrep -af "${process_pattern}" 2>/dev/null || true)"
   if [[ -n "${local_processes}" ]]; then
     printf '%s\n' "${local_processes}" >&2
-    die "检测到本机采集系统进程。请先停止对应前台启动进程，再编译 ROS 2"
+    die "检测到本机采集系统进程。若为前台 run_lan_preview.sh，请先在启动终端按 Ctrl+C；若为开机自启实例，请执行 sudo bash scripts/operation/stop_capture_system.sh"
   fi
 
   # ros2 node list 会发现同一 DDS Domain 内的远端节点，不能据此判断本机正在运行。
@@ -520,6 +552,15 @@ EOF_RUNTIME
   printf '%s\n' "$VARIANT" > "${STATE_DIR}/variant"
 }
 
+write_build_metadata() {
+  cat > "${STATE_DIR}/build.env" <<EOF_BUILD
+CAPTURE_BUILD_VARIANT=${VARIANT}
+CAPTURE_BUILD_TYPE=${BUILD_TYPE}
+CAPTURE_AUTOSTART_DESIRED=${AUTOSTART}
+EOF_BUILD
+  printf '%s\n' "${AUTOSTART}" > "${STATE_DIR}/autostart"
+}
+
 verify_customer_frontend() {
   [[ "$VARIANT" != "customer" ]] && return
   if grep -R -a -E '/api/dev/|/ws/dev/|开发测试版本' "${FRONTEND}/out" >/dev/null 2>&1; then
@@ -609,7 +650,12 @@ main() {
   info "命令      ${COMMAND}"
   info "构建类型  ${BUILD_TYPE}"
   info "构建变体  ${VARIANT}"
+  info "自启目标  ${AUTOSTART}"
   info "并行度    ${JOBS}"
+
+  case "$COMMAND" in
+    all|ros|workspace|driver|sdk|backend|web|clean|distclean) check_not_running ;;
+  esac
 
   case "$COMMAND" in
     doctor) run_doctor ;;
@@ -633,10 +679,17 @@ main() {
       ;;
   esac
 
+  case "$COMMAND" in
+    all|ros|workspace|driver|sdk|backend|web|verify) write_build_metadata ;;
+  esac
+
   printf '\n'
   ok "完成  ${COMMAND}"
   info "日志  ${LOG_FILE}"
-  [[ "$COMMAND" != "all" && "$COMMAND" != "verify" ]] || info "启动  scripts/operation/run_lan_preview.sh"
+  if [[ "$COMMAND" == "all" || "$COMMAND" == "verify" ]]; then
+    info "手工启动  bash scripts/operation/run_lan_preview.sh"
+    info "应用自启  sudo bash scripts/deploy/apply_autostart.sh"
+  fi
 }
 
 main "$@"

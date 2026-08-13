@@ -6,6 +6,8 @@ project_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 venv_dir="${project_root}/.venv"
 network_config="${project_root}/config/network/web.env"
 runtime_config="${project_root}/.build-state/runtime.env"
+state_dir="${project_root}/.build-state"
+instance_lock="${CAPTURE_INSTANCE_LOCK:-${state_dir}/capture-system.lock}"
 frontend_index="${project_root}/frontend/out/index.html"
 declare -a child_pids=()
 cleanup_started=0
@@ -55,7 +57,7 @@ cleanup() {
     fi
     wait "${pid}" 2>/dev/null || true
   done
-  echo "所有开发预览进程已停止。"
+  echo "所有 Capture System 进程已停止。"
 }
 
 trap cleanup EXIT
@@ -82,8 +84,19 @@ if [[ ! -f "${frontend_index}" ]]; then
   exit 1
 fi
 if ! command -v setsid >/dev/null 2>&1; then
-  print_error "系统缺少setsid，无法可靠管理开发预览进程。"
+  print_error "系统缺少setsid，无法可靠管理 Capture System 进程。"
   exit 1
+fi
+if ! command -v flock >/dev/null 2>&1; then
+  print_error "系统缺少flock，无法防止手工启动与systemd重复运行。"
+  exit 1
+fi
+mkdir -p "${state_dir}"
+exec 8>"${instance_lock}"
+if ! flock -n 8; then
+  print_error "已有 Capture System 完整实例正在运行，拒绝重复启动。"
+  print_error "若为开机自启实例，请先执行：sudo bash scripts/operation/stop_capture_system.sh"
+  exit 75
 fi
 
 if [[ -f "${network_config}" ]]; then
@@ -291,4 +304,9 @@ child_status=$?
 set -e
 
 print_error "有组件已经退出，退出码：${child_status}"
+# 主控制脚本没有主动要求的任一子组件退出都视为整套系统异常。
+# 即使子组件返回0，也需要让systemd的Restart=on-failure能够重新拉起完整链路。
+if (( child_status == 0 )); then
+  child_status=1
+fi
 exit "${child_status}"

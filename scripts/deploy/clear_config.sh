@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 # 清除 install.sh 写入的环境和双网口系统配置。
-# 不卸载 apt 软件包，不删除构建产物，不删除 runtime，不处理 Capture System systemd 单元。
+# 不卸载 apt 软件包，不删除构建产物，不删除 runtime；有部署快照时恢复 Capture System systemd 单元到首次安装前状态。
 
 # shellcheck disable=SC1091
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/common.sh"
@@ -20,7 +20,7 @@ usage() {
   - 不卸载 apt/Node/rosdep 已安装的软件包。
   - 不删除 .venv、node_modules、ROS 构建产物或其他源码目录。
   - 不删除 runtime、capture.db、tasks、measurements.db、reports 等正式数据。
-  - 不停止、删除或修改可选的 capture-web.service。
+  - 恢复 capture-web.service/capture-system.service 到首次安装前的文件、enable 和 active 状态。
 
 选项：
   --allow-ssh-network-reconfigure 允许修改当前 SSH 使用的有线接口
@@ -64,6 +64,10 @@ if [[ -f "${capture_state_file}" ]]; then
   echo '[CLEAR] 恢复 NetworkManager、Avahi 和运行用户串口权限状态'
   python3 "${capture_state_tool}" restore --state-file "${capture_state_file}" --scope baseline --component network-services
   python3 "${capture_state_tool}" restore --state-file "${capture_state_file}" --scope baseline --component user-groups
+
+  echo '[CLEAR] 恢复 Capture System systemd 单元到首次安装前状态'
+  python3 "${capture_state_tool}" restore --state-file "${capture_state_file}" --scope baseline --component systemd-files
+  python3 "${capture_state_tool}" restore --state-file "${capture_state_file}" --scope baseline --component capture-services
 else
   if (( ! force_without_state )); then
     echo "未找到部署状态文件 ${capture_state_file}。为避免误删部署前已有配置，默认拒绝无快照清理。" >&2
@@ -78,6 +82,10 @@ else
       nmcli connection delete "${profile}" >/dev/null
     fi
   done
+  systemctl disable --now capture-system.service >/dev/null 2>&1 || true
+  systemctl disable --now capture-web.service >/dev/null 2>&1 || true
+  rm -f /etc/systemd/system/capture-system.service /etc/systemd/system/capture-web.service
+  systemctl daemon-reload >/dev/null 2>&1 || true
   rm -f \
     /etc/avahi/services/capture-system.service \
     /etc/polkit-1/rules.d/50-capture-networkmanager.rules \
@@ -97,4 +105,4 @@ rmdir "${capture_state_dir}" 2>/dev/null || true
 
 printf '[CLEAR] install.sh 写入的环境和网络配置已清理。\n'
 printf '[CLEAR] apt/Node/rosdep 软件包未卸载。\n'
-printf '[CLEAR] 构建产物、systemd 单元和 runtime 数据均未修改。\n'
+printf '[CLEAR] 构建产物和 runtime 数据未修改；Capture System systemd 单元已按首次安装前快照恢复。\n'

@@ -40,6 +40,51 @@ def _is_same_origin(websocket: WebSocket) -> bool:
     return parsed_origin.scheme in {"http", "https"} and parsed_origin.netloc == host
 
 
+async def _ensure_cloud_preview_bridge(websocket: WebSocket, hub: CloudPreviewHub) -> None:
+    factory = getattr(websocket.app.state, "cloud_preview_bridge_factory", None)
+    lock = getattr(websocket.app.state, "cloud_preview_bridge_lock", None)
+    if factory is None or lock is None:
+        return
+
+    async with lock:
+        bridge = websocket.app.state.cloud_preview_bridge
+        if bridge is not None:
+            return
+        hub.clear_latest_frame()
+        try:
+            bridge = factory()
+            websocket.app.state.cloud_preview_bridge = bridge
+            started = await asyncio.to_thread(bridge.start)
+            hub.set_ros_availability(started, bridge.error)
+        except Exception as exception:
+            websocket.app.state.cloud_preview_bridge = None
+            hub.set_ros_availability(
+                False,
+                f"{type(exception).__name__}: {exception}",
+            )
+
+
+async def _release_cloud_preview_bridge(websocket: WebSocket, hub: CloudPreviewHub) -> None:
+    lock = getattr(websocket.app.state, "cloud_preview_bridge_lock", None)
+    if lock is None or hub.client_count != 0:
+        return
+
+    async with lock:
+        if hub.client_count != 0:
+            return
+        bridge = websocket.app.state.cloud_preview_bridge
+        websocket.app.state.cloud_preview_bridge = None
+        stop_error: str | None = None
+        if bridge is not None:
+            try:
+                await asyncio.to_thread(bridge.stop)
+            except Exception as exception:
+                stop_error = f"{type(exception).__name__}: {exception}"
+        if hub.client_count == 0:
+            hub.clear_latest_frame()
+            hub.set_ros_availability(False, stop_error or "等待点云预览客户端")
+
+
 @router.websocket("/ws/v1/cloud-preview")
 async def cloud_preview_socket(websocket: WebSocket) -> None:
     await websocket.accept()
@@ -63,13 +108,22 @@ async def cloud_preview_socket(websocket: WebSocket) -> None:
         await websocket.close(code=1013, reason="点云客户端数量已达到上限")
         return
 
+    await _ensure_cloud_preview_bridge(websocket, hub)
+
     last_stream_key: tuple[str, int] | None = None
     last_status_state: str | None = None
     last_status_sent = 0.0
     consecutive_timeouts = 0
+    disconnect_task = asyncio.create_task(websocket.receive())
 
     try:
         while True:
+            if disconnect_task.done():
+                message = disconnect_task.result()
+                if message.get("type") == "websocket.disconnect":
+                    return
+                disconnect_task = asyncio.create_task(websocket.receive())
+
             now = time.monotonic()
             status = hub.current_status()
             if (
@@ -103,7 +157,13 @@ async def cloud_preview_socket(websocket: WebSocket) -> None:
         # Starlette在连接已经关闭时可能以RuntimeError报告，清理路径与正常断开相同。
         pass
     finally:
+        disconnect_task.cancel()
+        try:
+            await disconnect_task
+        except asyncio.CancelledError:
+            pass
         hub.unregister(session)
+        await _release_cloud_preview_bridge(websocket, hub)
 
 
 @router.websocket("/ws/v1/rtk")

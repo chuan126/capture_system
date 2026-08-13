@@ -38,3 +38,14 @@ def test_runtime_sources_do_not_hardcode_previous_device_paths() -> None:
     combined = "\n".join(path.read_text(encoding="utf-8") for path in runtime_sources)
     assert "/home/cat/Project/capture_system" not in combined
     assert "/home/cat/.local/share/capture_system" not in combined
+
+
+def test_autostart_scripts_use_project_relative_paths_and_do_not_create_runtime_during_apply() -> None:
+    root = Path(__file__).resolve().parents[2]
+    apply = (root / "scripts/deploy/apply_autostart.sh").read_text(encoding="utf-8")
+    ready = (root / "scripts/operation/check_autostart_ready.sh").read_text(encoding="utf-8")
+    stop = (root / "scripts/operation/stop_capture_system.sh").read_text(encoding="utf-8")
+    assert 'capture_project_root' in apply
+    assert 'project_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"' in ready
+    assert '/home/firefly/project/capture_system' not in apply + ready + stop
+    assert 'mkdir -p "${project_root}/runtime' not in apply

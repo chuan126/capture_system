@@ -1,0 +1,32 @@
+# 本文件仅说明完整 Capture System 自启服务结构。不要直接复制到 /etc/systemd/system。
+# 请先用 build.sh --autostart on/off 选择构建目标，再执行 scripts/deploy/apply_autostart.sh。
+[Unit]
+Description=Capture System Full Capture Service
+Wants=network-online.target
+After=NetworkManager.service network-online.target
+Conflicts=capture-web.service
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=@RUN_USER@
+Group=@RUN_GROUP@
+WorkingDirectory=@PROJECT_ROOT@
+Environment=PYTHONUNBUFFERED=1
+Environment=CAPTURE_PROJECT_ROOT=@PROJECT_ROOT@
+Environment=CAPTURE_DATA_ROOT=@PROJECT_ROOT@/runtime
+Environment=CAPTURE_AUTOSTART_READY_TIMEOUT_S=30
+ExecStartPre=@PROJECT_ROOT@/scripts/operation/check_autostart_ready.sh
+ExecStart=@PROJECT_ROOT@/scripts/operation/run_lan_preview.sh
+Restart=on-failure
+RestartSec=5
+RestartPreventExitStatus=75
+SuccessExitStatus=130
+TimeoutStopSec=20
+KillMode=mixed
+NoNewPrivileges=true
+UMask=0022
+
+[Install]
+WantedBy=multi-user.target

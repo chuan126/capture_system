@@ -87,29 +87,37 @@ section 'IP ADDRESSES'
 ip -br -4 address 2>/dev/null || true
 
 section 'SYSTEMD'
-for unit in capture-web.service; do
+build_env="${project_root}/.build-state/build.env"
+autostart_desired="$(awk -F= '$1=="CAPTURE_AUTOSTART_DESIRED" {print $2}' "${build_env}" 2>/dev/null | tail -n1 || true)"
+build_variant="$(awk -F= '$1=="CAPTURE_BUILD_VARIANT" {print $2}' "${build_env}" 2>/dev/null | tail -n1 || true)"
+build_type="$(awk -F= '$1=="CAPTURE_BUILD_TYPE" {print $2}' "${build_env}" 2>/dev/null | tail -n1 || true)"
+kv 'build autostart desired' "${autostart_desired:-unknown}"
+kv 'build variant/type' "${build_variant:-unknown}/${build_type:-unknown}"
+for unit in capture-system.service capture-web.service; do
   installed="$([[ -f "/etc/systemd/system/${unit}" ]] && echo present || echo missing)"
   enabled="$(systemctl is-enabled "${unit}" 2>/dev/null || true)"
   active="$(systemctl is-active "${unit}" 2>/dev/null || true)"
   kv "${unit}" "installed=${installed} enabled=${enabled:-unknown} active=${active:-unknown}"
 done
+full_main_pid="$(systemctl show -p MainPID --value capture-system.service 2>/dev/null || true)"
 web_main_pid="$(systemctl show -p MainPID --value capture-web.service 2>/dev/null || true)"
+kv 'capture-system MainPID' "${full_main_pid:-unknown}"
 kv 'capture-web MainPID' "${web_main_pid:-unknown}"
-if [[ "${web_main_pid:-0}" =~ ^[0-9]+$ && "${web_main_pid}" -gt 0 && -r "/proc/${web_main_pid}/cmdline" ]]; then
-  web_cmd="$(tr '\0' ' ' < "/proc/${web_main_pid}/cmdline" 2>/dev/null || true)"
-  kv 'capture-web command' "${web_cmd:-unavailable}"
-fi
 
 section 'WEB HEALTH'
 listener="$(ss -H -lntp 2>/dev/null | awk -v port=":${web_port}" '$4 ~ port"$" {print; exit}' || true)"
 kv "TCP ${web_port} listener" "${listener:-none}"
 health_body="$(curl --silent --fail --max-time 2 "http://127.0.0.1:${web_port}/api/health" 2>/dev/null || true)"
 kv '/api/health' "${health_body:-unreachable}"
-if [[ -n "${listener}" && "${web_main_pid:-0}" =~ ^[0-9]+$ && "${web_main_pid}" -gt 0 ]]; then
-  if [[ "${listener}" == *"pid=${web_main_pid},"* ]]; then
-    kv 'listener ownership' 'capture-web.service MainPID'
+listener_pid="$(sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' <<<"${listener}" | head -n1)"
+if [[ "${listener_pid:-0}" =~ ^[0-9]+$ && "${listener_pid}" -gt 0 && -r "/proc/${listener_pid}/cgroup" ]]; then
+  listener_cgroup="$(cat "/proc/${listener_pid}/cgroup" 2>/dev/null || true)"
+  if [[ "${listener_cgroup}" == *"capture-system.service"* ]]; then
+    kv 'listener ownership' 'capture-system.service cgroup'
+  elif [[ "${listener_cgroup}" == *"capture-web.service"* ]]; then
+    kv 'listener ownership' 'capture-web.service cgroup'
   else
-    kv 'listener ownership' 'not proven as capture-web.service MainPID'
+    kv 'listener ownership' "other pid=${listener_pid}"
   fi
 else
   kv 'listener ownership' 'unavailable'

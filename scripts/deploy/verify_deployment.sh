@@ -26,6 +26,8 @@ usage() {
   --network-only       在配置检查基础上验证实际接口地址、mDNS 和雷达路由
   --installed-only     在网络实测基础上验证可选 capture-web.service 已安装并启用
   --expect-services    验证网络、capture-web.service、正式 Web 进程归属和 HTTP health
+  --autostart-only     验证 build.sh 的 autostart 目标与 capture-system.service enable 状态一致
+  --expect-autostart   验证完整 capture-system.service 已启用、运行并通过 HTTP health
   -h, --help           显示帮助
 
 默认读取 /etc/capture-system/device.env。当前部署只支持双网口。
@@ -38,6 +40,8 @@ while [[ $# -gt 0 ]]; do
     --network-only) mode="network"; shift ;;
     --installed-only) mode="installed"; shift ;;
     --expect-services) mode="services"; shift ;;
+    --autostart-only) mode="autostart"; shift ;;
+    --expect-autostart) mode="autostart-services"; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "未知参数：$1" >&2; usage >&2; exit 2 ;;
   esac
@@ -154,7 +158,7 @@ if [[ "${mode}" != "identity" ]]; then
   fi
 fi
 
-if [[ "${mode}" == "network" || "${mode}" == "installed" || "${mode}" == "services" ]]; then
+if [[ "${mode}" == "network" || "${mode}" == "installed" || "${mode}" == "services" || "${mode}" == "autostart-services" ]]; then
   lidar_link_down=0
   direct_link_down=0
   if [[ -r "/sys/class/net/${lidar_interface}/carrier" && "$(cat "/sys/class/net/${lidar_interface}/carrier")" == "0" ]]; then lidar_link_down=1; fi
@@ -184,10 +188,62 @@ if [[ "${mode}" == "network" || "${mode}" == "installed" || "${mode}" == "servic
   fi
 fi
 
+if [[ "${mode}" == "autostart" || "${mode}" == "autostart-services" ]]; then
+  build_env="${capture_project_root}/.build-state/build.env"
+  desired="$(awk -F= '$1=="CAPTURE_AUTOSTART_DESIRED" {print $2}' "${build_env}" 2>/dev/null | tail -n1 || true)"
+  case "${desired}" in
+    on)
+      [[ -f /etc/systemd/system/capture-system.service ]] && ok 'capture-system.service 已安装' || fail 'autostart=on 但 capture-system.service 未安装'
+      full_enabled="$(systemctl is-enabled capture-system.service 2>/dev/null || true)"
+      [[ "${full_enabled}" == "enabled" ]] && ok 'capture-system.service=enabled' || fail "autostart=on 但 capture-system.service 实际 ${full_enabled:-unknown}"
+      web_enabled="$(systemctl is-enabled capture-web.service 2>/dev/null || true)"
+      [[ "${web_enabled}" != "enabled" ]] && ok "capture-web.service 未与完整自启同时启用（${web_enabled:-unknown}）" || fail 'capture-web.service 与 capture-system.service 不能同时 enabled'
+      ;;
+    off)
+      full_enabled="$(systemctl is-enabled capture-system.service 2>/dev/null || true)"
+      [[ "${full_enabled}" != "enabled" ]] && ok "autostart=off，capture-system.service 未启用（${full_enabled:-unknown}）" || fail 'autostart=off 但 capture-system.service 仍为 enabled，请执行 apply_autostart.sh'
+      ;;
+    *) fail "缺少有效构建自启目标：${build_env}" ;;
+  esac
+fi
+
 if [[ "${mode}" == "installed" || "${mode}" == "services" ]]; then
   [[ -f "/etc/systemd/system/capture-web.service" ]] && ok 'capture-web.service 已安装' || fail 'capture-web.service 未安装到 /etc/systemd/system'
   web_enabled="$(systemctl is-enabled capture-web.service 2>/dev/null || true)"
   [[ "${web_enabled}" == "enabled" ]] && ok 'capture-web.service=enabled' || fail "capture-web.service 未启用，实际 ${web_enabled:-unknown}"
+fi
+
+if [[ "${mode}" == "autostart-services" ]]; then
+  desired="$(awk -F= '$1=="CAPTURE_AUTOSTART_DESIRED" {print $2}' "${capture_project_root}/.build-state/build.env" 2>/dev/null | tail -n1 || true)"
+  [[ "${desired}" == "on" ]] || fail "--expect-autostart 要求构建目标为 on，实际 ${desired:-unknown}"
+  systemctl is-active --quiet capture-system.service && ok 'capture-system.service=active' || fail 'capture-system.service 未运行'
+  full_main_pid="$(systemctl show -p MainPID --value capture-system.service 2>/dev/null | head -n1 || true)"
+  if [[ "${full_main_pid}" =~ ^[0-9]+$ && "${full_main_pid}" -gt 0 && -d "/proc/${full_main_pid}" ]]; then
+    ok "capture-system.service MainPID=${full_main_pid}"
+    cgroup_text="$(cat "/proc/${full_main_pid}/cgroup" 2>/dev/null || true)"
+    [[ "${cgroup_text}" == *"capture-system.service"* ]] && ok '完整主进程属于 capture-system.service cgroup' || fail '完整主进程 cgroup 无法证明属于 capture-system.service'
+  else
+    fail "capture-system.service MainPID 无效：${full_main_pid:-unknown}"
+  fi
+
+  listener="$(ss -H -lntp 2>/dev/null | awk -v port=":${web_port}" '$4 ~ port"$" {print; exit}' || true)"
+  listener_pid="$(sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' <<<"${listener}" | head -n1)"
+  if [[ -z "${listener}" ]]; then
+    fail "TCP ${web_port} 没有监听进程"
+  elif [[ "${listener_pid:-0}" =~ ^[0-9]+$ && "${listener_pid}" -gt 0 && -r "/proc/${listener_pid}/cgroup" ]]; then
+    listener_cgroup="$(cat "/proc/${listener_pid}/cgroup" 2>/dev/null || true)"
+    [[ "${listener_cgroup}" == *"capture-system.service"* ]]       && ok "TCP ${web_port} 监听进程属于 capture-system.service cgroup"       || fail "TCP ${web_port} 监听进程不属于 capture-system.service：${listener}"
+  else
+    fail "TCP ${web_port} 监听进程PID无法识别：${listener}"
+  fi
+
+  health_body=""
+  for _ in {1..60}; do
+    health_body="$(curl --silent --fail --max-time 1 "http://127.0.0.1:${web_port}/api/health" 2>/dev/null || true)"
+    if [[ "${health_body}" == *'"status":"ok"'* || "${health_body}" == *'"status": "ok"'* ]]; then break; fi
+    sleep 0.25
+  done
+  [[ "${health_body}" == *'"status":"ok"'* || "${health_body}" == *'"status": "ok"'* ]]     && ok "完整自启 HTTP health=http://127.0.0.1:${web_port}/api/health"     || fail '完整自启 HTTP 健康检查失败或响应不是 status=ok'
 fi
 
 if [[ "${mode}" == "services" ]]; then

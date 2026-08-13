@@ -1,8 +1,8 @@
 # 系统集成
 
-核对日期：2026-08-11
+核对日期：2026-08-13
 
-> 当前运行主要使用前台脚本。完整 systemd 开机自启、升级和回滚尚未完成现场验收。
+> 当前项目同时支持前台手工运行和可选完整 systemd 开机自启。是否启用由构建元数据和 `apply_autostart.sh` 显式控制；构建过程不直接修改 systemd。
 
 本目录保存 RK3588 操作系统级集成文件：
 
@@ -14,7 +14,8 @@ system/                                      # 操作系统级集成配置根目
 │   └── localauthority/50-local.d/           # Local Authority 模板
 │       └── 50-capture-networkmanager.pkla
 ├── systemd/                                 # systemd 服务单元目录
-│   └── capture-web.service                  # FastAPI 与静态前端服务
+│   ├── capture-web.service                  # 可选 Web-only 服务
+│   └── capture-system.service               # 完整采集链路自启服务模板
 └── sysctl.d/                                # 内核参数目录
     └── 99-capture-lidar.conf                # 雷达 UDP 接收缓冲区配置
 ```
@@ -70,7 +71,16 @@ JavaScript Authority 系统使用：
 sudo bash scripts/deploy/install.sh --variant customer
 ```
 
-可选 `capture-web.service` 安装使用：
+完整开机自启推荐使用：
+
+```bash
+bash scripts/build/build.sh all --release --variant customer --autostart on
+sudo bash scripts/deploy/apply_autostart.sh
+```
+
+`capture-system.service` 运行与手工 `run_lan_preview.sh` 相同的完整采集链路，并通过共享实例锁防止双实例。`apply_autostart.sh` 只改变 unit 安装和 enable 状态，不立即 start/stop。完整自启开启时会 disable 旧的 Web-only `capture-web.service`。
+
+如只需要 Web-only 服务，仍可使用：
 
 ```bash
 sudo bash scripts/deploy/install_systemd.sh

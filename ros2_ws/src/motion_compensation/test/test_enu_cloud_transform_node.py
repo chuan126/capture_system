@@ -7,7 +7,9 @@ import launch_testing.actions
 import pytest
 import rclpy
 from builtin_interfaces.msg import Time
+from diagnostic_msgs.msg import DiagnosticArray
 from nav_msgs.msg import Odometry
+from rcl_interfaces.srv import DescribeParameters, GetParameters
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import PointCloud2, PointField
 from sensor_msgs_py import point_cloud2
@@ -46,7 +48,7 @@ class TestEnuCloudTransformNode(unittest.TestCase):
     def tearDown(self):
         self.node.destroy_node()
 
-    def test_applies_default_c0_for_identity_odometry_pose(self):
+    def test_identity_odometry_pose_preserves_radar_coordinates(self):
         reliable = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
         cloud_publisher = self.node.create_publisher(
             PointCloud2, "/capture/lidar/points_raw", reliable
@@ -106,6 +108,76 @@ class TestEnuCloudTransformNode(unittest.TestCase):
             )
         )
         self.assertEqual(len(points), 1)
-        self.assertAlmostEqual(float(points[0][0]), -1.0, places=6)
-        self.assertAlmostEqual(float(points[0][1]), -2.0, places=6)
+        self.assertAlmostEqual(float(points[0][0]), 1.0, places=6)
+        self.assertAlmostEqual(float(points[0][1]), 2.0, places=6)
         self.assertAlmostEqual(float(points[0][2]), 3.0, places=6)
+
+    def test_default_poll_interval_and_diagnostics_fields(self):
+        parameter_client = self.node.create_client(
+            GetParameters, "/enu_cloud_transform_node/get_parameters"
+        )
+        self.assertTrue(parameter_client.wait_for_service(timeout_sec=5.0))
+        request = GetParameters.Request(
+            names=["processing_poll_interval_ms"]
+        )
+        future = parameter_client.call_async(request)
+        rclpy.spin_until_future_complete(self.node, future, timeout_sec=5.0)
+        self.assertIsNotNone(future.result())
+        self.assertEqual(future.result().values[0].integer_value, 10)
+
+        descriptor_client = self.node.create_client(
+            DescribeParameters,
+            "/enu_cloud_transform_node/describe_parameters",
+        )
+        self.assertTrue(descriptor_client.wait_for_service(timeout_sec=5.0))
+        descriptor_future = descriptor_client.call_async(
+            DescribeParameters.Request(names=["processing_poll_interval_ms"])
+        )
+        rclpy.spin_until_future_complete(
+            self.node, descriptor_future, timeout_sec=5.0
+        )
+        descriptor = descriptor_future.result().descriptors[0]
+        self.assertTrue(descriptor.read_only)
+        self.assertEqual(descriptor.integer_range[0].from_value, 1)
+        self.assertEqual(descriptor.integer_range[0].to_value, 100)
+        self.assertEqual(descriptor.integer_range[0].step, 1)
+
+        diagnostics = []
+        self.node.create_subscription(
+            DiagnosticArray, "/diagnostics", diagnostics.append, 10
+        )
+        deadline = time.monotonic() + 5.0
+        matching_status = None
+        while time.monotonic() < deadline and matching_status is None:
+            rclpy.spin_once(self.node, timeout_sec=0.1)
+            for message in diagnostics:
+                matching_status = next(
+                    (
+                        status
+                        for status in message.status
+                        if status.name == "motion_compensation/enu_cloud_transform"
+                    ),
+                    None,
+                )
+                if matching_status is not None:
+                    break
+        self.assertIsNotNone(matching_status)
+        values = {item.key: item.value for item in matching_status.values}
+        expected_fields = {
+            "processing_poll_interval_ms",
+            "pending_cloud_count",
+            "pending_cloud_max_count",
+            "clouds_received_total",
+            "clouds_processed_total",
+            "clouds_dropped_total",
+            "pose_wait_count",
+            "interpolation_failure_count",
+            "queue_wait_ms_last",
+            "queue_wait_ms_mean",
+            "queue_wait_ms_max",
+            "processing_time_ms_last",
+            "processing_time_ms_mean",
+            "processing_time_ms_max",
+        }
+        self.assertTrue(expected_fields.issubset(values))
+        self.assertEqual(values["processing_poll_interval_ms"], "10")

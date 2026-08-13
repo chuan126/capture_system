@@ -2,6 +2,21 @@
   "schema_version": 1,
   "parameters": [
     {
+      "key": "motion.processing_poll_interval_ms",
+      "node": "/enu_cloud_transform_node",
+      "parameter": "processing_poll_interval_ms",
+      "label": "ENU处理轮询周期",
+      "unit": "ms",
+      "kind": "int",
+      "minimum": 1,
+      "maximum": 100,
+      "step": 1,
+      "writable": false,
+      "note": "仅在节点启动时读取，修改配置后需重启服务",
+      "source_config": "ros2_ws/src/motion_compensation/config/motion_compensation.yaml",
+      "ui_visible": false
+    },
+    {
       "key": "motion.max_interpolation_gap_s",
       "node": "/enu_cloud_transform_node",
       "parameter": "max_interpolation_gap_s",

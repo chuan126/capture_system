@@ -31,12 +31,60 @@ class ParameterSetRequest(BaseModel):
     value: bool | int | float
 
 
+async def _ensure_dev_raw_cloud_bridge(websocket: WebSocket, hub: CloudPreviewHub) -> None:
+    factory = getattr(websocket.app.state, "dev_raw_cloud_bridge_factory", None)
+    lock = getattr(websocket.app.state, "dev_raw_cloud_bridge_lock", None)
+    if factory is None or lock is None:
+        return
+
+    async with lock:
+        bridge = websocket.app.state.dev_raw_cloud_bridge
+        if bridge is not None:
+            return
+        hub.clear_latest_frame()
+        try:
+            bridge = factory()
+            websocket.app.state.dev_raw_cloud_bridge = bridge
+            started = await asyncio.to_thread(bridge.start)
+            hub.set_ros_availability(started, bridge.error)
+        except Exception as exception:
+            websocket.app.state.dev_raw_cloud_bridge = None
+            hub.set_ros_availability(
+                False,
+                f"{type(exception).__name__}: {exception}",
+            )
+
+
+async def _release_dev_raw_cloud_bridge(websocket: WebSocket, hub: CloudPreviewHub) -> None:
+    lock = getattr(websocket.app.state, "dev_raw_cloud_bridge_lock", None)
+    if lock is None or hub.client_count != 0:
+        return
+
+    async with lock:
+        if hub.client_count != 0:
+            return
+        bridge = websocket.app.state.dev_raw_cloud_bridge
+        websocket.app.state.dev_raw_cloud_bridge = None
+        stop_error: str | None = None
+        if bridge is not None:
+            try:
+                await asyncio.to_thread(bridge.stop)
+            except Exception as exception:
+                stop_error = f"{type(exception).__name__}: {exception}"
+        if hub.client_count == 0:
+            hub.clear_latest_frame()
+            hub.set_ros_availability(False, stop_error or "等待开发点云预览客户端")
+
+
 def create_devtools_router() -> APIRouter:
     router = APIRouter(prefix="/api/dev", tags=["development-tools"])
 
     @router.get("/overview")
     def overview(request: Request) -> dict[str, object]:
-        telemetry = request.app.state.dev_telemetry_bridge.snapshot()
+        telemetry_bridge = request.app.state.dev_telemetry_bridge
+        if request.app.state.dev_ros_bridge_enabled:
+            telemetry_bridge.touch()
+        telemetry = telemetry_bridge.snapshot()
         data_root: Path = request.app.state.runtime_data_root
         usage = shutil.disk_usage(data_root)
         return {
@@ -186,10 +234,18 @@ def create_devtools_websocket_router() -> APIRouter:
             })
             await websocket.close(code=1013, reason="点云客户端数量已达到上限")
             return
+        await _ensure_dev_raw_cloud_bridge(websocket, hub)
         last_stream_key: tuple[str, int] | None = None
         last_status_sent = 0.0
+        disconnect_task = asyncio.create_task(websocket.receive())
         try:
             while True:
+                if disconnect_task.done():
+                    message = disconnect_task.result()
+                    if message.get("type") == "websocket.disconnect":
+                        return
+                    disconnect_task = asyncio.create_task(websocket.receive())
+
                 now = time.monotonic()
                 if now - last_status_sent >= 5.0:
                     await websocket.send_json(hub.current_status())
@@ -205,6 +261,8 @@ def create_devtools_websocket_router() -> APIRouter:
         except (WebSocketDisconnect, RuntimeError):
             pass
         finally:
+            disconnect_task.cancel()
             hub.unregister(session)
+            await _release_dev_raw_cloud_bridge(websocket, hub)
 
     return router

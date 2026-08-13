@@ -48,6 +48,10 @@ class CloudPreviewHub:
         self._ros_available = available
         self._ros_error = error
 
+    def clear_latest_frame(self) -> None:
+        """清除停用前缓存，避免下一次按需启动先发送旧点云。"""
+        self._latest_frame = None
+
     def publish(self, frame: CloudPreviewFrame) -> None:
         self._latest_frame = frame
 

@@ -1,6 +1,6 @@
 # Web 后端
 
-核对日期：2026-08-08
+核对日期：2026-08-13
 
 FastAPI 是浏览器访问 RK3588 的唯一 HTTP 和 WebSocket 入口。当前后端承担页面托管、
 实时展示桥、任务元数据持久化、任务控制桥、历史测量文件读取和正式文件生成。
@@ -61,15 +61,21 @@ Web 服务以部署时确定的普通运行用户启动，不固定用户名。s
 - 每类 ROS 2 桥使用独立 `rclpy.Context` 和后台单线程执行器；
 - FastAPI asyncio 事件循环不执行 ROS 回调；
 - 每个浏览器客户端队列容量为 1，新值覆盖尚未发送的旧值；
-- 浏览器断开不停止 ROS 2 节点；
+- 浏览器断开不停止正式业务 ROS 2 节点；点云 FastAPI ROS bridge 按浏览器连接数启停；
+- `/ws/v1/cloud-preview` 没有客户端时不订阅 `/capture/visualization/cloud_preview`，使上游 `cloud_visualization` 能按订阅数停止预览计算；
+- development 的原始点云 bridge 只在 `/ws/dev/raw-cloud-preview` 存在客户端时订阅原始点云；
+- development telemetry 由 `/api/dev/overview` 的 1 s 页面轮询续租，停止轮询约 3 s 后自动释放原始点云、补偿点云和高频里程计等诊断订阅；
 - ROS桥启动失败时，静态页面和健康接口仍可用；
 - Uvicorn 固定单 worker，点云 WebSocket 关闭压缩。
 
 ### 点云
 
-FastAPI 不逐点解析 PointCloud2，不做过滤、限点或坐标转换。上游
+正式点云 FastAPI bridge 不逐点解析 PointCloud2，不做过滤、限点或坐标转换。上游
 `cloud_visualization` 必须输出连续 `xyz float32`、最多 10,000 点、
-`frame_id=lidar_local_enu` 的受控消息。后端只添加 PCV1 帧头。
+`frame_id=lidar_local_enu` 的受控消息。后端只添加 PCV1 帧头。该 ROS subscription
+由 `/ws/v1/cloud-preview` 首个客户端建立，最后一个客户端断开后释放，并清除停用前缓存帧。
+development 的原始点云预览属于独立开发路径，仍在 Python 中抽取 XYZ，但只在对应
+WebSocket 实际存在客户端时运行。
 
 ### RTK
 

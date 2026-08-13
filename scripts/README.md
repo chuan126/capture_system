@@ -1,31 +1,33 @@
 # 工程脚本
 
-核对日期：2026-08-07
+本目录包含新机环境部署、项目构建、运行和可选开机自启脚本。构建、系统配置和业务启动相互独立，普通构建过程不会调用 `sudo`，也不会修改 systemd。
 
 ```text
-scripts/                         # 构建、部署和运行脚本
-├── build/                       # 构建与测试
+scripts/
+├── build/
 │   ├── build.sh                 # 统一构建入口
-│   ├── build_all.sh             # 兼容入口，转发到 build.sh all
-│   ├── build_web.sh             # 兼容入口，转发到 build.sh web
-│   └── test_web.sh              # 兼容入口，转发到 build.sh test
-├── deploy/                      # 新机依赖、双网口、恢复和可选Web服务安装
-│   ├── install.sh               # 环境依赖和双网口配置，不编译不启动节点
-│   ├── configure_network.sh     # capture-lidar/capture-direct、hostname和mDNS
-│   ├── rollback.sh              # 最近一次失败安装事务恢复
-│   ├── clear_config.sh          # 按首次安装前快照撤销环境和网络配置
-│   ├── status.sh                # 真实设备状态检查
-│   ├── verify_deployment.sh     # 配置、网络和可选Web服务验收
-│   └── install_systemd.sh       # 可选安装capture-web.service
-└── operation/                   # 开发运行
-    ├── run_lan_preview.sh       # 一键启动完整采集链路
-    └── run_web.sh               # 只启动 FastAPI 和 ROS Web 桥
+│   ├── build_all.sh             # 兼容入口
+│   ├── build_web.sh             # 兼容入口
+│   └── test_web.sh              # Web 与后端测试入口
+├── deploy/
+│   ├── install.sh               # 新机依赖、双网口、hostname、Avahi、polkit，不编译不启动
+│   ├── configure_network.sh     # 双物理网口配置
+│   ├── apply_autostart.sh       # 应用 build.sh 记录的开机自启目标
+│   ├── install_systemd.sh       # 可选 Web-only capture-web.service，不能与完整自启同时启用
+│   ├── rollback.sh              # 最近一次 install.sh 失败事务恢复
+│   ├── clear_config.sh          # 恢复首次安装前系统配置，不删除 runtime
+│   ├── status.sh                # 当前系统、网络、权限和自启状态
+│   └── verify_deployment.sh     # 部署与自启验收
+└── operation/
+    ├── run_lan_preview.sh       # 手工启动完整采集链路
+    ├── run_web.sh               # 只启动 Web
+    ├── stop_capture_system.sh   # 停止当前完整 systemd 实例，不关闭开机自启
+    └── check_autostart_ready.sh # capture-system.service 开机前置检查
 ```
 
+## 常用命令速查
 
-## 新机环境与网络部署
-
-新机预装 Ubuntu 22.04 和 ROS 2 Humble 后执行：
+### 新机部署
 
 ```bash
 sudo bash scripts/deploy/install.sh \
@@ -34,105 +36,178 @@ sudo bash scripts/deploy/install.sh \
   --direct-interface eth1
 ```
 
-接口名必须按新机真实情况填写。该入口不会调用 `build.sh`、不会安装完整 ROS 采集服务，也不会启动 `run_lan_preview.sh`。详细流程见 `docs/deployment/RK3588双网口环境与网络部署.md`。
+该命令只准备系统环境和双网口，不编译项目，不启动 ROS/Web，也不启用完整开机自启。
 
-## 统一构建入口
+### 手工运行模式
 
-首次使用先执行：
-
-```bash
-cd /path/to/capture_system
-bash scripts/build/build.sh doctor
-```
-
-推荐的现场全量构建：
+开发版构建并明确关闭开机自启目标：
 
 ```bash
-bash scripts/build/build.sh all --release
-```
-
-需要排除旧构建缓存时：
-
-```bash
-bash scripts/build/build.sh all --release --clean
-```
-
-`--clean` 只清理 SDK、colcon、Next.js 等编译产物，保留 `.venv` 和
-`frontend/node_modules`。只有 `distclean` 才会删除依赖环境。这样清理构建缓存时不会
-无条件触发 pip/npm 联网安装。
-
-常用分项命令：
-
-```bash
-bash scripts/build/build.sh ros --release         # SDK + 厂商驱动 + 业务 ROS 2
-bash scripts/build/build.sh workspace --release   # 仅业务 ROS 2
-bash scripts/build/build.sh driver --release      # SDK + 厂商驱动
-bash scripts/build/build.sh web                    # 前端设备静态导出
-bash scripts/build/build.sh backend                # 后端 Python 环境
-bash scripts/build/test_web.sh                     # Web 与后端完整测试
-bash scripts/build/build.sh verify                 # 验证已有构建产物
-bash scripts/build/build.sh clean                  # 保留依赖的清理
-bash scripts/build/build.sh distclean              # 连依赖一起清理
-```
-
-稳定性约束：
-
-- 每次构建写入 `.build-logs/`，失败信息包含步骤、命令、退出码和日志路径；
-- 默认并行度为 `min(CPU 核心数, 2)`，可用 `--jobs N` 覆盖；
-- ROS 2 构建在独立环境中只加载 Humble、厂商驱动和当前业务工作空间，避免终端中旧
-  overlay 污染编译；
-- Debug/Release 切换或发现来源不明的旧构建产物时自动清理对应缓存；
-- 默认拒绝在本机采集进程仍运行时重编译 ROS 2。`ros2 node list` 发现同一 DDS Domain 的远端 Capture 节点只告警，不再误判为本机进程；必须在线编译时需要显式设置 `ALLOW_BUILD_WHILE_RUNNING=1`；
-- 脚本只检查第一方源码 CRLF，不自动修改源码，也不修改 `third_party` 上游代码。
-
-
-### 构建变体
-
-客户交付使用默认的 `customer` 变体：
-
-```bash
-bash scripts/build/build.sh all --release --variant customer
-```
-
-该变体的静态前端不包含测试工作台模块，构建后还会扫描 `frontend/out`，如果发现
-`/api/dev/`、`/ws/dev/` 或开发测试页面标识则构建失败。运行时
-`CAPTURE_DEVTOOLS_ENABLED=0`，FastAPI 不注册任何开发诊断路由。
-
-开发调试使用：
-
-```bash
-bash scripts/build/build.sh all --release --variant development
-```
-
-该变体启用“测试”页面和 `/api/dev/*`、`/ws/dev/*`。原始点云录制依赖
-`ros-humble-rosbag2-storage-mcap`。录制文件写入
-`CAPTURE_DATA_ROOT/dev-tests/`，与正式任务数据隔离。
-
-## 一键运行
-
-```bash
-cd /path/to/capture_system
+bash scripts/build/build.sh all --release \
+  --variant development \
+  --autostart off
+sudo bash scripts/deploy/apply_autostart.sh
 bash scripts/operation/run_lan_preview.sh
 ```
 
-脚本启动：
+`apply_autostart.sh` 只改变下次开机的 enable 状态，不会启动或停止当前实例。
 
-- ODIN 雷达驱动，关闭 SLAM 点云和图像通道；
-- 补偿后局部东北天点云预览；
-- 高频里程计时间适配、逐点运动补偿和单帧净空算法；
-- RTK 驱动；
-- 系统状态监控；
-- `data_recorder` 正式测量记录器；
-- `task_manager` 设备端任务状态机；
-- FastAPI 网页服务。
+客户版：
 
-按 `Ctrl+C` 统一停止本次启动的进程。当前启动链路包含 `task_manager` 和
-`data_recorder`，但不安装 systemd 服务。
+```bash
+bash scripts/build/build.sh all --release \
+  --variant customer \
+  --autostart off
+sudo bash scripts/deploy/apply_autostart.sh
+bash scripts/operation/run_lan_preview.sh
+```
 
-## 构建前快速检查
+前台运行时按 `Ctrl+C` 统一停止本次启动的完整采集链路。
 
-`doctor` 会检查生产前端的 TypeScript import 路径。`frontend/app`、`frontend/components` 和 `frontend/worker` 中的相对导入不得显式以 `.ts` 或 `.tsx` 结尾；发现后会立即列出文件与行号并停止。
+### 开机自启模式
 
-`all` 和 `web` 在进入正式构建前还会安装或复用前端依赖，并执行 `npm run typecheck`（`tsc --noEmit`）。`all` 会在 ODIN SDK 和 ROS 2 编译之前完成这一检查，因此开发测试页或正式页面的 TypeScript 类型错误不会再等到几分钟后的 Next.js 构建阶段才暴露。
+开发版：
 
-`doctor` 还会检查源码时间戳。若源码文件比 RK3588 当前系统时间晚 120 秒以上，构建会直接停止。应先确认 `timedatectl`/NTP 正常，并优先在板端解压 Linux `.tar.gz` 交付包，避免错误时间戳导致 Make 报告时钟错误。
+```bash
+bash scripts/build/build.sh all --release \
+  --variant development \
+  --autostart on
+sudo bash scripts/deploy/apply_autostart.sh
+```
+
+客户版：
+
+```bash
+bash scripts/build/build.sh all --release \
+  --variant customer \
+  --autostart on
+sudo bash scripts/deploy/apply_autostart.sh
+```
+
+`--autostart on` 只写入 `.build-state/build.env`。`apply_autostart.sh` 才会安装并 enable `capture-system.service`，同时 disable 旧的 Web-only `capture-web.service`。应用过程默认不使用 `systemctl start` 或 `stop`，因此不会因为重新编译而突然改变当前业务运行状态。
+
+查看构建目标和系统实际状态：
+
+```bash
+bash scripts/deploy/status.sh
+sudo bash scripts/deploy/verify_deployment.sh --autostart-only
+```
+
+设备已经重启并由完整服务启动后，可验收：
+
+```bash
+sudo bash scripts/deploy/verify_deployment.sh --expect-autostart
+```
+
+查看完整服务：
+
+```bash
+systemctl status capture-system.service
+journalctl -u capture-system.service -f
+```
+
+### 自启模式下修改代码和重新编译
+
+开机自启实例正在运行时，不要直接覆盖构建产物。先执行：
+
+```bash
+sudo bash scripts/operation/stop_capture_system.sh
+```
+
+该命令只停止当前 `capture-system.service`，不会执行 `systemctl disable`。因此原来的开机自启设置保持不变。
+
+然后修改代码并重新构建，例如：
+
+```bash
+bash scripts/build/build.sh all --release \
+  --variant development \
+  --autostart on
+```
+
+如果本次没有改变自启目标，不需要再次执行 `apply_autostart.sh`。如需马上运行新构建：
+
+```bash
+sudo systemctl start capture-system.service
+```
+
+也可以不立即启动，下一次开机会继续按照现有 enabled 状态自动运行新构建。
+
+`build.sh` 默认拒绝在本机完整采集链仍运行时重编译 ROS 2。如果检测到 `capture-system.service` 正在运行，会直接提示使用 `stop_capture_system.sh`。不建议使用 `ALLOW_BUILD_WHILE_RUNNING=1` 绕过该保护。
+
+### 切换自启开关
+
+从手工模式切换为开机自启：
+
+```bash
+bash scripts/build/build.sh all --release \
+  --variant development \
+  --autostart on
+sudo bash scripts/deploy/apply_autostart.sh
+```
+
+从开机自启切换为手工模式：
+
+```bash
+bash scripts/build/build.sh all --release \
+  --variant development \
+  --autostart off
+sudo bash scripts/deploy/apply_autostart.sh
+```
+
+`autostart off` 的 apply 只 disable 下次开机启动。如果完整服务当前已经在运行，它不会被自动停止；需要停当前实例时另行执行：
+
+```bash
+sudo bash scripts/operation/stop_capture_system.sh
+```
+
+### 常用构建与检查
+
+```bash
+bash scripts/build/build.sh doctor
+bash scripts/build/build.sh all --release --variant customer --autostart off
+bash scripts/build/build.sh all --release --variant development --autostart off
+bash scripts/build/build.sh all --release --clean --variant development --autostart off
+bash scripts/build/build.sh ros --release
+bash scripts/build/build.sh workspace --release
+bash scripts/build/build.sh driver --release
+bash scripts/build/build.sh backend
+bash scripts/build/build.sh web
+bash scripts/build/build.sh verify --variant development
+bash scripts/build/test_web.sh
+```
+
+`--clean` 保留 `.venv` 和 `frontend/node_modules`。`distclean` 会删除依赖环境，但不会自动 disable 已经启用的 systemd 服务；如果设备处于自启模式，应先停止服务，并在重新完整构建后再启动或重启设备。
+
+## 自启设计约束
+
+`capture-system.service` 与手工 `run_lan_preview.sh` 使用同一个实例锁。任一完整实例已经运行时，第二个完整实例会拒绝启动，避免两套 ODIN、RTK、任务状态机、记录器和 8000 端口相互竞争。
+
+完整服务与 `capture-web.service` 也不能同时启用。开启完整自启时 `apply_autostart.sh` 会 disable Web-only 服务，但不会停止当前正在运行的 Web-only 实例。`capture-system.service` 本身声明了 `Conflicts=capture-web.service`，后续显式启动完整服务时由 systemd 处理冲突。
+
+完整服务只自动恢复 Capture System 运行环境，不自动继续断电前正在执行的正式测量任务。任务异常恢复仍由现有 `task_manager` 逻辑处理。
+
+## 运行数据
+
+默认数据目录仍为：
+
+```text
+<project_root>/runtime
+```
+
+构建、`apply_autostart.sh`、部署验证和自启配置不会创建、删除或递归修改正式 `runtime` 数据。业务运行时按照现有逻辑使用该目录。
+
+## 构建变体
+
+`customer` 为默认交付变体，不包含测试工作台和 `/api/dev/*`、`/ws/dev/*` 开发接口。
+
+```bash
+bash scripts/build/build.sh all --release --variant customer --autostart off
+```
+
+`development` 启用测试页面和开发诊断接口：
+
+```bash
+bash scripts/build/build.sh all --release --variant development --autostart off
+```
+
+`variant` 和 `autostart` 是两个独立配置，可以自由组合。新项目第一次构建未指定 `--autostart` 时默认 `off`；已有 `.build-state/build.env` 时，后续未显式指定该参数会保留原构建目标。
