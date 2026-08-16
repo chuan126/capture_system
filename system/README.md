@@ -80,6 +80,8 @@ sudo bash scripts/deploy/apply_autostart.sh
 
 `capture-system.service` 运行与手工 `run_lan_preview.sh` 相同的完整采集链路，并通过共享实例锁防止双实例。`apply_autostart.sh` 只改变 unit 安装和 enable 状态，不立即 start/stop。完整自启开启时会 disable 旧的 Web-only `capture-web.service`。
 
+服务启动前只校验本地构建产物。雷达未连接、雷达口尚无静态地址或 NetworkManager 暂时未就绪时仅记录提示，不阻塞 Web 与其余 ROS 2 节点；雷达状态由运行期诊断持续反映。
+
 如只需要 Web-only 服务，仍可使用：
 
 ```bash
@@ -91,4 +93,3 @@ sudo bash scripts/deploy/install_systemd.sh
 `verify_deployment.sh --configured-only` 会检查项目 polkit 配置，并直接验证实际运行用户的三个 NetworkManager action 是否全部为 `yes`。文件存在但实际权限仍为 `auth` 或 `no` 时，部署验证失败。
 
 `settings.modify.system` 可以修改 system-wide NetworkManager connection，权限范围大于单一 Wi-Fi profile。当前项目保持现有架构，但运行用户应限制为设备专用账户，并避免把普通交互账户无必要地复用为长期 Web 服务账户。
-

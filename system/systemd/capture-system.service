@@ -16,7 +16,6 @@ WorkingDirectory=@PROJECT_ROOT@
 Environment=PYTHONUNBUFFERED=1
 Environment=CAPTURE_PROJECT_ROOT=@PROJECT_ROOT@
 Environment=CAPTURE_DATA_ROOT=@PROJECT_ROOT@/runtime
-Environment=CAPTURE_AUTOSTART_READY_TIMEOUT_S=30
 ExecStartPre=@PROJECT_ROOT@/scripts/operation/check_autostart_ready.sh
 ExecStart=@PROJECT_ROOT@/scripts/operation/run_lan_preview.sh
 Restart=on-failure

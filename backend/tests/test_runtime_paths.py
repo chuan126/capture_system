@@ -49,3 +49,13 @@ def test_autostart_scripts_use_project_relative_paths_and_do_not_create_runtime_
     assert 'project_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"' in ready
     assert '/home/firefly/project/capture_system' not in apply + ready + stop
     assert 'mkdir -p "${project_root}/runtime' not in apply
+
+
+def test_autostart_readiness_does_not_block_on_lidar_or_network() -> None:
+    root = Path(__file__).resolve().parents[2]
+    ready = (root / "scripts/operation/check_autostart_ready.sh").read_text(encoding="utf-8")
+    service = (root / "system/systemd/capture-system.service").read_text(encoding="utf-8")
+    assert "雷达可稍后连接" in ready
+    assert "仍将启动并等待网络恢复" in ready
+    assert "等待开机网络就绪超时" not in ready
+    assert "CAPTURE_AUTOSTART_READY_TIMEOUT_S" not in ready + service

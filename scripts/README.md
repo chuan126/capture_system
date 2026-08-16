@@ -86,6 +86,8 @@ sudo bash scripts/deploy/apply_autostart.sh
 
 `--autostart on` 只写入 `.build-state/build.env`。`apply_autostart.sh` 才会安装并 enable `capture-system.service`，同时 disable 旧的 Web-only `capture-web.service`。应用过程默认不使用 `systemctl start` 或 `stop`，因此不会因为重新编译而突然改变当前业务运行状态。
 
+完整服务只把 ROS 2、Python、前端等本地构建产物作为启动硬条件。雷达未上电、网线未连接、雷达口尚未获得静态地址或 NetworkManager 暂时未就绪时会写入提示，但不会阻塞 Web 与其他 ROS 2 节点启动；雷达可在系统运行后接入并由运行期诊断报告状态。
+
 查看构建目标和系统实际状态：
 
 ```bash
