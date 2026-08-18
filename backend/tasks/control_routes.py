@@ -46,6 +46,11 @@ def _bridge(request: Request) -> TaskControlBridge | None:
     return request.app.state.task_control_bridge
 
 
+def _offline_replay_active(request: Request) -> bool:
+    manager = getattr(request.app.state, "dev_offline_replay_manager", None)
+    return bool(manager is not None and manager.active)
+
+
 def _sensor_start_readiness(request: Request) -> tuple[bool, bool, bool, list[str], str]:
     hub = getattr(request.app.state, "system_status_hub", None)
     if hub is None:
@@ -158,7 +163,8 @@ def task_control_readiness(request: Request) -> TaskControlReadinessResponse:
     active_phase = active.operation_phase if active is not None else None
     sensors_ready, lidar_online, rtk_online, sensor_blockers, sensor_detail = _sensor_start_readiness(request)
 
-    can_start = bool(bridge_available and services["start"] and active is None and sensors_ready)
+    offline_replay_active = _offline_replay_active(request)
+    can_start = bool(bridge_available and services["start"] and active is None and sensors_ready and not offline_replay_active)
     can_pause = bool(
         bridge_available
         and services["pause"]
@@ -202,6 +208,9 @@ def task_control_readiness(request: Request) -> TaskControlReadinessResponse:
         missing_detail = _missing_service_detail(services)
         if missing_detail:
             readiness_detail += f"；{missing_detail}"
+    elif offline_replay_active:
+        readiness_state = "offline_debug_active"
+        readiness_detail = "离线算法检测正在运行，停止离线检测后才能开始正式采集"
     elif not services["start"]:
         readiness_state = "start_service_unavailable"
         readiness_detail = "任务控制桥已启动，开始服务不可用"
@@ -253,6 +262,11 @@ def start_task(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务不存在") from error
     except TaskStorageError as error:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)) from error
+    if _offline_replay_active(request):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="离线算法检测正在运行，停止离线检测后才能开始正式采集",
+        )
     bridge = _bridge(request)
     bridge_available, services = _service_availability(bridge)
     if not bridge_available:

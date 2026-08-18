@@ -78,13 +78,18 @@ fix 伪造入口或出口结论。
 
 ### 2.1 数据回放
 
+净空曲线首次显示时锁定纵轴范围。水平拖拽、横向缩放以及局部数据刷新不会自动改变
+纵轴上下限，避免曲线在移动过程中上下跳变。拖拽曲线可同时左右、上下平移，用户也
+可通过“适配当前窗口”按当前数据重新计算纵轴范围；超出锁定范围的有效点会在曲线
+顶部或底部显示提示，不会静默隐藏异常。
+
 页面结构包括：
 
 - 左侧按创建日期分组的任务搜索、状态筛选和任务选择；
 - 中部当前任务的 50 Hz 净空高度曲线；
 - 右侧隧道信息、测量统计、入口与出口 RTK 和数据质量。
 
-数据回放通过 `/api/v1/tasks/{task_id}/measurements` 读取每任务独立 SQLite 测量文件。曲线支持拖拽平移、滚轮缩放、按钮缩放、键盘平移和双击复位；无效采样保持断线。没有测量文件时显示空状态。
+数据回放首次只通过 `/api/v1/tasks/{task_id}/measurements/series-prefix?max_samples=2000` 读取每任务独立 SQLite 测量文件的开头固定样本。prefix 提交后立即显示曲线，完整统计随后异步读取；初始化视窗和任务对象刷新都不会重复请求 prefix 或触发全范围 series。用户主动平移、缩放后才按真实源时间窗口请求 `measurements/series`。已经加载的窗口按 `sample_index` 合并保留在当前任务内存缓存中，回拖到分辨率足够的已加载区域不重复请求；只有未加载区域或放大后分辨率不足的区域才补充读取。曲线支持拖拽平移、滚轮缩放、按钮缩放、键盘平移和双击复位；无效采样保持断线，暂停造成的真实时间空档保持不变。宽屏下任务记录、净空曲线和统计卡使用同一网格行高度，纵轴标题采用标准图表方向。没有测量文件时显示空状态。
 
 数据回放只向普通用户提供逻辑删除。任务可逐项勾选、按日期选择，也可以对当前搜索和筛选结果执行“全选”，然后使用“删除所选任务”。采集中和已暂停任务的复选框禁用。批量删除由 `POST /api/v1/tasks/delete-selected` 在一个数据库事务中完成；任何一个任务不满足删除条件时整批不提交。物理清理 `/api/v1/tasks/purge-data` 继续保留为维护接口，但客户数据回放页面不再提供该入口。
 
@@ -102,13 +107,13 @@ TXT 文件名使用任务时间编号，例如 `20260807_145601_T-001_50Hz测量
 
 ## 3. 开发测试工作台
 
-测试工作台只存在于 `development` 构建。浏览器仍然只访问 FastAPI，不直接连接 ROS 2。页面包含概览、激光雷达、运动补偿、RTK、净空、任务与记录、参数七个页签。
+测试工作台只存在于 `development` 构建。浏览器仍然只访问 FastAPI 和正式同源 WebSocket，不直接连接 ROS 2。当前页面取消七个页签，采用左右两列单页布局：左列依次显示核心配置和离线算法调试，右列依次显示净空算法、RTK与融合定位、原始点云样本；两列整体高度由同一网格行约束，末卡自动吸收剩余高度。净空卡片为无效原因预留固定高度，只显示新增 `ransac_plane_count` 对应的“RANSAC平面”，不再把 `candidate_count` 误标成平面数。页面复用采集首页的 `/ws/v1/rtk` 与 `/ws/v1/clearance`，不调用 `/api/dev/overview`，因此普通打开测试页不会续租原始点云、补偿点云和高频里程计 development telemetry。
 
-任务与记录页提供三种正式开发录制模式。`raw_sensor` 直接按 ROS 发布频率保存 `/capture/lidar/points_raw`、`/capture/imu/data`、`/capture/odometry/high_rate_raw`、`/capture/odometry/slam` 和雷达上下线事件；`algorithm_debug` 保存时间适配里程计、补偿点云、净空、RTK、任务、记录器和系统诊断；`full_debug` 保存两组合集。当前不录制视觉数据和传感器内部温度。所有录制都由 rosbag2 直接订阅 Topic 写 MCAP，不经过浏览器预览，不设置降频。
+主页面的原始点云样本只提供保存、停止和删除。一个样本 MCAP 固定保存完整 `/capture/lidar/points_raw`，并同步保存完整运动补偿必需的 `/capture/odometry/high_rate_raw`；辅助里程计不作为独立用户数据项显示。样本可直接启动隔离的 1× 离线完整算法链。离线停止后 elapsed/progress 使用冻结的 monotonic 结束时间，不再继续增长；监控线程周期检查 rosbag、时间适配、运动补偿和净空进程，算法节点提前退出时立即终止其余离线进程并返回日志末尾。净空卡保留最后一次有效 `lidar_to_top_m`，同时单独显示当前帧是否有效和无效原因，并读取离线 ENU diagnostics 的接收、处理、丢帧、插值失败和队列计数。`raw_sensor`、`algorithm_debug`、`full_debug` 等高级开发录制接口继续保留，供专项故障分析直接调用，但不占据日常测试界面。所有录制都由 rosbag2 直接订阅 Topic 写 MCAP，不经过浏览器预览，不设置降频。
 
-参数页的核心参数由 `ros2_ws/src/bringup/config/dev_parameter_bindings.yaml` 装订。页面分别显示正式 YAML 配置值和 ROS 2 实际运行值，节点不可用时不会用配置值冒充运行值。当前界面只显示 `ransac.distance_threshold_m`、`region.grid_size_m`、`region.min_span_cells`、`region.min_occupied_cells`、`region.max_residual_p95_m`、`ransac.min_inliers_absolute`、`ransac.max_candidate_planes` 和 `ransac.min_remaining_points` 八项。`region.min_span_cells` 与 `ransac.min_remaining_points` 当前只读，其余已支持的白名单项可临时修改当前 ROS 节点。装订表中的其他实验参数继续用于开发录制参数快照，不在参数页显示。
+核心参数由 `ros2_ws/src/bringup/config/dev_parameter_bindings.yaml` 装订。单页显示三项运动补偿启动参数 `processing_poll_interval_ms`、`max_interpolation_gap_s`、`minimum_valid_pose_ratio`，以及六项净空参数 `ransac.distance_threshold_m`、`ransac.max_candidate_planes`、`ransac.min_inliers_absolute`、`region.grid_size_m`、`region.min_occupied_cells`、`region.max_residual_p95_m`。主列表同时显示正式 YAML 配置值和 ROS 2 实际运行值，二者不一致时明确标记。可写参数需要点开详情后才能设置当前运行值，主列表不提供直接输入框。`ransac.max_candidate_planes` 的 development 上限与当前 small-board 正式值统一为 2500。运行时修改不写回 YAML，节点重启后恢复正式配置。其余装订参数继续用于开发录制参数快照。
 
-原始点云页面中的三维预览仍为限频、限点数据，只用于观察。原始数据 MCAP 完全独立保存于 `CAPTURE_DATA_ROOT/dev-tests/`，不会进入任务列表、历史回放或正式报告。
+测试页不再包含三维点云预览。采集首页继续使用正式点云预览旁路；完整原始点云 MCAP 独立保存于 `CAPTURE_DATA_ROOT/dev-tests/`，不会进入任务列表、历史回放或正式报告。
 
 开发构建：
 

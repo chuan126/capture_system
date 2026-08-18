@@ -3,6 +3,8 @@ std_msgs/Header header
 
 bool valid
 float64 lidar_to_top_m
+# 本帧RANSAC成功提取并达到原始分辨率最少内点要求的平面模型数量。
+uint32 ransac_plane_count
 # 通过区域尺寸、倾角和残差检查的连通区域数量。一个RANSAC模型可以产生多个区域。
 uint32 candidate_count
 uint32 selected_inlier_count

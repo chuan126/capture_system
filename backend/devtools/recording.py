@@ -29,7 +29,12 @@ class RecordingProfile:
 RAW_CLOUD_PROFILE = RecordingProfile(
     name="raw_cloud",
     directory_prefix="raw-cloud",
-    topics=("/capture/lidar/points_raw",),
+    # 界面仍定义为“原始点云样本”。high_rate_raw只用于离线重放完整运动补偿链，
+    # 不作为独立用户数据类型暴露。
+    topics=(
+        "/capture/lidar/points_raw",
+        "/capture/odometry/high_rate_raw",
+    ),
 )
 
 DIAGNOSTIC_PROFILE = RecordingProfile(
@@ -252,6 +257,16 @@ class RosbagRecordingManager:
                         snapshot_complete = bool(snapshot_payload.get("complete", False))
                     except (OSError, json.JSONDecodeError):
                         snapshot_complete = False
+                manifest = self._read_manifest(path)
+                topics = manifest.get("topics") if isinstance(manifest, dict) else None
+                replay_ready = isinstance(topics, list) and all(
+                    topic in topics
+                    for topic in (
+                        "/capture/lidar/points_raw",
+                        "/capture/odometry/high_rate_raw",
+                    )
+                )
+                duration_seconds = manifest.get("duration_seconds") if isinstance(manifest, dict) else None
                 records.append({
                     "recording_id": path.name,
                     "profile": profile.name,
@@ -260,24 +275,46 @@ class RosbagRecordingManager:
                     "modified_at_ns": int(stat.st_mtime_ns),
                     "active": path == self._path and self._process is not None,
                     "parameter_snapshot_complete": snapshot_complete,
+                    "replay_ready": replay_ready,
+                    "duration_seconds": float(duration_seconds) if isinstance(duration_seconds, (int, float)) else None,
                 })
         records.sort(key=lambda item: int(item["modified_at_ns"]), reverse=True)
         return records
 
+    def get_recording(self, recording_id: str) -> dict[str, object]:
+        path = self._resolve_recording_path(recording_id)
+        for record in self.list_recordings():
+            if record["recording_id"] == recording_id:
+                return record
+        raise DevRecordingError("未找到指定开发录制")
+
     def delete(self, recording_id: str) -> None:
-        if not _RECORDING_ID.fullmatch(recording_id):
-            raise DevRecordingError("录制编号无效")
         with self._lock:
             self._reap_locked()
             if self._recording_id == recording_id and self._process is not None:
                 raise DevRecordingError("正在录制的文件不能删除")
-            matches = list(self.root.glob(f"*/{recording_id}"))
-            if len(matches) != 1 or not matches[0].is_dir():
-                raise DevRecordingError("未找到指定开发录制")
-            path = matches[0].resolve()
-            if self.root not in path.parents:
-                raise DevRecordingError("录制路径越界")
+            path = self._resolve_recording_path(recording_id)
             shutil.rmtree(path)
+
+    def _resolve_recording_path(self, recording_id: str) -> Path:
+        if not _RECORDING_ID.fullmatch(recording_id):
+            raise DevRecordingError("录制编号无效")
+        matches = list(self.root.glob(f"*/{recording_id}"))
+        if len(matches) != 1 or not matches[0].is_dir():
+            raise DevRecordingError("未找到指定开发录制")
+        path = matches[0].resolve()
+        if self.root not in path.parents:
+            raise DevRecordingError("录制路径越界")
+        return path
+
+    @staticmethod
+    def _read_manifest(path: Path) -> dict[str, object]:
+        manifest_path = path / "capture_manifest.json"
+        try:
+            payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        return payload if isinstance(payload, dict) else {}
 
     def _write_snapshot_async(
         self, path: Path, recording_id: str, profile: RecordingProfile, started_at_ns: int
@@ -314,6 +351,11 @@ class RosbagRecordingManager:
             "topic_downsampling": False,
             "parameter_snapshot_file": "parameter_snapshot.yaml" if snapshot is not None else None,
         }
+        existing = RosbagRecordingManager._read_manifest(path)
+        if "stopped_at_ns" in existing:
+            manifest["stopped_at_ns"] = existing["stopped_at_ns"]
+        if "duration_seconds" in existing:
+            manifest["duration_seconds"] = existing["duration_seconds"]
         (path / "capture_manifest.json").write_text(
             json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
@@ -361,8 +403,27 @@ class RosbagRecordingManager:
             return
         if return_code != 0 and self._last_error is None:
             self._last_error = f"ros2 bag异常退出：{return_code}"
+        self._mark_recording_stopped_locked()
         self._process = None
         self._cancel_timers_locked()
+
+    def _mark_recording_stopped_locked(self) -> None:
+        if self._path is None or self._started_at_ns is None or not self._path.is_dir():
+            return
+        stopped_at_ns = time.time_ns()
+        manifest = self._read_manifest(self._path)
+        manifest.update({
+            "stopped_at_ns": stopped_at_ns,
+            "duration_seconds": max(0.0, (stopped_at_ns - self._started_at_ns) / 1e9),
+        })
+        try:
+            (self._path / "capture_manifest.json").write_text(
+                json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+        except OSError as error:
+            if self._last_error is None:
+                self._last_error = f"录制停止元数据写入失败：{error}"
 
     def _stop_process_locked(self) -> None:
         assert self._process is not None
@@ -380,6 +441,7 @@ class RosbagRecordingManager:
         except ProcessLookupError:
             pass
         finally:
+            self._mark_recording_stopped_locked()
             self._process = None
 
     def _schedule_watchdog_locked(self) -> None:

@@ -9,6 +9,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect, status
 from pydantic import BaseModel, Field
 
+from backend.devtools.offline_replay import OfflineReplayError, OfflineReplayManager
 from backend.devtools.parameters import DevParameterError, DevParameterService
 from backend.devtools.recording import (
     ALGORITHM_DEBUG_PROFILE,
@@ -29,6 +30,10 @@ class RecordingStartRequest(BaseModel):
 
 class ParameterSetRequest(BaseModel):
     value: bool | int | float
+
+
+class OfflineReplayStartRequest(BaseModel):
+    recording_id: str = Field(min_length=1, max_length=128)
 
 
 async def _ensure_dev_raw_cloud_bridge(websocket: WebSocket, hub: CloudPreviewHub) -> None:
@@ -137,6 +142,12 @@ def create_devtools_router() -> APIRouter:
     @router.put("/parameters/{key:path}")
     def set_parameter(key: str, payload: ParameterSetRequest, request: Request) -> dict[str, object]:
         _ensure_no_formal_task_active(request)
+        offline_manager = getattr(request.app.state, "dev_offline_replay_manager", None)
+        if offline_manager is not None and offline_manager.active:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="离线算法检测使用启动时参数快照，请先停止离线检测再修改运行参数",
+            )
         service: DevParameterService = request.app.state.dev_parameter_service
         try:
             return service.set_parameter(key, payload.value)
@@ -145,6 +156,9 @@ def create_devtools_router() -> APIRouter:
 
     def _recording_manager(request: Request) -> RosbagRecordingManager:
         return request.app.state.dev_recording_manager
+
+    def _offline_manager(request: Request) -> OfflineReplayManager:
+        return request.app.state.dev_offline_replay_manager
 
     def _ensure_no_formal_task_active(request: Request) -> None:
         readiness = task_control_readiness(request)
@@ -164,6 +178,11 @@ def create_devtools_router() -> APIRouter:
 
     def _start_profile(profile, payload: RecordingStartRequest, request: Request) -> dict[str, object]:
         _ensure_no_formal_task_active(request)
+        if _offline_manager(request).active:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="离线算法检测正在运行，请先停止后再保存开发样本",
+            )
         try:
             return _recording_manager(request).start(profile, payload.duration_seconds)
         except DevRecordingError as error:
@@ -197,8 +216,32 @@ def create_devtools_router() -> APIRouter:
         except DevRecordingError as error:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
 
+    @router.get("/offline/status")
+    def offline_status(request: Request) -> dict[str, object]:
+        return _offline_manager(request).status()
+
+    @router.post("/offline/start", status_code=status.HTTP_202_ACCEPTED)
+    def start_offline_replay(payload: OfflineReplayStartRequest, request: Request) -> dict[str, object]:
+        _ensure_no_formal_task_active(request)
+        try:
+            return _offline_manager(request).start(payload.recording_id)
+        except OfflineReplayError as error:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+
+    @router.post("/offline/stop")
+    def stop_offline_replay(request: Request) -> dict[str, object]:
+        try:
+            return _offline_manager(request).stop()
+        except OfflineReplayError as error:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+
     @router.delete("/recordings/{recording_id}", status_code=status.HTTP_204_NO_CONTENT)
     def delete_recording(recording_id: str, request: Request) -> None:
+        if _offline_manager(request).uses_recording(recording_id):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="离线算法检测正在使用该样本，不能删除",
+            )
         try:
             _recording_manager(request).delete(recording_id)
         except DevRecordingError as error:

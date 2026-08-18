@@ -169,7 +169,7 @@ private:
         estimator_ = ClearanceEstimator(next);
       }
       result.successful = true;
-      result.reason = "开发参数已临时应用，重启后恢复YAML值";
+      result.reason = "当前运行值已应用，节点重启后恢复YAML值";
     } catch (const std::exception & error) {
       result.reason = error.what();
     }
@@ -242,6 +242,7 @@ private:
     interfaces::msg::ClearanceResult output;
     output.header = message->header;
     output.valid = estimate.valid;
+    output.ransac_plane_count = static_cast<std::uint32_t>(estimate.ransac_plane_count);
     output.candidate_count = static_cast<std::uint32_t>(estimate.candidates.size());
     output.valid_point_ratio = estimate.valid_point_ratio;
     output.invalid_reason = estimate.invalid_reason;

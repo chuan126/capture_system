@@ -5,13 +5,23 @@ import test from "node:test";
 const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
 const playback = await readFile(new URL("../components/playback/PlaybackWorkspace.tsx", import.meta.url), "utf8");
 const interactiveChart = await readFile(new URL("../components/playback/InteractiveClearanceChart.tsx", import.meta.url), "utf8");
+const playbackWindow = await readFile(new URL("../components/playback/playbackSeriesWindow.ts", import.meta.url), "utf8");
+const playbackCache = await readFile(new URL("../components/playback/playbackSeriesCache.ts", import.meta.url), "utf8");
+const playbackCoordinator = await readFile(new URL("../components/playback/playbackLoadCoordinator.ts", import.meta.url), "utf8");
 const report = await readFile(new URL("../components/report/ReportWorkspace.tsx", import.meta.url), "utf8");
 const taskBrowser = await readFile(new URL("../components/workflow/TaskBrowser.tsx", import.meta.url), "utf8");
 const taskModel = await readFile(new URL("../components/workflow/taskModel.ts", import.meta.url), "utf8");
 const taskApi = await readFile(new URL("../components/workflow/taskApi.ts", import.meta.url), "utf8");
 const reportApi = await readFile(new URL("../components/report/reportExportApi.ts", import.meta.url), "utf8");
 const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
-const { normalizeChartView, panChartView, zoomChartView } = await import("../components/playback/clearanceChartViewport.ts");
+const {
+  fitChartYRange,
+  normalizeChartView,
+  panChartView,
+  panChartYRange,
+  zoomChartView,
+  zoomChartYRange,
+} = await import("../components/playback/clearanceChartViewport.ts");
 
 test("capture, playback and report share persisted tasks and one browser selection", () => {
   assert.match(page, /const \[tasks, setTasks\] = useState<CollectionTask\[]>\(\[\]\)/);
@@ -48,14 +58,14 @@ test("stopped tasks expose direct playback and report navigation", () => {
 });
 
 test("playback task browser follows task creation order", () => {
-  assert.match(playback, /heading="选择回放任务" sortOrder="asc"/);
+  assert.match(playback, /heading="选择回放任务"[\s\S]*sortOrder="asc"/);
   assert.match(taskBrowser, /sortOrder\?: "asc" \| "desc"/);
   assert.match(taskBrowser, /const direction=sortOrder==="asc"\?1:-1/);
 });
 
-test("playback keeps one complete task curve and supports filtered multi-task deletion", () => {
+test("playback keeps one task curve workspace and supports filtered multi-task deletion", () => {
   assert.match(playback, /选择回放任务/);
-  assert.match(playback, /完整净空高度曲线/);
+  assert.match(playback, /净空高度曲线/);
   assert.match(playback, /50 Hz 测量序列/);
   assert.match(playback, /统计与数据质量/);
   assert.match(playback, /deleteSelectedTasks\(deleteIds\)/);
@@ -75,19 +85,57 @@ test("interactive clearance chart supports pan, zoom, reset and hover without mo
   assert.match(interactiveChart, /onPointerDown=\{handlePointerDown\}/);
   assert.match(interactiveChart, /setPointerCapture/);
   assert.match(interactiveChart, /onDoubleClick=\{resetView\}/);
-  assert.match(interactiveChart, /拖拽平移/);
-  assert.match(interactiveChart, /滚轮横向缩放/);
-  assert.match(interactiveChart, /Shift\+滚轮纵向缩放/);
+  assert.match(interactiveChart, /拖拽：左右、上下平移/);
+  assert.match(interactiveChart, /滚轮：横向缩放/);
+  assert.match(interactiveChart, /Shift\+滚轮：纵向缩放/);
   assert.match(interactiveChart, /zoomVertically/);
   assert.match(interactiveChart, /纵向放大曲线/);
   assert.match(interactiveChart, /纵向缩小曲线/);
-  assert.match(interactiveChart, /重置视图/);
+  assert.match(interactiveChart, /纵轴已锁定/);
+  assert.match(interactiveChart, /适配当前窗口/);
+  assert.match(interactiveChart, /pendingDragYRangeRef/);
+  assert.match(interactiveChart, /outOfRange\.above/);
+  assert.match(interactiveChart, /outOfRange\.below/);
+  assert.match(interactiveChart, /requestAnimationFrame/);
+  assert.doesNotMatch(interactiveChart, /\[verticalZoom, visibleSamples\]/);
+  assert.match(interactiveChart, /回到开头/);
   assert.match(interactiveChart, /onKeyDown=\{handleKeyDown\}/);
   assert.match(interactiveChart, /heightM:\s*number \| null/);
+  assert.match(interactiveChart, /sampleIndex:\s*number/);
+  assert.match(interactiveChart, /sample\.timestampMs - windowStart/);
+  assert.match(interactiveChart, /Math\.abs\(sample\.timestampMs - targetTime\)/);
+  assert.doesNotMatch(interactiveChart, /xToPercent\(sample\.sampleIndex\)/);
+  assert.match(playback, /startTimestampMs: request\.startTimestampMs/);
+  assert.match(playback, /endTimestampMs: request\.endTimestampMs/);
   assert.match(interactiveChart, /!sample\.valid \|\| sample\.heightM === null/);
   assert.doesNotMatch(interactiveChart, /mock|demo|Math\.random|模拟曲线/);
-  assert.match(playback, /loadMeasurementHistory\(selectedTask\.taskId\)/);
-  assert.match(playback, /samples=\{history\?\.samples\?\?\[]\}/);
+  assert.match(playback, /loadMeasurementPrefix\(selectedTaskId/);
+  assert.match(playback, /loadMeasurementSummary\(selectedTaskId/);
+  assert.match(playback, /loadMeasurementSeries\(selectedTaskId/);
+  assert.match(playback, /mergeSeriesIntoCache\(seriesCacheRef\.current, nextSeries\)/);
+  assert.match(playback, /isSeriesWindowCached/);
+  assert.match(playback, /series cache hit/);
+  assert.match(playbackCache, /samplesByIndex/);
+  assert.match(playbackCache, /targetResolutionMs/);
+  assert.match(playback, /INITIAL_PREFIX_SAMPLES = 2000/);
+  assert.match(playback, /SUMMARY_LOAD_DELAY_MS = 100/);
+  assert.match(playback, /DETAIL_SERIES_POINTS = 6000/);
+  assert.match(playback, /setTimeout/);
+  assert.match(playback, /samples=\{series\?\.samples \?\? \[]\}/);
+  assert.match(playback, /保留局部最低值、最高值和无效断点/);
+  assert.match(playback, /首屏只读取任务最前面的固定样本段/);
+  assert.match(interactiveChart, /initialView \?\? \{ start: 0, end: 1 \}/);
+  assert.match(interactiveChart, /onViewWindowChange\?\.\(view\)/);
+  assert.match(interactiveChart, /reportedInitialViewRef/);
+  assert.match(playback, /userViewRevisionRef\.current === 0/);
+  assert.match(playback, /\[selectedTaskId, selectedTask\?\.hasMeasurements\]/);
+  assert.match(playbackWindow, /if \(userViewRevision <= 0\) return null/);
+  assert.match(playback, /prefixTimer = window\.setTimeout\(beginInitialLoad, 0\)/);
+  assert.match(playback, /SUMMARY_RETRY_DELAY_MS = 500/);
+  assert.match(playback, /isSupersededError\(error\)/);
+  assert.match(interactiveChart, /const lineSegments = useMemo/);
+  assert.doesNotMatch(playbackCoordinator, /loadMeasurementSeries|\/measurements(?:["'`])/);
+  assert.doesNotMatch(playback, /\}, \[selectedTask\]\)/);
 });
 
 test("playback removes physical cleanup from customer UI and deletes selected tasks logically", () => {
@@ -101,7 +149,7 @@ test("playback removes physical cleanup from customer UI and deletes selected ta
 });
 
 test("playback distinguishes loading, ready, empty, cleaned and failed history states", () => {
-  assert.match(playback, /type HistoryState="idle"\|"loading"\|"empty"\|"ready"\|"error"/);
+  assert.match(playback, /type HistoryState = "idle" \| "loading" \| "empty" \| "ready" \| "error"/);
   assert.match(playback, /界面测试数据/);
   assert.match(playback, /实际平均频率/);
   assert.match(playback, /有效采样比例/);
@@ -120,6 +168,25 @@ test("clearance chart viewport math keeps zoom and pan inside the full task rang
   assertView(zoomed, { start: 0.25, end: 0.75 });
   assertView(panChartView(zoomed, -2), { start: 0, end: 0.5 });
   assertView(panChartView(zoomed, 2), { start: 0.5, end: 1 });
+});
+
+test("clearance chart keeps a stable fitted y range until the user changes it", () => {
+  const fitted = fitChartYRange([4.2, 4.4]);
+  assert.deepEqual(fitted, { minimum: 4.176, maximum: 4.424 });
+  const zoomed = zoomChartYRange(fitted, 2);
+  assert.ok(Math.abs(zoomed.minimum - 4.238) < 1e-12);
+  assert.ok(Math.abs(zoomed.maximum - 4.362) < 1e-12);
+  assert.equal(fitChartYRange([Number.NaN, Number.POSITIVE_INFINITY]), null);
+  assert.deepEqual(panChartYRange({ minimum: 4, maximum: 5 }, 0.5), {
+    minimum: 4.5,
+    maximum: 5.5,
+  });
+  assert.deepEqual(panChartYRange({ minimum: 0.1, maximum: 1.1 }, -0.5), {
+    minimum: 0,
+    maximum: 1,
+  });
+  assert.match(interactiveChart, /const \[yRange, setYRange\] = useState/);
+  assert.match(interactiveChart, /setYRange\(initialYRangeRef\.current\)/);
 });
 
 test("report removes task-name fields and aggregates only user-selected tasks", () => {
@@ -157,6 +224,13 @@ test("task browser searches time identifiers and tunnel metadata and groups by d
   assert.match(taskBrowser, /formatTaskDateKey\(dateKey\)/);
   assert.match(taskBrowser, /任务编号由设备端创建时间生成/);
   assert.doesNotMatch(taskBrowser, /formatTaskSequence|task\.taskName/);
+});
+
+test("playback main cards share one row height and y-axis title has normal chart orientation", () => {
+  assert.match(css, /\.playback-layout > \.task-browser, \.playback-clearance-main, \.playback-inspector \{ height: 100%; \}/);
+  assert.match(css, /\.playback-clearance-panel \{[^}]*height: 100%;/);
+  assert.match(css, /\.interactive-clearance-chart__y-axis strong \{[^}]*writing-mode: horizontal-tb;[^}]*transform: rotate\(-90deg\);/);
+  assert.doesNotMatch(css, /interactive-clearance-chart__y-axis strong[^}]*vertical-rl/);
 });
 
 test("workflow layout keeps the clearance curve prominent on wide and notebook screens", () => {

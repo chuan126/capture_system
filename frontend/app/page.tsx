@@ -7,6 +7,7 @@ import type { ClearanceSnapshot } from "@/components/clearance/clearanceProtocol
 import RealtimeAmap from "@/components/map/RealtimeAmap";
 import PointCloudViewer from "@/components/point-cloud/PointCloudViewer";
 import WifiControl from "@/components/network/WifiControl";
+import { deriveLocalizationStatus, rtkSolutionLabel } from "@/components/rtk/localizationView";
 import { useRtkSocket } from "@/components/rtk/useRtkSocket";
 import { useSystemStatusSocket } from "@/components/system-status/useSystemStatusSocket";
 import { isDeviceConnected } from "@/components/system-status/systemStatusProtocol";
@@ -564,17 +565,8 @@ function Dashboard({
         : systemSnapshot?.rtk.state === "error" || systemSnapshot?.rtk.state === "stale"
           ? "danger"
           : "idle";
-  const solutionLabels: Record<number, string> = {
-    0: "未定位",
-    1: "单点定位",
-    2: "差分定位",
-    4: "RTK固定",
-    5: "RTK浮动",
-  };
   const gpsState = rtkSnapshot?.gps_state;
-  const rtkCardValue = gpsState === null || gpsState === undefined
-    ? "--"
-    : solutionLabels[gpsState] ?? `状态 ${gpsState}`;
+  const rtkCardValue = rtkSolutionLabel(gpsState);
   const rmcCharacter = rtkSnapshot?.rmc_validity
     ? String.fromCharCode(rtkSnapshot.rmc_validity)
     : null;
@@ -594,13 +586,11 @@ function Dashboard({
     Number.isFinite(longitudeValue);
   const localizationLatitudeValue = rtkSnapshot?.localization_latitude;
   const localizationLongitudeValue = rtkSnapshot?.localization_longitude;
-  const localizationValid = rtk.connection === "connected" &&
-    rtk.streamState === "streaming" &&
-    rtkSnapshot?.localization_valid === true &&
-    typeof localizationLatitudeValue === "number" &&
-    Number.isFinite(localizationLatitudeValue) &&
-    typeof localizationLongitudeValue === "number" &&
-    Number.isFinite(localizationLongitudeValue);
+  const localization = deriveLocalizationStatus(
+    rtkSnapshot,
+    rtk.connection === "connected" && rtk.streamState === "streaming",
+  );
+  const localizationValid = localization.valid;
   const rawLatitudeText = rawCoordinateAvailable && typeof latitudeValue === "number"
     ? latitudeValue.toFixed(7)
     : "--";
@@ -619,21 +609,9 @@ function Dashboard({
   const localizationAltitudeText = localizationValid
     ? `${formatMetric(rtkSnapshot?.localization_altitude)} m`
     : "--";
-  const localizationModeLabels: Record<number, string> = {
-    0: "无效",
-    1: "RTK",
-    2: "航位推算",
-    3: "RTK恢复",
-  };
-  const localizationModeText = typeof rtkSnapshot?.localization_mode === "number"
-    ? localizationModeLabels[rtkSnapshot.localization_mode] ?? `模式 ${rtkSnapshot.localization_mode}`
-    : "--";
-  const localizationTone = localizationValid
-    ? rtkSnapshot?.localization_mode === 2 ? "warn" : "ok"
-    : "danger";
-  const localizationStatusText = localizationValid
-    ? localizationModeText
-    : rtkSnapshot?.localization_invalid_reason ?? "等待融合定位";
+  const localizationModeText = localization.modeText;
+  const localizationTone = localization.tone;
+  const localizationStatusText = localization.statusText;
   const vehicleAttitudeValid = rtkSnapshot?.localization_vehicle_attitude_valid === true;
   const vehiclePitchText = vehicleAttitudeValid ? `${formatMetric(rtkSnapshot?.localization_vehicle_pitch_deg, 2)}°` : "--";
   const vehicleRollText = vehicleAttitudeValid ? `${formatMetric(rtkSnapshot?.localization_vehicle_roll_deg, 2)}°` : "--";

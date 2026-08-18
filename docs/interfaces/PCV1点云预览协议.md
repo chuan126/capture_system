@@ -13,7 +13,8 @@ PCV1用于FastAPI向局域网浏览器发送受控XYZ预览点云。正式 `/ws/
 发送ROS 2侧已经完成姿态补偿、限频并限制最大点数的当前帧局部东北天点云，点坐标
 固定为`x=East`、`y=North`、`z=Up`，单位米，`frame_id`固定为`lidar_local_enu`。
 development 构建的 `/ws/dev/raw-cloud-preview` 复用同一二进制帧头和XYZ负载，但
-`stream_info.coordinate_mode=sensor`，表示原始雷达传感器坐标，仅用于测试工作台预览。
+`stream_info.coordinate_mode=sensor`，表示原始雷达传感器坐标。该接口保留给直接开发诊断，
+当前测试工作台不再自动连接它。
 
 PCV1不是ROS 2消息，不用于净空计算、记录、坐标转换或跨设备传感器同步。
 
@@ -38,6 +39,10 @@ wss://<host>/ws/v1/cloud-preview
 
 FastAPI依赖ROS预览Topic符合固定输出契约，不检查PointCloud2字段、偏移、步长、
 大小端或数据长度，不逐点解析和修复XYZ负载。
+
+当前正式上游 `cloud_visualization` 在 PCV1 之前完成显示旁路处理：剔除 x/y/z 非有限点和明确
+`(0,0,0)` 占位点；有效点不超过 10000 时全部保留，超过后以 5 cm 体素优先保留空间代表点，
+再补足或限点到最多 10000。该处理只生成预览 Topic，不修改正式运动补偿点云和净空算法输入。
 
 ## 3. 流描述消息
 

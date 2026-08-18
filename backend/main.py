@@ -22,6 +22,7 @@ from backend.websocket.system_status_hub import SystemStatusHub
 from backend.websocket.task_status_hub import TaskStatusHub
 from backend.websocket.routes import router as websocket_router
 from backend.measurements.repository import MeasurementRepository
+from backend.measurements.query_coordinator import MeasurementQueryCoordinator
 from backend.exports.routes import router as export_router
 from backend.batches.routes import router as batch_router
 from backend.exports.service import ReportExportService
@@ -95,6 +96,7 @@ def create_app(
     database_path = (task_database_path or runtime_data_root / "capture.db").resolve()
     task_repository = TaskRepository(database_path, tasks_directory)
     measurement_repository = MeasurementRepository(tasks_directory)
+    measurement_query_coordinator = MeasurementQueryCoordinator()
     configured_pdf_font = os.getenv("CAPTURE_PDF_FONT_PATH")
     resolved_pdf_font_path = (
         pdf_font_path.resolve()
@@ -114,12 +116,14 @@ def create_app(
     dev_raw_cloud_bridge = None
     dev_raw_cloud_hub = None
     dev_recording_manager = None
+    dev_offline_replay_manager = None
     dev_parameter_service = None
     dev_parameter_bridge = None
     dev_system_metrics = None
     devtools_http_router = None
     devtools_ws_router = None
     if development_tools_enabled:
+        from backend.devtools.offline_replay import OfflineReplayManager
         from backend.devtools.parameter_bridge import DevParameterBridge
         from backend.devtools.parameters import DevParameterService
         from backend.devtools.recording import RosbagRecordingManager
@@ -135,6 +139,11 @@ def create_app(
         dev_recording_manager = RosbagRecordingManager(
             runtime_data_root,
             parameter_snapshot_provider=dev_parameter_service.snapshot,
+        )
+        dev_offline_replay_manager = OfflineReplayManager(
+            dev_recording_manager,
+            parameter_snapshot_provider=dev_parameter_service.snapshot,
+            project_root=PROJECT_ROOT,
         )
         dev_system_metrics = SystemMetricsSampler()
         devtools_http_router = create_devtools_router()
@@ -244,12 +253,14 @@ def create_app(
                 application.state.dev_raw_cloud_bridge = None
             if dev_telemetry_bridge is not None:
                 dev_telemetry_bridge.stop()
+            if dev_offline_replay_manager is not None:
+                dev_offline_replay_manager.stop_on_shutdown()
+            if dev_recording_manager is not None:
+                dev_recording_manager.stop_on_shutdown()
             if dev_parameter_service is not None:
                 dev_parameter_service.stop()
             if dev_parameter_bridge is not None:
                 dev_parameter_bridge.stop()
-            if dev_recording_manager is not None:
-                dev_recording_manager.stop_on_shutdown()
 
     application = FastAPI(
         title="Capture System Web API",
@@ -266,6 +277,7 @@ def create_app(
     application.state.task_status_hub = task_status_hub
     application.state.task_repository = task_repository
     application.state.measurement_repository = measurement_repository
+    application.state.measurement_query_coordinator = measurement_query_coordinator
     application.state.report_export_service = report_export_service
     application.state.task_control_bridge = None
     application.state.runtime_data_root = runtime_data_root
@@ -278,6 +290,7 @@ def create_app(
     application.state.dev_raw_cloud_bridge_factory = None
     application.state.dev_raw_cloud_bridge_lock = None
     application.state.dev_recording_manager = dev_recording_manager
+    application.state.dev_offline_replay_manager = dev_offline_replay_manager
     application.state.dev_parameter_service = dev_parameter_service
     application.state.dev_system_metrics = dev_system_metrics
     application.state.device_settings_store = device_settings_store

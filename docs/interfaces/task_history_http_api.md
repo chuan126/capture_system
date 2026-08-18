@@ -66,6 +66,39 @@ Content-Type: application/json
 
 ## 5. 历史测量读取
 
+客户回放页使用轻量摘要和按窗口曲线接口，避免长任务一次传输和渲染全部 50 Hz 样本。
+
+```http
+GET /api/v1/tasks/{task_id}/measurements/series-prefix?max_samples=2000
+GET /api/v1/tasks/{task_id}/measurements/summary
+GET /api/v1/tasks/{task_id}/measurements/series?start_timestamp_ms=1785978000000&end_timestamp_ms=1785978020000&max_points=4000
+```
+
+正式前端为上述回放请求携带同一标签页稳定的 `X-Playback-Session`。同一会话发起新回放读取时，
+后端通过 SQLite `interrupt()` 取消仍在执行的旧查询；旧请求返回非标准 HTTP 499，前端不显示为
+数据错误。`sessionStorage` 使标签页刷新前后的会话 ID 保持一致，因此刷新后的 prefix 可以终止
+刷新前残留的大窗口查询。不同浏览器标签页互不取消。
+
+`series-prefix` 用于首屏。它按 `sample_index` 顺序直接读取任务开头固定数量的样本，`max_samples`
+允许 200 至 10000，默认 2000。该接口不对整条任务执行样本计数或降采样，并同时返回完整任务的首尾
+源时间戳，前端据此把首段样本显示为初始时间窗口。初始化视窗不会触发 `series`；只有用户主动改变
+窗口后才请求局部数据。完整统计在首段曲线出现后异步读取，不阻塞首屏。
+
+`summary` 返回测量统计、数据来源、实际检测方向与车道、入口出口 RTK、暂停区间数量以及首尾
+样本索引和源时间戳，不返回 `samples`。
+
+`series` 使用源采样时间戳窗口查询，保持原回放曲线的真实时间轴语义。`max_points` 允许 200 至 10000，默认
+4000。窗口样本不超过上限时返回全部样本；超过上限时由 SQLite 按真实源时间桶直接选择局部最低值、
+局部最高值和至少一个无效样本断点，并保留窗口首尾，避免把窗口内每条记录送入 Python 后再筛选。
+该降采样只用于显示，不修改 `measurements.db`，正式
+TXT/PDF 导出仍读取完整记录。
+
+`series-prefix` 和 `series` 都返回 `domain_start_timestamp_ms` 与 `domain_end_timestamp_ms`，表示任务
+完整源时间范围。用户拖拽或缩放离开首段后，前端再调用 `series` 读取当前视图窗口；“回到开头”恢复
+首段窗口，不主动触发整任务曲线扫描。
+
+旧完整读取接口继续保留用于兼容和测试：
+
 ```http
 GET /api/v1/tasks/{task_id}/measurements
 ```
@@ -119,4 +152,6 @@ CAPTURE_DATA_ROOT/
 
 ## 7. 当前限制
 
-单次接口最多读取 500000 个样本。当前实现返回完整任务序列，尚未实现分块传输和多级降采样。
+兼容接口 `/measurements` 仍限制最多读取 500000 个样本。客户回放页不再调用该完整序列接口，
+而是以 `series-prefix` 首屏、`summary` 延后、`series` 按用户当前视图加载。当前 series 直接以
+`source_timestamp_ns` 对应的毫秒时间窗口和已有时间戳索引读取，暂停造成的真实时间间隔仍保留在横轴中。

@@ -43,6 +43,7 @@ TEST(ClearanceEstimatorTest, SelectsLowestOfMultiplePlanes)
   const auto result = estimator.estimate(points);
 
   ASSERT_TRUE(result.valid) << result.invalid_reason;
+  EXPECT_GE(result.ransac_plane_count, 3U);
   EXPECT_GE(result.candidates.size(), 3U);
   EXPECT_NEAR(result.selected.min_height_m, 1.5, 0.03);
 }
@@ -140,6 +141,7 @@ TEST(ClearanceEstimatorTest, OneRansacPlaneCanProduceMultipleConnectedRegions)
 
   ASSERT_TRUE(result.valid) << result.invalid_reason;
   EXPECT_EQ(config.max_candidate_planes, 1);
+  EXPECT_EQ(result.ransac_plane_count, 1U);
   EXPECT_GE(result.candidates.size(), 2U);
 }
 

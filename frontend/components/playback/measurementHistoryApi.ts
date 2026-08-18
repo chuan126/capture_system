@@ -24,7 +24,7 @@ export type MeasurementStatistics = {
   actualAverageSampleRateHz: number | null;
 };
 
-export type MeasurementHistory = {
+export type MeasurementSummary = {
   taskId: string;
   recordingSchemaVersion: number;
   dataOrigin: "recorded" | "test_fixture";
@@ -39,7 +39,61 @@ export type MeasurementHistory = {
   entryRtk: MeasurementRtkEndpoint | null;
   exitRtk: MeasurementRtkEndpoint | null;
   pauseIntervalCount: number;
+  firstSampleIndex: number;
+  lastSampleIndex: number;
+  firstTimestampMs: number;
+  lastTimestampMs: number;
+};
+
+export type MeasurementSeries = {
+  taskId: string;
+  domainStartTimestampMs: number;
+  domainEndTimestampMs: number;
+  requestedStartTimestampMs: number;
+  requestedEndTimestampMs: number;
+  sourceSampleCount: number;
+  returnedSampleCount: number;
+  downsampled: boolean;
   samples: ClearanceSample[];
+};
+
+export type MeasurementSeriesRequest = {
+  startTimestampMs?: number;
+  endTimestampMs?: number;
+  maxPoints?: number;
+  signal?: AbortSignal;
+};
+
+export type MeasurementPrefixRequest = {
+  maxSamples?: number;
+  signal?: AbortSignal;
+};
+
+const PLAYBACK_SESSION_KEY = "capture.playback.session.v1";
+let inMemoryPlaybackSession: string | null = null;
+
+const createPlaybackSession = (): string => {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `playback-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+};
+
+export const getPlaybackSessionId = (): string => {
+  if (typeof window === "undefined") {
+    inMemoryPlaybackSession ??= createPlaybackSession();
+    return inMemoryPlaybackSession;
+  }
+  try {
+    const existing = window.sessionStorage.getItem(PLAYBACK_SESSION_KEY);
+    if (existing) return existing;
+    const created = createPlaybackSession();
+    window.sessionStorage.setItem(PLAYBACK_SESSION_KEY, created);
+    return created;
+  } catch {
+    inMemoryPlaybackSession ??= createPlaybackSession();
+    return inMemoryPlaybackSession;
+  }
 };
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
@@ -85,6 +139,24 @@ const readRtk = (value: unknown, field: string): MeasurementRtkEndpoint | null =
   };
 };
 
+const readStatistics = (value: unknown): MeasurementStatistics => {
+  if (!isObject(value)) throw new TaskApiError("历史记录字段 statistics 无效");
+  return {
+    totalSamples: readNumber(value.total_samples, "statistics.total_samples"),
+    validSamples: readNumber(value.valid_samples, "statistics.valid_samples"),
+    invalidSamples: readNumber(value.invalid_samples, "statistics.invalid_samples"),
+    minimumHeightM: readNullableNumber(value.minimum_height_m, "statistics.minimum_height_m"),
+    averageHeightM: readNullableNumber(value.average_height_m, "statistics.average_height_m"),
+    maximumHeightM: readNullableNumber(value.maximum_height_m, "statistics.maximum_height_m"),
+    durationMs: readNumber(value.duration_ms, "statistics.duration_ms"),
+    nominalSampleRateHz: readNumber(value.nominal_sample_rate_hz, "statistics.nominal_sample_rate_hz"),
+    actualAverageSampleRateHz: readNullableNumber(
+      value.actual_average_sample_rate_hz,
+      "statistics.actual_average_sample_rate_hz",
+    ),
+  };
+};
+
 const readErrorMessage = async (response: Response): Promise<string> => {
   try {
     const payload = await response.json();
@@ -95,76 +167,153 @@ const readErrorMessage = async (response: Response): Promise<string> => {
   return response.statusText || `HTTP ${response.status}`;
 };
 
-export const loadMeasurementHistory = async (taskId: string): Promise<MeasurementHistory> => {
+const fetchJson = async (url: string, signal?: AbortSignal): Promise<unknown> => {
   let response: Response;
   try {
-    response = await fetch(`/api/v1/tasks/${encodeURIComponent(taskId)}/measurements`, {
+    response = await fetch(url, {
       method: "GET",
-      headers: { Accept: "application/json" },
+      headers: {
+        Accept: "application/json",
+        "X-Playback-Session": getPlaybackSessionId(),
+      },
       cache: "no-store",
+      signal,
     });
   } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") throw error;
     const detail = error instanceof Error ? error.message : "网络请求失败";
     throw new TaskApiError(`无法连接历史记录接口：${detail}`);
   }
   if (!response.ok) throw new TaskApiError(await readErrorMessage(response), response.status);
-
-  let payload: unknown;
   try {
-    payload = await response.json();
+    return await response.json();
   } catch {
     throw new TaskApiError("历史记录接口返回了无效JSON", response.status);
   }
-  if (!isObject(payload)) throw new TaskApiError("历史记录接口返回了无效对象");
-  if (!isObject(payload.statistics)) throw new TaskApiError("历史记录统计字段无效");
-  if (!Array.isArray(payload.pause_intervals)) throw new TaskApiError("历史记录暂停区间字段无效");
-  if (!Array.isArray(payload.samples)) throw new TaskApiError("历史记录样本字段无效");
+};
 
+export const loadMeasurementSummary = async (
+  taskId: string,
+  signal?: AbortSignal,
+): Promise<MeasurementSummary> => {
+  const payload = await fetchJson(
+    `/api/v1/tasks/${encodeURIComponent(taskId)}/measurements/summary`,
+    signal,
+  );
+  if (!isObject(payload)) throw new TaskApiError("历史记录接口返回格式无效");
   const dataOrigin = readString(payload.data_origin, "data_origin");
   if (dataOrigin !== "recorded" && dataOrigin !== "test_fixture") {
-    throw new TaskApiError(`历史记录数据来源无效 ${dataOrigin}`);
+    throw new TaskApiError("历史记录字段 data_origin 无效");
   }
-  const laneValue = readString(payload.lane, "lane");
-  const travelDirection = typeof payload.travel_direction === "string" ? payload.travel_direction : "unknown";
-  const laneSide = typeof payload.lane_side === "string" ? payload.lane_side : laneValue;
-  const lane = formatLaneDisplay(travelDirection, laneSide, laneValue);
-
+  const rawLane = readString(payload.lane, "lane");
+  const travelDirection = readString(payload.travel_direction, "travel_direction");
+  const laneSide = readString(payload.lane_side, "lane_side");
   return {
     taskId: readString(payload.task_id, "task_id"),
     recordingSchemaVersion: readNumber(payload.recording_schema_version, "recording_schema_version"),
     dataOrigin,
-    lane,
+    lane: formatLaneDisplay(travelDirection, laneSide, rawLane),
     startedAt: readString(payload.started_at, "started_at"),
     endedAt: readNullableString(payload.ended_at, "ended_at"),
     complete: readBoolean(payload.complete, "complete"),
     algorithmVersion: readNullableString(payload.algorithm_version, "algorithm_version"),
     configVersion: readNullableString(payload.config_version, "config_version"),
     softwareVersion: readNullableString(payload.software_version, "software_version"),
-    statistics: {
-      totalSamples: readNumber(payload.statistics.total_samples, "statistics.total_samples"),
-      validSamples: readNumber(payload.statistics.valid_samples, "statistics.valid_samples"),
-      invalidSamples: readNumber(payload.statistics.invalid_samples, "statistics.invalid_samples"),
-      minimumHeightM: readNullableNumber(payload.statistics.minimum_height_m, "statistics.minimum_height_m"),
-      averageHeightM: readNullableNumber(payload.statistics.average_height_m, "statistics.average_height_m"),
-      maximumHeightM: readNullableNumber(payload.statistics.maximum_height_m, "statistics.maximum_height_m"),
-      durationMs: readNumber(payload.statistics.duration_ms, "statistics.duration_ms"),
-      nominalSampleRateHz: readNumber(payload.statistics.nominal_sample_rate_hz, "statistics.nominal_sample_rate_hz"),
-      actualAverageSampleRateHz: readNullableNumber(
-        payload.statistics.actual_average_sample_rate_hz,
-        "statistics.actual_average_sample_rate_hz",
-      ),
-    },
+    statistics: readStatistics(payload.statistics),
     entryRtk: readRtk(payload.entry_rtk, "entry_rtk"),
     exitRtk: readRtk(payload.exit_rtk, "exit_rtk"),
-    pauseIntervalCount: payload.pause_intervals.length,
-    samples: payload.samples.map((sample, index) => {
-      if (!isObject(sample)) throw new TaskApiError(`历史记录样本 ${index} 无效`);
-      return {
-        timestampMs: readNumber(sample.timestamp_ms, `samples.${index}.timestamp_ms`),
-        heightM: readNullableNumber(sample.height_m, `samples.${index}.height_m`),
-        valid: readBoolean(sample.valid, `samples.${index}.valid`),
-        reason: readNullableString(sample.invalid_reason, `samples.${index}.invalid_reason`) ?? undefined,
-      };
-    }),
+    pauseIntervalCount: readNumber(payload.pause_interval_count, "pause_interval_count"),
+    firstSampleIndex: readNumber(payload.first_sample_index, "first_sample_index"),
+    lastSampleIndex: readNumber(payload.last_sample_index, "last_sample_index"),
+    firstTimestampMs: readNumber(payload.first_timestamp_ms, "first_timestamp_ms"),
+    lastTimestampMs: readNumber(payload.last_timestamp_ms, "last_timestamp_ms"),
+  };
+};
+
+export const loadMeasurementSeries = async (
+  taskId: string,
+  request: MeasurementSeriesRequest = {},
+): Promise<MeasurementSeries> => {
+  const params = new URLSearchParams();
+  if (request.startTimestampMs !== undefined) {
+    params.set("start_timestamp_ms", String(Math.floor(request.startTimestampMs)));
+  }
+  if (request.endTimestampMs !== undefined) {
+    params.set("end_timestamp_ms", String(Math.ceil(request.endTimestampMs)));
+  }
+  params.set("max_points", String(request.maxPoints ?? 4000));
+  const payload = await fetchJson(
+    `/api/v1/tasks/${encodeURIComponent(taskId)}/measurements/series?${params.toString()}`,
+    request.signal,
+  );
+  if (!isObject(payload) || !Array.isArray(payload.samples)) {
+    throw new TaskApiError("历史曲线接口返回格式无效");
+  }
+  const samples = payload.samples.map((raw, index): ClearanceSample => {
+    if (!isObject(raw)) throw new TaskApiError(`历史曲线样本 ${index} 无效`);
+    const valid = readBoolean(raw.valid, `samples[${index}].valid`);
+    return {
+      sampleIndex: readNumber(raw.sample_index, `samples[${index}].sample_index`),
+      timestampMs: readNumber(raw.timestamp_ms, `samples[${index}].timestamp_ms`),
+      elapsedMs: readNumber(raw.elapsed_ms, `samples[${index}].elapsed_ms`),
+      heightM: readNullableNumber(raw.height_m, `samples[${index}].height_m`),
+      valid,
+      reason: readNullableString(raw.invalid_reason, `samples[${index}].invalid_reason`) ?? undefined,
+    };
+  });
+  return {
+    taskId: readString(payload.task_id, "task_id"),
+    domainStartTimestampMs: readNumber(payload.domain_start_timestamp_ms, "domain_start_timestamp_ms"),
+    domainEndTimestampMs: readNumber(payload.domain_end_timestamp_ms, "domain_end_timestamp_ms"),
+    requestedStartTimestampMs: readNumber(
+      payload.requested_start_timestamp_ms,
+      "requested_start_timestamp_ms",
+    ),
+    requestedEndTimestampMs: readNumber(
+      payload.requested_end_timestamp_ms,
+      "requested_end_timestamp_ms",
+    ),
+    sourceSampleCount: readNumber(payload.source_sample_count, "source_sample_count"),
+    returnedSampleCount: readNumber(payload.returned_sample_count, "returned_sample_count"),
+    downsampled: readBoolean(payload.downsampled, "downsampled"),
+    samples,
+  };
+};
+
+export const loadMeasurementPrefix = async (
+  taskId: string,
+  request: MeasurementPrefixRequest = {},
+): Promise<MeasurementSeries> => {
+  const params = new URLSearchParams();
+  params.set("max_samples", String(request.maxSamples ?? 2000));
+  const payload = await fetchJson(
+    `/api/v1/tasks/${encodeURIComponent(taskId)}/measurements/series-prefix?${params.toString()}`,
+    request.signal,
+  );
+  if (!isObject(payload) || !Array.isArray(payload.samples)) {
+    throw new TaskApiError("历史曲线首段接口返回格式无效");
+  }
+  const samples = payload.samples.map((raw, index): ClearanceSample => {
+    if (!isObject(raw)) throw new TaskApiError(`历史曲线首段样本 ${index} 无效`);
+    const valid = readBoolean(raw.valid, `samples[${index}].valid`);
+    return {
+      sampleIndex: readNumber(raw.sample_index, `samples[${index}].sample_index`),
+      timestampMs: readNumber(raw.timestamp_ms, `samples[${index}].timestamp_ms`),
+      elapsedMs: readNumber(raw.elapsed_ms, `samples[${index}].elapsed_ms`),
+      heightM: readNullableNumber(raw.height_m, `samples[${index}].height_m`),
+      valid,
+      reason: readNullableString(raw.invalid_reason, `samples[${index}].invalid_reason`) ?? undefined,
+    };
+  });
+  return {
+    taskId: readString(payload.task_id, "task_id"),
+    domainStartTimestampMs: readNumber(payload.domain_start_timestamp_ms, "domain_start_timestamp_ms"),
+    domainEndTimestampMs: readNumber(payload.domain_end_timestamp_ms, "domain_end_timestamp_ms"),
+    requestedStartTimestampMs: readNumber(payload.requested_start_timestamp_ms, "requested_start_timestamp_ms"),
+    requestedEndTimestampMs: readNumber(payload.requested_end_timestamp_ms, "requested_end_timestamp_ms"),
+    sourceSampleCount: readNumber(payload.source_sample_count, "source_sample_count"),
+    returnedSampleCount: readNumber(payload.returned_sample_count, "returned_sample_count"),
+    downsampled: readBoolean(payload.downsampled, "downsampled"),
+    samples,
   };
 };

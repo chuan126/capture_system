@@ -1,4 +1,5 @@
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -29,6 +30,7 @@ public:
       "output_topic", "/capture/visualization/cloud_preview");
     publish_rate_hz_ = declare_parameter<double>("publish_rate_hz", 5.0);
     const auto configured_max_points = declare_parameter<std::int64_t>("max_points", 10000);
+    voxel_size_m_ = declare_parameter<double>("voxel_size_m", 0.05);
 
     validate_parameters(configured_max_points);
     max_points_ = static_cast<std::size_t>(configured_max_points);
@@ -62,12 +64,13 @@ public:
 
     RCLCPP_INFO(
       get_logger(),
-      "实时点云预览已启动：输入=%s，期望坐标帧=%s，输出=%s，频率=%.2f Hz，最大点数=%zu，启用=%s",
+      "实时点云预览已启动：输入=%s，期望坐标帧=%s，输出=%s，频率=%.2f Hz，最大点数=%zu，体素=%.3f m，启用=%s",
       input_topic_.c_str(),
       expected_frame_id_.c_str(),
       output_topic_.c_str(),
       publish_rate_hz_,
       max_points_,
+      voxel_size_m_,
       enabled_ ? "是" : "否");
   }
 
@@ -88,6 +91,9 @@ private:
     }
     if (configured_max_points < 500 || configured_max_points > 20000) {
       throw std::invalid_argument("参数max_points必须位于[500, 20000]");
+    }
+    if (!std::isfinite(voxel_size_m_) || voxel_size_m_ < 0.005 || voxel_size_m_ > 1.0) {
+      throw std::invalid_argument("参数voxel_size_m必须位于[0.005, 1.0] m");
     }
   }
 
@@ -130,7 +136,7 @@ private:
     }
 
     try {
-      publisher_->publish(converter_.convert(*cloud, max_points_));
+      publisher_->publish(converter_.convert(*cloud, max_points_, voxel_size_m_));
     } catch (const std::invalid_argument & exception) {
       // 预览输入异常不得拖垮核心测量；限频记录布局错误并等待下一帧。
       RCLCPP_ERROR_THROTTLE(
@@ -145,6 +151,7 @@ private:
   std::string output_topic_;
   double publish_rate_hz_{5.0};
   std::size_t max_points_{10000U};
+  double voxel_size_m_{0.05};
 
   CloudPreviewConverter converter_;
   std::mutex latest_cloud_mutex_;

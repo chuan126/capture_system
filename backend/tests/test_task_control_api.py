@@ -457,3 +457,51 @@ def test_task_start_accepts_zero_mount_height_and_zero_threshold(tmp_path: Path)
     assert response.status_code == 202
     assert created_bridges[0].calls[-1][1]["lidar_mount_height_m"] == 0.0
     assert created_bridges[0].calls[-1][1]["clearance_threshold_m"] == 0.0
+
+
+def test_offline_debug_blocks_formal_task_start(tmp_path: Path) -> None:
+    from types import SimpleNamespace
+
+    static_dir = tmp_path / "site-offline-block"
+    make_static_site(static_dir)
+    created_bridges: list[FakeTaskControlBridge] = []
+
+    def task_bridge_factory(sink):
+        bridge = FakeTaskControlBridge(sink)
+        created_bridges.append(bridge)
+        return bridge
+
+    application = create_app(
+        static_dir,
+        data_root=tmp_path / "runtime-offline-block",
+        start_ros_bridge=True,
+        bridge_factory=DummyBridge,
+        rtk_bridge_factory=DummyBridge,
+        system_status_bridge_factory=DummyBridge,
+        clearance_bridge_factory=DummyBridge,
+        task_control_bridge_factory=task_bridge_factory,
+    )
+    application.state.dev_offline_replay_manager = SimpleNamespace(active=True)
+    with TestClient(application) as client:
+        task = client.post(
+            "/api/v1/tasks",
+            json={"tunnel_code": "T-OFF", "tunnel_name": "离线互斥测试"},
+        ).json()
+        publish_sensor_status(application, lidar_online=True, rtk_online=True)
+        readiness = client.get("/api/v1/task-control/readiness")
+        response = client.post(
+            f"/api/v1/tasks/{task['task_id']}/start",
+            json={
+                "lane": "right",
+                "lidar_mount_height_m": 1.86,
+                "clearance_threshold_m": 4.5,
+                "expected_revision": 0,
+            },
+        )
+
+    assert readiness.status_code == 200
+    assert readiness.json()["ready"] is False
+    assert readiness.json()["state"] == "offline_debug_active"
+    assert response.status_code == 409
+    assert "离线算法检测" in response.json()["detail"]
+    assert created_bridges[0].calls == []

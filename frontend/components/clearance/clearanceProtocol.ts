@@ -13,6 +13,7 @@ export type ClearanceSnapshot = {
   frame_id: string;
   valid: boolean;
   lidar_to_top_m: number | null;
+  ransac_plane_count: number;
   candidate_count: number;
   selected_inlier_count: number;
   selected_area_m2: number | null;
@@ -60,7 +61,7 @@ export function parseClearanceText(text: string): ClearanceTextMessage {
     throw new Error(`未知净空消息类型：${value.type}`);
   }
 
-  const integerFields = ["sequence", "stamp_ns", "candidate_count", "selected_inlier_count"] as const;
+  const integerFields = ["sequence", "stamp_ns", "ransac_plane_count", "candidate_count", "selected_inlier_count"] as const;
   const nullableFields = [
     "lidar_to_top_m",
     "selected_area_m2",

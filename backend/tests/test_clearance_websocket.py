@@ -27,6 +27,7 @@ def test_websocket_sends_latest_clearance_snapshot(tmp_path: Path) -> None:
             frame_id="lidar",
             valid=True,
             lidar_to_top_m=1.723,
+            ransac_plane_count=3,
             candidate_count=4,
             selected_inlier_count=1234,
             selected_area_m2=1.1,

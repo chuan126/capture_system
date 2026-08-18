@@ -11,14 +11,21 @@ import {
 
 import {
   clampChartValue,
+  fitChartYRange,
   normalizeChartView,
   panChartView,
+  panChartYRange,
+  zoomChartYRange,
   zoomChartView,
+  type ChartYRange,
   type NormalizedViewWindow,
 } from "@/components/playback/clearanceChartViewport";
+import { markPlaybackTiming } from "@/components/playback/playbackPerformance";
 
 export type ClearanceSample = {
+  sampleIndex: number;
   timestampMs: number;
+  elapsedMs: number;
   heightM: number | null;
   valid: boolean;
   reason?: string;
@@ -26,6 +33,11 @@ export type ClearanceSample = {
 
 type InteractiveClearanceChartProps = {
   samples: ClearanceSample[];
+  domainStartTimestampMs: number;
+  domainEndTimestampMs: number;
+  initialView?: NormalizedViewWindow;
+  onViewWindowChange?: (view: NormalizedViewWindow) => void;
+  timingTaskId?: string;
   emptyTitle: string;
   emptyDescription: string;
 };
@@ -33,7 +45,9 @@ type InteractiveClearanceChartProps = {
 type DragState = {
   pointerId: number;
   startX: number;
+  startY: number;
   view: NormalizedViewWindow;
+  yRange: ChartYRange;
 };
 
 type HoverPoint = {
@@ -72,13 +86,30 @@ const formatAxisTime = (timestampMs: number) => {
 
 export default function InteractiveClearanceChart({
   samples,
+  domainStartTimestampMs,
+  domainEndTimestampMs,
+  initialView,
+  onViewWindowChange,
+  timingTaskId,
   emptyTitle,
   emptyDescription,
 }: InteractiveClearanceChartProps) {
   const chartRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<DragState | null>(null);
-  const [view, setView] = useState<NormalizedViewWindow>({ start: 0, end: 1 });
-  const [verticalZoom, setVerticalZoom] = useState(1);
+  const dragFrameRef = useRef<number | null>(null);
+  const pendingDragViewRef = useRef<NormalizedViewWindow | null>(null);
+  const pendingDragYRangeRef = useRef<ChartYRange | null>(null);
+  const reportedInitialViewRef = useRef(false);
+  const reportedSamplesRef = useRef(false);
+  const reportedPathRef = useRef(false);
+  const reportedVisibleRef = useRef(false);
+  const [view, setView] = useState<NormalizedViewWindow>(initialView ?? { start: 0, end: 1 });
+  const [yRange, setYRange] = useState<ChartYRange>(() => (
+    fitChartYRange(samples.flatMap((sample) => (
+      sample.valid && sample.heightM !== null ? [sample.heightM] : []
+    ))) ?? { minimum: 0, maximum: 1 }
+  ));
+  const initialYRangeRef = useRef(yRange);
   const [hover, setHover] = useState<HoverPoint | null>(null);
   const [dragging, setDragging] = useState(false);
 
@@ -87,12 +118,12 @@ export default function InteractiveClearanceChart({
     [samples],
   );
 
-  const fullStart = orderedSamples[0]?.timestampMs ?? 0;
-  const fullEnd = orderedSamples.at(-1)?.timestampMs ?? fullStart + 1;
+  const fullStart = domainStartTimestampMs;
+  const fullEnd = Math.max(domainStartTimestampMs + 1, domainEndTimestampMs);
   const fullDuration = Math.max(1, fullEnd - fullStart);
   const windowStart = fullStart + fullDuration * view.start;
   const windowEnd = fullStart + fullDuration * view.end;
-  const hasData = orderedSamples.length > 1;
+  const hasData = orderedSamples.length > 1 && domainEndTimestampMs > domainStartTimestampMs;
 
   const visibleSamples = useMemo(() => {
     if (!hasData) return [];
@@ -102,59 +133,52 @@ export default function InteractiveClearanceChart({
     );
   }, [hasData, orderedSamples, windowEnd, windowStart]);
 
-  let rawYMin = Number.POSITIVE_INFINITY;
-  let rawYMax = Number.NEGATIVE_INFINITY;
-  let visibleValidCount = 0;
+  const yMin = yRange.minimum;
+  const yMax = yRange.maximum;
 
-  visibleSamples.forEach((sample) => {
-    if (!sample.valid || sample.heightM === null || !Number.isFinite(sample.heightM)) return;
-    rawYMin = Math.min(rawYMin, sample.heightM);
-    rawYMax = Math.max(rawYMax, sample.heightM);
-    visibleValidCount += 1;
-  });
-
-  if (visibleValidCount === 0) {
-    rawYMin = 0;
-    rawYMax = 1;
-  }
-  const ySpan = Math.max(0.1, rawYMax - rawYMin);
-  const baseYMin = Math.max(0, rawYMin - ySpan * 0.12);
-  const baseYMax = rawYMax + ySpan * 0.12;
-  const yCenter = (baseYMin + baseYMax) / 2;
-  const scaledYSpan = Math.max(0.02, (baseYMax - baseYMin) / verticalZoom);
-  let yMin = yCenter - scaledYSpan / 2;
-  let yMax = yCenter + scaledYSpan / 2;
-  if (yMin < 0) {
-    yMax -= yMin;
-    yMin = 0;
-  }
+  const outOfRange = useMemo(() => {
+    let above = 0;
+    let below = 0;
+    visibleSamples.forEach((sample) => {
+      if (!sample.valid || sample.heightM === null || !Number.isFinite(sample.heightM)) return;
+      if (sample.heightM > yMax) above += 1;
+      if (sample.heightM < yMin) below += 1;
+    });
+    return { above, below };
+  }, [visibleSamples, yMax, yMin]);
 
   const xToPercent = (timestampMs: number) =>
     ((timestampMs - windowStart) / Math.max(1, windowEnd - windowStart)) * 100;
   const yToPercent = (heightM: number) =>
     100 - ((heightM - yMin) / Math.max(0.001, yMax - yMin)) * 100;
 
-  const lineSegments: string[][] = [];
-  let currentSegment: string[] = [];
+  const lineSegments = useMemo(() => {
+    const nextSegments: string[][] = [];
+    let currentSegment: string[] = [];
 
-  visibleSamples.forEach((sample) => {
-    if (!sample.valid || sample.heightM === null || !Number.isFinite(sample.heightM)) {
-      if (currentSegment.length > 1) lineSegments.push(currentSegment);
-      currentSegment = [];
-      return;
-    }
+    visibleSamples.forEach((sample) => {
+      if (!sample.valid || sample.heightM === null || !Number.isFinite(sample.heightM)) {
+        if (currentSegment.length > 1) nextSegments.push(currentSegment);
+        currentSegment = [];
+        return;
+      }
+      const x = ((sample.timestampMs - windowStart) / Math.max(1, windowEnd - windowStart)) * 100;
+      const y = 100 - ((sample.heightM - yMin) / Math.max(0.001, yMax - yMin)) * 100;
+      currentSegment.push(`${x},${y}`);
+    });
 
-    currentSegment.push(`${xToPercent(sample.timestampMs)},${yToPercent(sample.heightM)}`);
-  });
+    if (currentSegment.length > 1) nextSegments.push(currentSegment);
+    return nextSegments;
+  }, [visibleSamples, windowEnd, windowStart, yMax, yMin]);
 
-  if (currentSegment.length > 1) lineSegments.push(currentSegment);
-
-  const yTicks = Array.from({ length: 5 }, (_, index) => yMax - ((yMax - yMin) * index) / 4);
-  const xTicks = Array.from({ length: 6 }, (_, index) => windowStart + ((windowEnd - windowStart) * index) / 5);
-
-  const setClampedView = (nextStart: number, nextEnd: number) => {
-    setView(normalizeChartView(nextStart, nextEnd));
-  };
+  const yTicks = useMemo(
+    () => Array.from({ length: 5 }, (_, index) => yMax - ((yMax - yMin) * index) / 4),
+    [yMax, yMin],
+  );
+  const xTicks = useMemo(
+    () => Array.from({ length: 6 }, (_, index) => windowStart + ((windowEnd - windowStart) * index) / 5),
+    [windowEnd, windowStart],
+  );
 
   const zoomAt = (factor: number, anchor = 0.5) => {
     if (!hasData) return;
@@ -168,12 +192,28 @@ export default function InteractiveClearanceChart({
 
   const zoomVertically = (factor: number) => {
     if (!hasData) return;
-    setVerticalZoom((current) => clampChartValue(current * factor, 0.25, 8));
+    setYRange((current) => zoomChartYRange(current, factor));
+  };
+
+  const fitVerticalRange = () => {
+    const nextRange = fitChartYRange(visibleSamples.flatMap((sample) => (
+      sample.valid && sample.heightM !== null ? [sample.heightM] : []
+    )));
+    if (nextRange) setYRange(nextRange);
+  };
+
+  const commitViewIfChanged = (nextView: NormalizedViewWindow) => {
+    setView((current) => (
+      Math.abs(current.start - nextView.start) < 1e-9
+      && Math.abs(current.end - nextView.end) < 1e-9
+        ? current
+        : nextView
+    ));
   };
 
   const resetView = () => {
-    setView({ start: 0, end: 1 });
-    setVerticalZoom(1);
+    setView(initialView ?? { start: 0, end: 1 });
+    setYRange(initialYRangeRef.current);
     setHover(null);
   };
 
@@ -230,8 +270,8 @@ export default function InteractiveClearanceChart({
       event.preventDefault();
       event.stopPropagation();
       if (event.shiftKey) {
-        setVerticalZoom((current) =>
-          clampChartValue(current * (event.deltaY > 0 ? 1 / 1.18 : 1.18), 0.25, 8),
+        setYRange((current) =>
+          zoomChartYRange(current, event.deltaY > 0 ? 1 / 1.18 : 1.18),
         );
         return;
       }
@@ -251,13 +291,53 @@ export default function InteractiveClearanceChart({
     return () => chart.removeEventListener("wheel", handleWheel);
   }, [hasData]);
 
+  useEffect(() => () => {
+    if (dragFrameRef.current !== null) window.cancelAnimationFrame(dragFrameRef.current);
+  }, []);
+
+  useEffect(() => {
+    if (!reportedInitialViewRef.current) {
+      reportedInitialViewRef.current = true;
+      return;
+    }
+    onViewWindowChange?.(view);
+  }, [onViewWindowChange, view]);
+
+  useEffect(() => {
+    if (!hasData || !timingTaskId) return undefined;
+    if (!reportedSamplesRef.current) {
+      reportedSamplesRef.current = true;
+      markPlaybackTiming(timingTaskId, "chart component received samples", {
+        receivedSamples: samples.length,
+      });
+    }
+    if (!reportedPathRef.current) {
+      reportedPathRef.current = true;
+      markPlaybackTiming(timingTaskId, "chart path calculated", {
+        pathSegments: lineSegments.length,
+      });
+    }
+    if (reportedVisibleRef.current) return undefined;
+    const frame = window.requestAnimationFrame(() => {
+      reportedVisibleRef.current = true;
+      markPlaybackTiming(timingTaskId, "chart visible", {
+        receivedSamples: samples.length,
+        visibleSamples: visibleSamples.length,
+        pathSegments: lineSegments.length,
+      });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [hasData, lineSegments.length, samples.length, timingTaskId, visibleSamples.length]);
+
   const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (!hasData || event.button !== 0) return;
     event.currentTarget.setPointerCapture(event.pointerId);
     dragRef.current = {
       pointerId: event.pointerId,
       startX: event.clientX,
+      startY: event.clientY,
       view,
+      yRange,
     };
     setDragging(true);
     setHover(null);
@@ -274,11 +354,39 @@ export default function InteractiveClearanceChart({
     if (!metrics) return;
     const span = drag.view.end - drag.view.start;
     const delta = ((event.clientX - drag.startX) / metrics.width) * span;
-    setClampedView(drag.view.start - delta, drag.view.end - delta);
+    pendingDragViewRef.current = normalizeChartView(
+      drag.view.start - delta,
+      drag.view.end - delta,
+    );
+    pendingDragYRangeRef.current = panChartYRange(
+      drag.yRange,
+      (event.clientY - drag.startY) / metrics.height,
+    );
+    if (dragFrameRef.current === null) {
+      dragFrameRef.current = window.requestAnimationFrame(() => {
+        dragFrameRef.current = null;
+        const nextView = pendingDragViewRef.current;
+        const nextYRange = pendingDragYRangeRef.current;
+        pendingDragViewRef.current = null;
+        pendingDragYRangeRef.current = null;
+        if (nextView) commitViewIfChanged(nextView);
+        if (nextYRange) setYRange(nextYRange);
+      });
+    }
   };
 
   const finishPointer = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (dragRef.current?.pointerId === event.pointerId) {
+      if (dragFrameRef.current !== null) {
+        window.cancelAnimationFrame(dragFrameRef.current);
+        dragFrameRef.current = null;
+      }
+      const finalView = pendingDragViewRef.current;
+      const finalYRange = pendingDragYRangeRef.current;
+      pendingDragViewRef.current = null;
+      pendingDragYRangeRef.current = null;
+      if (finalView) commitViewIfChanged(finalView);
+      if (finalYRange) setYRange(finalYRange);
       dragRef.current = null;
       setDragging(false);
     }
@@ -295,28 +403,27 @@ export default function InteractiveClearanceChart({
     if (event.key === "0" || event.key === "Home") resetView();
   };
 
-  const viewPercent = Math.round((view.end - view.start) * 100);
-  const verticalZoomText = `${verticalZoom.toFixed(2)}x`;
-
+  const viewPercent = Math.max(0.01, (view.end - view.start) * 100);
   return (
     <div className="interactive-clearance-chart-shell">
       <div className="interactive-clearance-chart-toolbar" aria-label="曲线视图工具">
         <div>
-          <strong>完整任务曲线</strong>
-          <span>{hasData ? `时间 ${viewPercent}% · 纵向 ${verticalZoomText}` : "当前没有可显示记录"}</span>
+          <strong>当前时间窗口</strong>
+          <span>{hasData ? `任务范围 ${viewPercent.toFixed(viewPercent < 1 ? 2 : 0)}% · 纵轴已锁定` : "当前没有可显示记录"}</span>
         </div>
         <div className="interactive-clearance-chart-toolbar__guide">
-          <span>拖拽平移</span>
-          <span>滚轮横向缩放</span>
-          <span>Shift+滚轮纵向缩放</span>
+          <span>拖拽：左右、上下平移</span>
+          <span>滚轮：横向缩放</span>
+          <span>Shift+滚轮：纵向缩放</span>
           <span>双击复位</span>
         </div>
         <div className="interactive-clearance-chart-toolbar__actions">
           <button type="button" disabled={!hasData} onClick={() => zoomAt(0.8)} aria-label="放大曲线">＋</button>
           <button type="button" disabled={!hasData} onClick={() => zoomAt(1.25)} aria-label="缩小曲线">－</button>
-          <button type="button" disabled={!hasData || verticalZoom >= 8} onClick={() => zoomVertically(1.4)} aria-label="纵向放大曲线">Y＋</button>
-          <button type="button" disabled={!hasData || verticalZoom <= 0.25} onClick={() => zoomVertically(1 / 1.4)} aria-label="纵向缩小曲线">Y－</button>
-          <button type="button" disabled={!hasData || (viewPercent === 100 && verticalZoom === 1)} onClick={resetView}>重置视图</button>
+          <button type="button" disabled={!hasData || yMax - yMin <= 0.020001} onClick={() => zoomVertically(1.4)} aria-label="纵向放大曲线">Y＋</button>
+          <button type="button" disabled={!hasData || yMax - yMin >= 39.999} onClick={() => zoomVertically(1 / 1.4)} aria-label="纵向缩小曲线">Y－</button>
+          <button type="button" className="interactive-clearance-chart-toolbar__fit" disabled={!hasData} onClick={fitVerticalRange}>适配当前窗口</button>
+          <button type="button" disabled={!hasData} onClick={resetView}>回到开头</button>
         </div>
       </div>
 
@@ -325,7 +432,7 @@ export default function InteractiveClearanceChart({
         className={`interactive-clearance-chart${dragging ? " is-dragging" : ""}${hasData ? " has-data" : " is-empty"}`}
         role="application"
         tabIndex={0}
-        aria-label="可拖拽和缩放的任务净空高度曲线"
+        aria-label="可左右和上下拖拽、可缩放的任务净空高度曲线"
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={finishPointer}
@@ -378,6 +485,17 @@ export default function InteractiveClearanceChart({
         <div className="interactive-clearance-chart__x-axis" aria-hidden="true">
           {xTicks.map((tick) => <span key={tick}>{hasData ? formatAxisTime(tick) : "--:--:--"}</span>)}
         </div>
+
+        {outOfRange.above > 0 && (
+          <div className="interactive-clearance-chart__range-warning is-above">
+            ↑ {outOfRange.above} 个点超出纵轴，可上下拖动或点击“适配当前窗口”
+          </div>
+        )}
+        {outOfRange.below > 0 && (
+          <div className="interactive-clearance-chart__range-warning is-below">
+            ↓ {outOfRange.below} 个点超出纵轴，可上下拖动或点击“适配当前窗口”
+          </div>
+        )}
 
         {hover && (
           <div className="interactive-clearance-chart__hover" style={{ left: hover.x, top: hover.y }}>

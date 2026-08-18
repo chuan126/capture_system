@@ -10,6 +10,7 @@ def make_message(*, valid: bool, height: float) -> SimpleNamespace:
         ),
         valid=valid,
         lidar_to_top_m=height,
+        ransac_plane_count=3,
         candidate_count=4,
         selected_inlier_count=1234,
         selected_area_m2=1.25,

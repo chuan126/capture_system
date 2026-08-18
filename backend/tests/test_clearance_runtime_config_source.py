@@ -17,6 +17,6 @@ def test_bringup_default_clearance_profile_is_the_documented_one_centimeter_prof
 
     assert '"clearance_engine_small_board_1cm.yaml"' in launch_source
     assert "ransac.voxel_size_m: 0.04" in config_source
-    assert "ransac.max_candidate_planes: 8" in config_source
+    assert "ransac.max_candidate_planes: 2500" in config_source
     assert "ransac.min_inliers_absolute: 50" in config_source
     assert "region.grid_size_m: 0.010" in config_source

@@ -26,7 +26,7 @@ class FakeBridge:
             "region.min_occupied_cells": 15,
             "region.max_residual_p95_m": 0.05,
             "ransac.min_inliers_absolute": 50,
-            "ransac.max_candidate_planes": 8,
+            "ransac.max_candidate_planes": 2500,
             "ransac.min_remaining_points": 100,
         }
         return {name: values.get(name, 1.0) for name in names}
@@ -77,25 +77,29 @@ def test_parameter_snapshot_uses_cached_runtime_values_and_source_hashes() -> No
     assert len(bridge.calls) == call_count, "录制参数快照不得再次同步访问ROS"
 
 
-def test_parameter_page_exposes_only_requested_clearance_parameters() -> None:
+def test_dashboard_exposes_only_requested_core_parameters() -> None:
     bridge = FakeBridge()
     service = DevParameterService(bridge=bridge, bindings_path=BINDINGS)
     service.refresh_now()
     call_count = len(bridge.calls)
     parameters = service.list_parameters(ui_only=True)
     assert len(bridge.calls) == call_count, "参数页面不得在HTTP请求路径同步访问ROS"
-    assert [item["parameter"] for item in parameters] == [
-        "ransac.distance_threshold_m",
-        "ransac.max_candidate_planes",
-        "ransac.min_remaining_points",
-        "ransac.min_inliers_absolute",
-        "region.grid_size_m",
-        "region.min_span_cells",
-        "region.min_occupied_cells",
-        "region.max_residual_p95_m",
+    assert [item["key"] for item in parameters] == [
+        "motion.processing_poll_interval_ms",
+        "motion.max_interpolation_gap_s",
+        "motion.minimum_valid_pose_ratio",
+        "clearance.distance_threshold_m",
+        "clearance.max_candidate_planes",
+        "clearance.min_inliers_absolute",
+        "clearance.region_grid_size_m",
+        "clearance.min_region_occupied_cells",
+        "clearance.max_residual_p95_m",
     ]
-    assert next(item for item in parameters if item["parameter"] == "ransac.min_remaining_points")["value"] == 100
-    assert next(item for item in parameters if item["parameter"] == "region.min_span_cells")["writable"] is False
+    assert next(item for item in parameters if item["key"] == "motion.processing_poll_interval_ms")["writable"] is False
+    assert next(item for item in parameters if item["key"] == "clearance.distance_threshold_m")["writable"] is True
+    max_planes = next(item for item in parameters if item["key"] == "clearance.max_candidate_planes")
+    assert max_planes["configured_value"] == 2500
+    assert max_planes["maximum"] == 2500.0
 
 
 def test_parameter_page_keeps_yaml_value_when_ros_bridge_is_unavailable() -> None:
@@ -104,13 +108,14 @@ def test_parameter_page_keeps_yaml_value_when_ros_bridge_is_unavailable() -> Non
     bridge.error = "ROS桥不可用"
     service = DevParameterService(bridge=bridge, bindings_path=BINDINGS)
     parameters = service.list_parameters(ui_only=True)
-    assert len(parameters) == 8
+    assert len(parameters) == 9
+    poll = next(item for item in parameters if item["key"] == "motion.processing_poll_interval_ms")
     distance = next(item for item in parameters if item["parameter"] == "ransac.distance_threshold_m")
-    remaining = next(item for item in parameters if item["parameter"] == "ransac.min_remaining_points")
+    assert poll["configured_value"] == 10
+    assert poll["available"] is False
     assert distance["configured_value"] == 0.04
     assert distance["available"] is False
     assert distance["value"] is None
-    assert remaining["configured_value"] == 100
 
 
 def test_one_node_failure_does_not_hide_other_nodes() -> None:

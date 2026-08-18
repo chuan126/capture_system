@@ -1,7 +1,9 @@
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 
 #include "cloud_visualization/cloud_preview_converter.hpp"
 #include "gtest/gtest.h"
@@ -69,6 +71,17 @@ std::array<float, 3U> read_xyz(
   return xyz;
 }
 
+void write_xyz(
+  sensor_msgs::msg::PointCloud2 & cloud,
+  const std::size_t point_index,
+  const std::array<float, 3U> & xyz)
+{
+  std::memcpy(
+    cloud.data.data() + point_index * cloud.point_step,
+    xyz.data(),
+    xyz.size() * sizeof(float));
+}
+
 TEST(CloudPreviewConverterTest, PreservesAllPointsBelowLimitAndRemovesRgb)
 {
   const auto input = make_fixed_layout_cloud(3U, false);
@@ -88,11 +101,48 @@ TEST(CloudPreviewConverterTest, PreservesAllPointsBelowLimitAndRemovesRgb)
   EXPECT_EQ(output.point_step, 12U);
   EXPECT_EQ(output.row_step, 36U);
   EXPECT_FALSE(output.is_bigendian);
-  EXPECT_FALSE(output.is_dense);
+  EXPECT_TRUE(output.is_dense);
   EXPECT_EQ(output.data.size(), 36U);
 
   EXPECT_EQ(read_xyz(output, 0U), (std::array<float, 3U>{0.0F, 0.25F, 0.0F}));
   EXPECT_EQ(read_xyz(output, 2U), (std::array<float, 3U>{2.0F, 2.25F, -2.0F}));
+}
+
+TEST(CloudPreviewConverterTest, FiltersZeroPlaceholdersAndNonFinitePointsBeforeLimiting)
+{
+  auto input = make_fixed_layout_cloud(6U, false);
+  write_xyz(input, 0U, {0.0F, 0.0F, 0.0F});
+  write_xyz(input, 1U, {std::numeric_limits<float>::quiet_NaN(), 1.0F, 1.0F});
+  write_xyz(input, 2U, {2.0F, 2.0F, 2.0F});
+  write_xyz(input, 3U, {0.0F, 0.0F, 0.0F});
+  write_xyz(input, 4U, {4.0F, 4.0F, 4.0F});
+  write_xyz(input, 5U, {5.0F, 5.0F, 5.0F});
+
+  const auto output = CloudPreviewConverter{}.convert(input, 10U);
+
+  ASSERT_EQ(output.width, 3U);
+  EXPECT_TRUE(output.is_dense);
+  EXPECT_EQ(read_xyz(output, 0U), (std::array<float, 3U>{2.0F, 2.0F, 2.0F}));
+  EXPECT_EQ(read_xyz(output, 1U), (std::array<float, 3U>{4.0F, 4.0F, 4.0F}));
+  EXPECT_EQ(read_xyz(output, 2U), (std::array<float, 3U>{5.0F, 5.0F, 5.0F}));
+}
+
+TEST(CloudPreviewConverterTest, KeepsConfiguredVisualDensityAfterVoxelSelection)
+{
+  auto input = make_fixed_layout_cloud(8U);
+  for (std::size_t index = 0U; index < 8U; ++index) {
+    const float coordinate = 0.001F * static_cast<float>(index + 1U);
+    write_xyz(input, index, {coordinate, coordinate, coordinate});
+  }
+
+  const auto output = CloudPreviewConverter{}.convert(input, 4U, 0.05);
+
+  ASSERT_EQ(output.width, 4U);
+  for (std::size_t index = 0U; index < output.width; ++index) {
+    const auto xyz = read_xyz(output, index);
+    EXPECT_TRUE(std::isfinite(xyz[0]));
+    EXPECT_TRUE(xyz[0] != 0.0F || xyz[1] != 0.0F || xyz[2] != 0.0F);
+  }
 }
 
 TEST(CloudPreviewConverterTest, PreservesPointCountAtExactLimit)

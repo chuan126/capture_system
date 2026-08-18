@@ -61,8 +61,11 @@ def test_raw_cloud_recording_uses_fixed_mcap_profile(monkeypatch, tmp_path: Path
 
     command = captured["command"]
     assert command[:6] == ["ros2", "bag", "record", "--storage", "mcap", "--output"]
-    assert command[-1] == "/capture/lidar/points_raw"
-    assert len(command) == 8
+    assert command[-2:] == [
+        "/capture/lidar/points_raw",
+        "/capture/odometry/high_rate_raw",
+    ]
+    assert len(command) == 9
     assert status["active"] is True
     assert status["profile"] == "raw_cloud"
     assert str(tmp_path / "dev-tests" / "raw-cloud") in str(status["path"])
@@ -206,5 +209,28 @@ def test_raw_cloud_recording_can_be_deleted_after_stop(monkeypatch, tmp_path: Pa
 
     manager.stop()
     assert path.is_dir()
+    record = manager.get_recording(recording_id)
+    assert record["replay_ready"] is True
+    assert isinstance(record["duration_seconds"], float)
+    assert record["duration_seconds"] >= 0.0
     manager.delete(recording_id)
     assert not path.exists()
+
+
+def test_old_raw_cloud_sample_without_odometry_is_marked_not_replay_ready(tmp_path: Path) -> None:
+    manager = RosbagRecordingManager(tmp_path, min_free_bytes=1)
+    recording_id = "raw-cloud_20260817_120000_abcdef"
+    path = tmp_path / "dev-tests" / "raw-cloud" / recording_id
+    path.mkdir(parents=True)
+    (path / "capture_manifest.json").write_text(
+        json.dumps({
+            "schema_version": 1,
+            "recording_id": recording_id,
+            "profile": "raw_cloud",
+            "topics": ["/capture/lidar/points_raw"],
+        }),
+        encoding="utf-8",
+    )
+    record = manager.get_recording(recording_id)
+    assert record["replay_ready"] is False
+    assert record["duration_seconds"] is None

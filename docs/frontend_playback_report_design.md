@@ -1,6 +1,6 @@
 # 数据回放与报告导出前端设计说明
 
-核对日期：2026-08-09
+核对日期：2026-08-17
 
 ## 1. 适用范围
 
@@ -28,14 +28,26 @@
 页面包含以下固定区域。
 
 - 左侧任务搜索、状态筛选、日期分组和任务选择；
-- 中部当前任务的完整 50 Hz 净空高度曲线；
+- 中部当前任务按真实时间窗口加载的 50 Hz 净空高度曲线；
 - 右侧隧道信息、测量统计、入口与出口 RTK 和数据质量；
 - 顶部所选任务批量删除入口。
 
-项目不保留历史点云、历史地图轨迹和播放式回放控制。页面中部只展示当前任务的完整高度
-曲线，支持拖拽平移、滚轮缩放、按钮缩放、键盘左右平移和复位。前端通过
-`/api/v1/tasks/{task_id}/measurements` 读取统一时间戳、高度序列、有效性、统计结果和 RTK 端点。
-无效采样形成断线。无有效数据时显示空状态，不使用实时流、上一有效值或生成数据补齐。
+项目不保留历史点云、历史地图轨迹和播放式回放控制。页面中部只展示当前任务的高度
+曲线，支持拖拽平移、滚轮缩放、按钮缩放、键盘左右平移和复位。首次选择任务时只调用
+`series-prefix?max_samples=2000`；首段响应解析并提交 React state 后即可绘制，初始化视窗不会
+触发第二次 `series` 请求。随后独立调度 `summary`，统计未返回或读取失败都不遮挡已经显示的首段曲线。
+用户主动放大或平移后，页面以 160 ms 防抖按当前真实时间窗口请求最多 6000 个显示点。窗口样本超过上限时，
+后端保留局部最低值、最高值和无效断点，不使用简单等间隔抽点。无有效数据时显示空状态，不使用
+实时流、上一有效值或生成数据补齐。
+
+回放 API 请求携带标签页级稳定会话 ID。连续缩放、任务切换或浏览器刷新产生新请求时，后端会中断
+同一会话仍在运行的旧 SQLite 查询，防止旧任务的大窗口读取继续占用 CPU 和磁盘。被窗口请求取消的
+summary 会在交互空闲后重试。曲线路径、纵轴范围和刻度使用 memoized 结果，鼠标悬停等局部状态变化
+不会重新计算整条 SVG polyline。
+
+首段加载 effect 只依赖稳定任务 UUID 和 `hasMeasurements`，任务列表刷新产生的新对象不会重新发起
+prefix。development 构建在浏览器控制台输出从任务选择、prefix 请求、state 提交、曲线路径计算与
+可见，到 summary 请求和响应的轻量耗时点；customer 构建不输出这些测量日志。
 
 任务浏览器按 `display_id` 的日期部分分组。用户可以勾选单个任务、选择某一天的全部可删除任务，也可以对当前搜索和筛选结果执行全选。采集中和已暂停任务的复选框禁用。客户回放页面调用 `POST /api/v1/tasks/delete-selected` 执行逻辑删除，由后端在一个 SQLite 事务中检查并更新全部所选任务，任何一个任务不满足条件时整批不提交。
 
@@ -67,6 +79,9 @@
 - `frontend/components/workflow/TaskBrowser.tsx`
 - `frontend/components/playback/PlaybackWorkspace.tsx`
 - `frontend/components/playback/measurementHistoryApi.ts`
+- `frontend/components/playback/playbackLoadCoordinator.ts`
+- `frontend/components/playback/playbackSeriesWindow.ts`
+- `frontend/components/playback/playbackPerformance.ts`
 - `frontend/components/report/ReportWorkspace.tsx`
 - `frontend/components/report/reportExportApi.ts`
 - `frontend/tests/playback-report-workflow-ui.test.mjs`
@@ -76,7 +91,7 @@
 
 ## 6. 显示适配
 
-数据回放和报告导出页面沿用采集首页的字体、间距、边框和状态表达。时间编号使用等宽字体，
+数据回放和报告导出页面沿用采集首页的字体、间距、边框和状态表达。宽屏回放中的任务记录、净空曲线和统计卡共享同一网格行高度；曲线纵轴标题使用标准图表方向。已加载曲线按样本索引合并到当前任务内存缓存，并按时间范围与显示分辨率判断是否需要再次请求。时间编号使用等宽字体，
 任务列表为编号预留足够宽度。数据回放右侧统计区和报告任务列表继续按现有响应式断点调整。
 
 ## 7. 采集首页待测任务可见性

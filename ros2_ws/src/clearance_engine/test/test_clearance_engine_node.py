@@ -69,4 +69,5 @@ class TestClearanceEngineNode(unittest.TestCase):
         self.assertTrue(results, "节点未在10秒内发布净空结果")
         self.assertTrue(results[-1].valid, results[-1].invalid_reason)
         self.assertAlmostEqual(results[-1].lidar_to_top_m, 2.0, delta=0.03)
+        self.assertGreaterEqual(results[-1].ransac_plane_count, 1)
         self.assertGreaterEqual(results[-1].candidate_count, 1)

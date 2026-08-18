@@ -14,7 +14,7 @@
       "writable": false,
       "note": "仅在节点启动时读取，修改配置后需重启服务",
       "source_config": "ros2_ws/src/motion_compensation/config/motion_compensation.yaml",
-      "ui_visible": false
+      "ui_visible": true
     },
     {
       "key": "motion.max_interpolation_gap_s",
@@ -28,7 +28,7 @@
       "writable": false,
       "note": "当前节点未实现运行时更新，仅读取",
       "source_config": "ros2_ws/src/motion_compensation/config/motion_compensation.yaml",
-      "ui_visible": false
+      "ui_visible": true
     },
     {
       "key": "motion.minimum_valid_pose_ratio",
@@ -42,7 +42,7 @@
       "writable": false,
       "note": "当前节点未实现运行时更新，仅读取",
       "source_config": "ros2_ws/src/motion_compensation/config/motion_compensation.yaml",
-      "ui_visible": false
+      "ui_visible": true
     },
     {
       "key": "motion.max_translation_per_scan_m",
@@ -150,9 +150,9 @@
       "unit": "",
       "kind": "int",
       "minimum": 1,
-      "maximum": 100,
+      "maximum": 2500,
       "writable": true,
-      "note": "限制单帧RANSAC平面提取循环，不等于合格连通区域数；临时生效，重启恢复YAML值",
+      "note": "限制单帧RANSAC平面提取循环；当前运行值可动态修改，节点重启后恢复YAML值",
       "source_config": "ros2_ws/src/clearance_engine/config/clearance_engine_small_board_1cm.yaml",
       "ui_visible": true
     },
@@ -168,7 +168,7 @@
       "writable": false,
       "note": "当前节点未实现该参数运行时更新，仅读取",
       "source_config": "ros2_ws/src/clearance_engine/config/clearance_engine_small_board_1cm.yaml",
-      "ui_visible": true
+      "ui_visible": false
     },
     {
       "key": "clearance.min_inliers_absolute",
@@ -210,7 +210,7 @@
       "writable": false,
       "note": "当前节点未实现该参数运行时更新，仅读取",
       "source_config": "ros2_ws/src/clearance_engine/config/clearance_engine_small_board_1cm.yaml",
-      "ui_visible": true
+      "ui_visible": false
     },
     {
       "key": "clearance.min_region_occupied_cells",

@@ -18,6 +18,7 @@ export type DevTopicTelemetry = {
   // ClearanceResult telemetry.
   valid?: boolean;
   lidar_to_top_m?: number | null;
+  ransac_plane_count?: number;
   candidate_count?: number;
   selected_inlier_count?: number;
   selected_area_m2?: number | null;
@@ -87,6 +88,38 @@ export type DevRecording = {
   modified_at_ns: number;
   active: boolean;
   parameter_snapshot_complete: boolean | null;
+  replay_ready: boolean;
+  duration_seconds: number | null;
+};
+
+export type DevOfflineReplayStatus = {
+  active: boolean;
+  state: "idle" | "starting" | "running" | "stopping" | "completed" | "stopped" | "failed";
+  recording_id: string | null;
+  started_at_ns: number | null;
+  finished_at_ns: number | null;
+  elapsed_seconds: number;
+  duration_seconds: number | null;
+  progress: number | null;
+  processed_frames: number;
+  valid_frames: number;
+  invalid_frames: number;
+  ransac_plane_last: number | null;
+  ransac_plane_mean: number | null;
+  ransac_plane_max: number | null;
+  lidar_to_top_last_m: number | null;
+  latest_result_valid: boolean | null;
+  lidar_to_top_min_m: number | null;
+  lidar_to_top_mean_m: number | null;
+  lidar_to_top_max_m: number | null;
+  processing_time_ms_last: number | null;
+  invalid_reason: string;
+  latest_stamp_ns: number | null;
+  last_error: string | null;
+  parameter_snapshot_complete: boolean | null;
+  parameter_fallback_keys: string[];
+  diagnostics: Record<string, number | string | null>;
+  topics: Record<string, string>;
 };
 
 export type DevParameter = {
@@ -167,3 +200,12 @@ export const deleteDevRecording = async (recordingId: string) => {
   const response = await fetch(`/api/dev/recordings/${encodeURIComponent(recordingId)}`, { method: "DELETE" });
   if (!response.ok) throw new Error(await readError(response));
 };
+export const getDevOfflineReplayStatus = () => requestJson<DevOfflineReplayStatus>("/api/dev/offline/status");
+export const startDevOfflineReplay = (recordingId: string) =>
+  requestJson<DevOfflineReplayStatus>("/api/dev/offline/start", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ recording_id: recordingId }),
+  });
+export const stopDevOfflineReplay = () =>
+  requestJson<DevOfflineReplayStatus>("/api/dev/offline/stop", { method: "POST" });

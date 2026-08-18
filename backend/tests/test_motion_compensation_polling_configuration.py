@@ -55,4 +55,17 @@ def test_development_binding_documents_poll_interval_as_restart_only() -> None:
     assert binding["step"] == 1
     assert binding["unit"] == "ms"
     assert binding["writable"] is False
-    assert binding["ui_visible"] is False
+    assert binding["ui_visible"] is True
+
+def test_queue_wait_timestamp_is_taken_at_actual_pending_queue_insertion() -> None:
+    source = (
+        MOTION_ROOT / "src" / "enu_cloud_transform_node.cpp"
+    ).read_text(encoding="utf-8")
+    callback = source.split("void cloudCallback", 1)[1].split("bool readPoints", 1)[0]
+    lock_position = callback.index("std::lock_guard<std::mutex> lock(pending_clouds_mutex_)")
+    timestamp_position = callback.index("EnuProcessingDiagnostics::Clock::now()")
+    push_position = callback.index("pending_clouds_.push_back")
+
+    assert lock_position < push_position <= timestamp_position
+    assert "const auto enqueued_at" not in callback
+

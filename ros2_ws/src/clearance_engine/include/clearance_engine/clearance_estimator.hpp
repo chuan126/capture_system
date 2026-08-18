@@ -62,6 +62,7 @@ struct ClearanceEstimate
   std::size_t input_point_count{0};
   std::size_t valid_point_count{0};
   double valid_point_ratio{0.0};
+  std::size_t ransac_plane_count{0};
   std::vector<PlaneCandidate> candidates;
   PlaneCandidate selected;
 };

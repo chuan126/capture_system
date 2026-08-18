@@ -6,17 +6,26 @@ from fastapi import APIRouter, Header, HTTPException, Query, Request, Response, 
 
 from backend.measurements.models import (
     ClearanceHistorySampleResponse,
+    ClearanceSeriesSampleResponse,
     MeasurementHistoryResponse,
+    MeasurementSeriesResponse,
     MeasurementStatisticsResponse,
+    MeasurementSummaryResponse,
     PauseIntervalResponse,
     RtkEndpointResponse,
 )
 from backend.measurements.repository import (
     MeasurementHistoryRecord,
+    MeasurementSeriesRecord,
+    MeasurementSummaryRecord,
     RtkEndpointRecord,
     MeasurementNotFoundError,
     MeasurementRepository,
     MeasurementStorageError,
+)
+from backend.measurements.query_coordinator import (
+    MeasurementQueryCancelledError,
+    MeasurementQueryCoordinator,
 )
 from backend.tasks.models import (
     TaskBatchCreateRequest,
@@ -47,6 +56,14 @@ def _repository(request: Request) -> TaskRepository:
 
 def _measurement_repository(request: Request) -> MeasurementRepository:
     return request.app.state.measurement_repository
+
+
+def _measurement_query_coordinator(request: Request) -> MeasurementQueryCoordinator:
+    return request.app.state.measurement_query_coordinator
+
+
+def _cancelled_measurement_query(error: MeasurementQueryCancelledError) -> HTTPException:
+    return HTTPException(status_code=499, detail=str(error))
 
 
 def _response(record: TaskRecord) -> TaskResponse:
@@ -155,6 +172,69 @@ def _measurement_response(record: MeasurementHistoryRecord) -> MeasurementHistor
     )
 
 
+def _measurement_statistics_response(record: MeasurementSummaryRecord | MeasurementHistoryRecord) -> MeasurementStatisticsResponse:
+    return MeasurementStatisticsResponse(
+        total_samples=record.statistics.total_samples,
+        valid_samples=record.statistics.valid_samples,
+        invalid_samples=record.statistics.invalid_samples,
+        minimum_height_m=record.statistics.minimum_height_m,
+        average_height_m=record.statistics.average_height_m,
+        maximum_height_m=record.statistics.maximum_height_m,
+        duration_ms=record.statistics.duration_ms,
+        nominal_sample_rate_hz=record.statistics.nominal_sample_rate_hz,
+        actual_average_sample_rate_hz=record.statistics.actual_average_sample_rate_hz,
+    )
+
+
+def _measurement_summary_response(record: MeasurementSummaryRecord) -> MeasurementSummaryResponse:
+    return MeasurementSummaryResponse(
+        task_id=record.task_id,
+        recording_schema_version=record.recording_schema_version,
+        data_origin=record.data_origin,
+        lane=record.lane,
+        travel_direction=record.travel_direction,
+        lane_side=record.lane_side,
+        started_at=record.started_at,
+        ended_at=record.ended_at,
+        complete=record.complete,
+        algorithm_version=record.algorithm_version,
+        config_version=record.config_version,
+        software_version=record.software_version,
+        statistics=_measurement_statistics_response(record),
+        entry_rtk=_rtk_response(record.entry_rtk),
+        exit_rtk=_rtk_response(record.exit_rtk),
+        pause_interval_count=record.pause_interval_count,
+        first_sample_index=record.first_sample_index,
+        last_sample_index=record.last_sample_index,
+        first_timestamp_ms=record.first_timestamp_ms,
+        last_timestamp_ms=record.last_timestamp_ms,
+    )
+
+
+def _measurement_series_response(record: MeasurementSeriesRecord) -> MeasurementSeriesResponse:
+    return MeasurementSeriesResponse(
+        task_id=record.task_id,
+        domain_start_timestamp_ms=record.domain_start_timestamp_ms,
+        domain_end_timestamp_ms=record.domain_end_timestamp_ms,
+        requested_start_timestamp_ms=record.requested_start_timestamp_ms,
+        requested_end_timestamp_ms=record.requested_end_timestamp_ms,
+        source_sample_count=record.source_sample_count,
+        returned_sample_count=len(record.samples),
+        downsampled=record.downsampled,
+        samples=[
+            ClearanceSeriesSampleResponse(
+                sample_index=sample.sample_index,
+                timestamp_ms=sample.timestamp_ms,
+                elapsed_ms=sample.elapsed_ms,
+                height_m=sample.height_m,
+                valid=sample.valid,
+                invalid_reason=sample.invalid_reason,
+            )
+            for sample in record.samples
+        ],
+    )
+
+
 def _storage_failure(error: TaskStorageError) -> HTTPException:
     return HTTPException(
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -220,6 +300,121 @@ def list_tasks(
         return [_response(record) for record in records]
     except TaskStorageError as error:
         raise _storage_failure(error) from error
+
+
+@router.get("/{task_id}/measurements/summary", response_model=MeasurementSummaryResponse)
+def get_task_measurement_summary(
+    task_id: str,
+    request: Request,
+    playback_session: Annotated[
+        str | None,
+        Header(alias="X-Playback-Session", max_length=128),
+    ] = None,
+) -> MeasurementSummaryResponse:
+    query = _measurement_query_coordinator(request).begin(playback_session)
+    try:
+        task = _repository(request).get_task(task_id)
+        return _measurement_summary_response(
+            _measurement_repository(request).load_summary(task, query=query)
+        )
+    except TaskNotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务不存在") from error
+    except MeasurementNotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务尚无测量记录") from error
+    except MeasurementStorageError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(error),
+        ) from error
+    except MeasurementQueryCancelledError as error:
+        raise _cancelled_measurement_query(error) from error
+    except TaskStorageError as error:
+        raise _storage_failure(error) from error
+    finally:
+        if query is not None:
+            query.close()
+
+
+@router.get("/{task_id}/measurements/series", response_model=MeasurementSeriesResponse)
+def get_task_measurement_series(
+    task_id: str,
+    request: Request,
+    start_timestamp_ms: Annotated[int | None, Query(ge=0)] = None,
+    end_timestamp_ms: Annotated[int | None, Query(ge=0)] = None,
+    max_points: Annotated[int, Query(ge=200, le=10_000)] = 4_000,
+    playback_session: Annotated[
+        str | None,
+        Header(alias="X-Playback-Session", max_length=128),
+    ] = None,
+) -> MeasurementSeriesResponse:
+    query = _measurement_query_coordinator(request).begin(playback_session)
+    try:
+        task = _repository(request).get_task(task_id)
+        record = _measurement_repository(request).load_series(
+            task,
+            start_timestamp_ms=start_timestamp_ms,
+            end_timestamp_ms=end_timestamp_ms,
+            max_points=max_points,
+            query=query,
+        )
+        return _measurement_series_response(record)
+    except TaskNotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务不存在") from error
+    except MeasurementNotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务尚无测量记录") from error
+    except ValueError as error:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error)) from error
+    except MeasurementStorageError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(error),
+        ) from error
+    except MeasurementQueryCancelledError as error:
+        raise _cancelled_measurement_query(error) from error
+    except TaskStorageError as error:
+        raise _storage_failure(error) from error
+    finally:
+        if query is not None:
+            query.close()
+
+
+@router.get("/{task_id}/measurements/series-prefix", response_model=MeasurementSeriesResponse)
+def get_task_measurement_series_prefix(
+    task_id: str,
+    request: Request,
+    max_samples: Annotated[int, Query(ge=200, le=10_000)] = 2_000,
+    playback_session: Annotated[
+        str | None,
+        Header(alias="X-Playback-Session", max_length=128),
+    ] = None,
+) -> MeasurementSeriesResponse:
+    query = _measurement_query_coordinator(request).begin(playback_session)
+    try:
+        task = _repository(request).get_task(task_id)
+        record = _measurement_repository(request).load_prefix(
+            task,
+            max_samples=max_samples,
+            query=query,
+        )
+        return _measurement_series_response(record)
+    except TaskNotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务不存在") from error
+    except MeasurementNotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务尚无测量记录") from error
+    except ValueError as error:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error)) from error
+    except MeasurementStorageError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(error),
+        ) from error
+    except MeasurementQueryCancelledError as error:
+        raise _cancelled_measurement_query(error) from error
+    except TaskStorageError as error:
+        raise _storage_failure(error) from error
+    finally:
+        if query is not None:
+            query.close()
 
 
 @router.get("/{task_id}/measurements", response_model=MeasurementHistoryResponse)

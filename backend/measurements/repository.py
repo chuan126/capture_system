@@ -6,6 +6,10 @@ from pathlib import Path
 from typing import Iterator, cast
 
 from backend.measurements.models import MeasurementDataOrigin, MeasurementLane, MeasurementTravelDirection
+from backend.measurements.query_coordinator import (
+    MeasurementQueryCancelledError,
+    MeasurementQueryHandle,
+)
 from backend.tasks.repository import TaskRecord
 
 
@@ -111,6 +115,32 @@ class MeasurementSummaryRecord:
     entry_rtk: RtkEndpointRecord | None
     exit_rtk: RtkEndpointRecord | None
     pause_interval_count: int
+    first_sample_index: int
+    last_sample_index: int
+    first_timestamp_ms: int
+    last_timestamp_ms: int
+
+
+@dataclass(frozen=True)
+class ClearanceSeriesSampleRecord:
+    sample_index: int
+    timestamp_ms: int
+    elapsed_ms: float
+    height_m: float | None
+    valid: bool
+    invalid_reason: str | None
+
+
+@dataclass(frozen=True)
+class MeasurementSeriesRecord:
+    task_id: str
+    domain_start_timestamp_ms: int
+    domain_end_timestamp_ms: int
+    requested_start_timestamp_ms: int
+    requested_end_timestamp_ms: int
+    source_sample_count: int
+    downsampled: bool
+    samples: list[ClearanceSeriesSampleRecord]
 
 
 @dataclass(frozen=True)
@@ -142,12 +172,20 @@ class MeasurementRepository:
     def __init__(self, tasks_directory: Path) -> None:
         self.tasks_directory = tasks_directory.resolve()
 
-    def load_summary(self, task: TaskRecord) -> MeasurementSummaryRecord:
+    def load_summary(
+        self,
+        task: TaskRecord,
+        *,
+        query: MeasurementQueryHandle | None = None,
+    ) -> MeasurementSummaryRecord:
         database_path = self._resolve_recording_database(task)
         connection = self._open_readonly(database_path)
         try:
+            if query is not None:
+                query.bind(connection)
             metadata = self._load_metadata(connection, task)
             statistics = self._load_statistics(connection, task.task_id)
+            sample_bounds = self._load_sample_bounds(connection, task.task_id)
             endpoints = self._load_endpoints(connection)
             pause_count = int(
                 connection.execute("SELECT COUNT(*) FROM pause_intervals").fetchone()[0]
@@ -158,12 +196,17 @@ class MeasurementRepository:
                 statistics=statistics,
                 endpoints=endpoints,
                 pause_interval_count=pause_count,
+                sample_bounds=sample_bounds,
             )
-        except (MeasurementNotFoundError, MeasurementStorageError):
+        except (MeasurementNotFoundError, MeasurementStorageError, MeasurementQueryCancelledError):
             raise
         except sqlite3.Error as error:
+            if query is not None and query.cancelled:
+                raise MeasurementQueryCancelledError("回放摘要查询已被后续请求取消") from error
             raise MeasurementStorageError(f"读取任务测量数据库失败：{error}") from error
         finally:
+            if query is not None:
+                query.unbind(connection)
             connection.close()
 
     def load_history(self, task: TaskRecord) -> MeasurementHistoryRecord:
@@ -224,6 +267,7 @@ class MeasurementRepository:
                 statistics=statistics,
                 endpoints=endpoints,
                 pause_interval_count=len(pause_intervals),
+                sample_bounds=self._load_sample_bounds(connection, task.task_id),
             )
             return MeasurementHistoryRecord(
                 task_id=summary.task_id,
@@ -249,6 +293,190 @@ class MeasurementRepository:
         except sqlite3.Error as error:
             raise MeasurementStorageError(f"读取任务测量数据库失败：{error}") from error
         finally:
+            connection.close()
+
+    def load_series(
+        self,
+        task: TaskRecord,
+        *,
+        start_timestamp_ms: int | None,
+        end_timestamp_ms: int | None,
+        max_points: int,
+        query: MeasurementQueryHandle | None = None,
+    ) -> MeasurementSeriesRecord:
+        if max_points < 5:
+            raise ValueError("max_points必须至少为5")
+
+        database_path = self._resolve_recording_database(task)
+        connection = self._open_readonly(database_path)
+        try:
+            if query is not None:
+                query.bind(connection)
+            self._load_metadata(connection, task)
+            _, _, first_timestamp_ms, last_timestamp_ms = self._load_sample_bounds(
+                connection, task.task_id
+            )
+
+            requested_start = (
+                first_timestamp_ms if start_timestamp_ms is None else start_timestamp_ms
+            )
+            requested_end = last_timestamp_ms if end_timestamp_ms is None else end_timestamp_ms
+            if requested_start > requested_end:
+                raise ValueError("start_timestamp_ms不得大于end_timestamp_ms")
+
+            effective_start = max(first_timestamp_ms, requested_start)
+            effective_end = min(last_timestamp_ms, requested_end)
+            if effective_start > effective_end:
+                return MeasurementSeriesRecord(
+                    task_id=task.task_id,
+                    domain_start_timestamp_ms=first_timestamp_ms,
+                    domain_end_timestamp_ms=last_timestamp_ms,
+                    requested_start_timestamp_ms=requested_start,
+                    requested_end_timestamp_ms=requested_end,
+                    source_sample_count=0,
+                    downsampled=False,
+                    samples=[],
+                )
+
+            # API 时间窗口使用毫秒，数据库保留纳秒。结束边界覆盖该毫秒内全部样本。
+            start_timestamp_ns = effective_start * 1_000_000
+            end_timestamp_ns = effective_end * 1_000_000 + 999_999
+            count_row = connection.execute(
+                """
+                SELECT COUNT(*) AS sample_count
+                FROM clearance_samples
+                WHERE source_timestamp_ns BETWEEN ? AND ?
+                """,
+                (start_timestamp_ns, end_timestamp_ns),
+            ).fetchone()
+            source_sample_count = int(count_row["sample_count"])
+            if query is not None:
+                query.raise_if_cancelled()
+
+            if source_sample_count <= max_points:
+                rows = connection.execute(
+                    """
+                    SELECT
+                        sample_index,
+                        source_timestamp_ns,
+                        elapsed_ms,
+                        clearance_height_m,
+                        valid,
+                        invalid_reason
+                    FROM clearance_samples
+                    WHERE source_timestamp_ns BETWEEN ? AND ?
+                    ORDER BY source_timestamp_ns ASC, sample_index ASC
+                    """,
+                    (start_timestamp_ns, end_timestamp_ns),
+                ).fetchall()
+                samples = [self._series_sample_from_row(row) for row in rows]
+                return MeasurementSeriesRecord(
+                    task_id=task.task_id,
+                    domain_start_timestamp_ms=first_timestamp_ms,
+                    domain_end_timestamp_ms=last_timestamp_ms,
+                    requested_start_timestamp_ms=requested_start,
+                    requested_end_timestamp_ms=requested_end,
+                    source_sample_count=source_sample_count,
+                    downsampled=False,
+                    samples=samples,
+                )
+
+            samples = self._load_downsampled_series(
+                connection,
+                start_timestamp_ns=start_timestamp_ns,
+                end_timestamp_ns=end_timestamp_ns,
+                max_points=max_points,
+            )
+            if query is not None:
+                query.raise_if_cancelled()
+            return MeasurementSeriesRecord(
+                task_id=task.task_id,
+                domain_start_timestamp_ms=first_timestamp_ms,
+                domain_end_timestamp_ms=last_timestamp_ms,
+                requested_start_timestamp_ms=requested_start,
+                requested_end_timestamp_ms=requested_end,
+                source_sample_count=source_sample_count,
+                downsampled=True,
+                samples=samples,
+            )
+        except (
+            MeasurementNotFoundError,
+            MeasurementStorageError,
+            MeasurementQueryCancelledError,
+            ValueError,
+        ):
+            raise
+        except sqlite3.Error as error:
+            if query is not None and query.cancelled:
+                raise MeasurementQueryCancelledError("回放曲线查询已被后续请求取消") from error
+            raise MeasurementStorageError(f"读取任务回放曲线失败：{error}") from error
+        finally:
+            if query is not None:
+                query.unbind(connection)
+            connection.close()
+
+    def load_prefix(
+        self,
+        task: TaskRecord,
+        *,
+        max_samples: int,
+        query: MeasurementQueryHandle | None = None,
+    ) -> MeasurementSeriesRecord:
+        """读取任务开头固定数量样本，避免首屏扫描整条长任务曲线。"""
+        if max_samples < 200:
+            raise ValueError("max_samples必须至少为200")
+
+        database_path = self._resolve_recording_database(task)
+        connection = self._open_readonly(database_path)
+        try:
+            if query is not None:
+                query.bind(connection)
+            self._load_metadata(connection, task)
+            _, _, first_timestamp_ms, last_timestamp_ms = self._load_sample_bounds(
+                connection, task.task_id
+            )
+            rows = connection.execute(
+                """
+                SELECT
+                    sample_index,
+                    source_timestamp_ns,
+                    elapsed_ms,
+                    clearance_height_m,
+                    valid,
+                    invalid_reason
+                FROM clearance_samples
+                ORDER BY sample_index ASC
+                LIMIT ?
+                """,
+                (max_samples,),
+            ).fetchall()
+            if not rows:
+                raise MeasurementNotFoundError(task.task_id)
+            samples = [self._series_sample_from_row(row) for row in rows]
+            return MeasurementSeriesRecord(
+                task_id=task.task_id,
+                domain_start_timestamp_ms=first_timestamp_ms,
+                domain_end_timestamp_ms=last_timestamp_ms,
+                requested_start_timestamp_ms=samples[0].timestamp_ms,
+                requested_end_timestamp_ms=samples[-1].timestamp_ms,
+                source_sample_count=len(samples),
+                downsampled=False,
+                samples=samples,
+            )
+        except (
+            MeasurementNotFoundError,
+            MeasurementStorageError,
+            MeasurementQueryCancelledError,
+            ValueError,
+        ):
+            raise
+        except sqlite3.Error as error:
+            if query is not None and query.cancelled:
+                raise MeasurementQueryCancelledError("回放首段查询已被后续请求取消") from error
+            raise MeasurementStorageError(f"读取任务回放首段曲线失败：{error}") from error
+        finally:
+            if query is not None:
+                query.unbind(connection)
             connection.close()
 
     def iter_export_samples(self, task: TaskRecord) -> Iterator[MeasurementExportSampleRecord]:
@@ -438,6 +666,137 @@ class MeasurementRepository:
         )
 
     @staticmethod
+    def _load_sample_bounds(
+        connection: sqlite3.Connection,
+        task_id: str,
+    ) -> tuple[int, int, int, int]:
+        first = connection.execute(
+            """
+            SELECT sample_index, source_timestamp_ns
+            FROM clearance_samples
+            ORDER BY sample_index ASC
+            LIMIT 1
+            """
+        ).fetchone()
+        last = connection.execute(
+            """
+            SELECT sample_index, source_timestamp_ns
+            FROM clearance_samples
+            ORDER BY sample_index DESC
+            LIMIT 1
+            """
+        ).fetchone()
+        if first is None or last is None:
+            raise MeasurementNotFoundError(task_id)
+        return (
+            int(first["sample_index"]),
+            int(last["sample_index"]),
+            int(first["source_timestamp_ns"]) // 1_000_000,
+            int(last["source_timestamp_ns"]) // 1_000_000,
+        )
+
+    @staticmethod
+    def _series_sample_from_row(row: sqlite3.Row) -> ClearanceSeriesSampleRecord:
+        return ClearanceSeriesSampleRecord(
+            sample_index=int(row["sample_index"]),
+            timestamp_ms=int(row["source_timestamp_ns"]) // 1_000_000,
+            elapsed_ms=float(row["elapsed_ms"]),
+            height_m=_optional_float(row["clearance_height_m"]),
+            valid=bool(row["valid"]),
+            invalid_reason=row["invalid_reason"],
+        )
+
+    @classmethod
+    def _load_downsampled_series(
+        cls,
+        connection: sqlite3.Connection,
+        *,
+        start_timestamp_ns: int,
+        end_timestamp_ns: int,
+        max_points: int,
+    ) -> list[ClearanceSeriesSampleRecord]:
+        """在SQLite内按真实时间桶选择极值和无效断点，避免逐行跨入Python。"""
+        bucket_count = max(1, (max_points - 2) // 3)
+        duration_ns = max(1, end_timestamp_ns - start_timestamp_ns + 1)
+        columns = (
+            "sample_index, source_timestamp_ns, elapsed_ms, "
+            "clearance_height_m, valid, invalid_reason"
+        )
+        bucket_expression = (
+            "MIN(? - 1, CAST(((source_timestamp_ns - ?) * ?) / ? AS INTEGER))"
+        )
+        sql = f"""
+            SELECT DISTINCT {columns}
+            FROM (
+                SELECT {columns}, MIN(clearance_height_m) AS selected_value
+                FROM clearance_samples
+                WHERE source_timestamp_ns BETWEEN ? AND ?
+                  AND valid = 1 AND clearance_height_m IS NOT NULL
+                GROUP BY {bucket_expression}
+
+                UNION ALL
+
+                SELECT {columns}, MAX(clearance_height_m) AS selected_value
+                FROM clearance_samples
+                WHERE source_timestamp_ns BETWEEN ? AND ?
+                  AND valid = 1 AND clearance_height_m IS NOT NULL
+                GROUP BY {bucket_expression}
+
+                UNION ALL
+
+                SELECT {columns}, MIN(sample_index) AS selected_value
+                FROM clearance_samples
+                WHERE source_timestamp_ns BETWEEN ? AND ?
+                  AND (valid = 0 OR clearance_height_m IS NULL)
+                GROUP BY {bucket_expression}
+
+                UNION ALL
+
+                SELECT * FROM (
+                    SELECT {columns}, NULL AS selected_value
+                    FROM clearance_samples
+                    WHERE source_timestamp_ns BETWEEN ? AND ?
+                    ORDER BY source_timestamp_ns ASC, sample_index ASC
+                    LIMIT 1
+                )
+
+                UNION ALL
+
+                SELECT * FROM (
+                    SELECT {columns}, NULL AS selected_value
+                    FROM clearance_samples
+                    WHERE source_timestamp_ns BETWEEN ? AND ?
+                    ORDER BY source_timestamp_ns DESC, sample_index DESC
+                    LIMIT 1
+                )
+            )
+            ORDER BY source_timestamp_ns ASC, sample_index ASC
+        """
+        bucket_parameters = (
+            bucket_count,
+            start_timestamp_ns,
+            bucket_count,
+            duration_ns,
+        )
+        parameters = (
+            start_timestamp_ns,
+            end_timestamp_ns,
+            *bucket_parameters,
+            start_timestamp_ns,
+            end_timestamp_ns,
+            *bucket_parameters,
+            start_timestamp_ns,
+            end_timestamp_ns,
+            *bucket_parameters,
+            start_timestamp_ns,
+            end_timestamp_ns,
+            start_timestamp_ns,
+            end_timestamp_ns,
+        )
+        rows = connection.execute(sql, parameters).fetchall()
+        return [cls._series_sample_from_row(row) for row in rows]
+
+    @staticmethod
     def _load_endpoints(connection: sqlite3.Connection) -> dict[str, RtkEndpointRecord]:
         return {
             row["role"]: RtkEndpointRecord(
@@ -466,6 +825,7 @@ class MeasurementRepository:
         statistics: MeasurementStatisticsRecord,
         endpoints: dict[str, RtkEndpointRecord],
         pause_interval_count: int,
+        sample_bounds: tuple[int, int, int, int],
     ) -> MeasurementSummaryRecord:
         data_origin = str(metadata["data_origin"])
         if data_origin not in {"recorded", "test_fixture"}:
@@ -482,6 +842,7 @@ class MeasurementRepository:
             raise MeasurementStorageError(f"未知行驶方向：{travel_direction}")
         if lane_side not in {"left", "right", "unknown"}:
             raise MeasurementStorageError(f"未知车道位置：{lane_side}")
+        first_sample_index, last_sample_index, first_timestamp_ms, last_timestamp_ms = sample_bounds
         return MeasurementSummaryRecord(
             task_id=task.task_id,
             recording_schema_version=int(metadata["schema_version"]),
@@ -499,6 +860,10 @@ class MeasurementRepository:
             entry_rtk=endpoints.get("entry"),
             exit_rtk=endpoints.get("exit"),
             pause_interval_count=pause_interval_count,
+            first_sample_index=first_sample_index,
+            last_sample_index=last_sample_index,
+            first_timestamp_ms=first_timestamp_ms,
+            last_timestamp_ms=last_timestamp_ms,
         )
 
     def _resolve_recording_database(self, task: TaskRecord) -> Path:

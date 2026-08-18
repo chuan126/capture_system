@@ -62,4 +62,4 @@ DR坐标覆盖原始RTK历史数据。
 
 ## 开发核心参数装订
 
-`config/dev_parameter_bindings.yaml` 定义 development 调试参数，包括参数键、ROS 节点、范围、可写性、是否在参数页显示以及所属正式 YAML。算法实际默认值仍由各节点自己的配置文件提供，不在装订表中复制一份。当前参数页只显示八项净空核心参数，其中 `region.min_span_cells` 与 `ransac.min_remaining_points` 只读；其他装订参数仍随每次开发 MCAP 录制保存实际 ROS 参数快照及相关配置 SHA-256。
+`config/dev_parameter_bindings.yaml` 定义 development 调试参数，包括参数键、ROS 节点、范围、可写性、是否在单页测试界面显示以及所属正式 YAML。算法实际默认值仍由各节点自己的配置文件提供，不在装订表中复制一份。当前主界面显示 3 项运动补偿启动参数和 6 项净空核心参数；其他装订参数仍随每次开发 MCAP 录制保存实际 ROS 参数快照及相关配置 SHA-256。

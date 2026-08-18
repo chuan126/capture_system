@@ -464,6 +464,7 @@ ClearanceEstimate ClearanceEstimator::estimate(const std::vector<Point3f> & poin
       break;
     }
     plane_model_found = true;
+    ++result.ransac_plane_count;
 
     auto region_analysis = analyzeRegions(*remaining, *inliers, plane_coefficients, config_);
     if (!region_analysis.has_size_qualified_region) {

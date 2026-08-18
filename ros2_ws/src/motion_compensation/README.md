@@ -78,7 +78,7 @@ r_n,i = R_n<-b(t_i) r_l,i + p_n(t_i) - p_n(t_0)
   次数，不等于唯一等待帧数。
 - `interpolation_failure_count`累计`REFERENCE_POSE_NOT_COVERED`、
   `NO_POINT_POSE_COVERED`和`INSUFFICIENT_POSE_COVERAGE`结果；该计数不改变原错误处理。
-- `queue_wait_ms_last/mean/max`使用`steady_clock`，定义为点云进入pending队列到该帧
-  具备姿态覆盖并真正开始处理的本机等待时间。
+- `queue_wait_ms_last/mean/max`使用`steady_clock`，定义为点云实际插入pending队列到该帧
+  具备姿态覆盖并真正开始处理的本机等待时间；等待队列互斥锁的时间不计入该指标。
 - `processing_time_ms_last/mean/max`使用`steady_clock`，只统计正常输出帧从开始解析到
   完成输出构造及publish调用的本机处理时间。

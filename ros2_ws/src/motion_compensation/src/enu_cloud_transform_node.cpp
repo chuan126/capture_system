@@ -224,7 +224,6 @@ private:
   void cloudCallback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr message)
   {
     diagnostics_.recordCloudReceived();
-    const auto enqueued_at = EnuProcessingDiagnostics::Clock::now();
     PendingCloud dropped;
     {
       std::lock_guard<std::mutex> lock(pending_clouds_mutex_);
@@ -233,7 +232,9 @@ private:
         pending_clouds_.pop_front();
         diagnostics_.recordCloudDropped();
       }
-      pending_clouds_.push_back(PendingCloud{message, enqueued_at});
+      // queue_wait从点云真正进入pending队列开始计时，不包含等待队列互斥锁的时间。
+      pending_clouds_.push_back(
+        PendingCloud{message, EnuProcessingDiagnostics::Clock::now()});
       diagnostics_.observePendingCloudCount(pending_clouds_.size());
     }
     if (dropped.message) {
