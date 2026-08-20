@@ -188,7 +188,7 @@ public:
     algorithm_version_ = declare_parameter<std::string>(
       "algorithm_version", "clearance_engine-current");
     config_version_ = declare_parameter<std::string>(
-      "config_version", "clearance_engine_small_board_1cm.yaml");
+      "config_version", "clearance_engine_tunnel_4cm.yaml");
 
     if (!(sample_rate_hz_ > 0.0 && sample_rate_hz_ <= 200.0)) {
       throw std::runtime_error("sample_rate_hz必须位于(0, 200]范围");

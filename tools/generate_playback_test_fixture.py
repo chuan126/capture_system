@@ -248,7 +248,7 @@ def create_recording(
                 iso_utc(end_ns) if complete else None,
                 1 if complete else 0,
                 "fixture-clearance-2.0",
-                "clearance_engine_small_board_1cm.yaml-test-fixture",
+                "clearance_engine_tunnel_4cm.yaml-test-fixture",
                 "0.2.0-test-fixture",
                 2.30,
                 4.50,

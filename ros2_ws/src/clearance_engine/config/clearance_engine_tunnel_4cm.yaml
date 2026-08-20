@@ -21,8 +21,8 @@ clearance_engine_node:
     ransac.min_inliers_absolute: 50
     ransac.min_inlier_ratio: 0.0003
 
-    # 1 cm网格实验配置。点间距超过约1.4 cm时，连通区域可能破碎。
-    # 最低跨度约5 cm，最低占用面积约15 cm²。
+    # 2026-08-20隧道实测回放使用4 cm网格连接数米距离处的扫描线。
+    # 8格双向跨度约32 cm，50格最低占用投影面积约0.08 m²，用于排除小碎片平面。
     region.grid_size_m: 0.040
     region.min_span_cells: 8
     region.min_occupied_cells: 50

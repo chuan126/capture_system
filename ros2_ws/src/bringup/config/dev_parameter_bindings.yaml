@@ -125,7 +125,7 @@
       "maximum": 0.5,
       "writable": true,
       "note": "临时生效，重启恢复YAML值",
-      "source_config": "ros2_ws/src/clearance_engine/config/clearance_engine_small_board_1cm.yaml",
+      "source_config": "ros2_ws/src/clearance_engine/config/clearance_engine_tunnel_4cm.yaml",
       "ui_visible": true
     },
     {
@@ -139,7 +139,7 @@
       "maximum": 1.0,
       "writable": true,
       "note": "临时生效，重启恢复YAML值",
-      "source_config": "ros2_ws/src/clearance_engine/config/clearance_engine_small_board_1cm.yaml",
+      "source_config": "ros2_ws/src/clearance_engine/config/clearance_engine_tunnel_4cm.yaml",
       "ui_visible": false
     },
     {
@@ -153,7 +153,7 @@
       "maximum": 2500,
       "writable": true,
       "note": "限制单帧RANSAC平面提取循环；当前运行值可动态修改，节点重启后恢复YAML值",
-      "source_config": "ros2_ws/src/clearance_engine/config/clearance_engine_small_board_1cm.yaml",
+      "source_config": "ros2_ws/src/clearance_engine/config/clearance_engine_tunnel_4cm.yaml",
       "ui_visible": true
     },
     {
@@ -167,7 +167,7 @@
       "maximum": 1000000,
       "writable": false,
       "note": "当前节点未实现该参数运行时更新，仅读取",
-      "source_config": "ros2_ws/src/clearance_engine/config/clearance_engine_small_board_1cm.yaml",
+      "source_config": "ros2_ws/src/clearance_engine/config/clearance_engine_tunnel_4cm.yaml",
       "ui_visible": false
     },
     {
@@ -181,7 +181,7 @@
       "maximum": 1000000,
       "writable": true,
       "note": "临时生效，重启恢复YAML值",
-      "source_config": "ros2_ws/src/clearance_engine/config/clearance_engine_small_board_1cm.yaml",
+      "source_config": "ros2_ws/src/clearance_engine/config/clearance_engine_tunnel_4cm.yaml",
       "ui_visible": true
     },
     {
@@ -195,7 +195,7 @@
       "maximum": 1.0,
       "writable": true,
       "note": "用于连通区域划分和网格覆盖面积计算；临时生效，重启恢复YAML值",
-      "source_config": "ros2_ws/src/clearance_engine/config/clearance_engine_small_board_1cm.yaml",
+      "source_config": "ros2_ws/src/clearance_engine/config/clearance_engine_tunnel_4cm.yaml",
       "ui_visible": true
     },
     {
@@ -209,7 +209,7 @@
       "maximum": 100000,
       "writable": false,
       "note": "当前节点未实现该参数运行时更新，仅读取",
-      "source_config": "ros2_ws/src/clearance_engine/config/clearance_engine_small_board_1cm.yaml",
+      "source_config": "ros2_ws/src/clearance_engine/config/clearance_engine_tunnel_4cm.yaml",
       "ui_visible": false
     },
     {
@@ -223,7 +223,7 @@
       "maximum": 100000,
       "writable": true,
       "note": "临时生效，重启恢复YAML值",
-      "source_config": "ros2_ws/src/clearance_engine/config/clearance_engine_small_board_1cm.yaml",
+      "source_config": "ros2_ws/src/clearance_engine/config/clearance_engine_tunnel_4cm.yaml",
       "ui_visible": true
     },
     {
@@ -237,7 +237,7 @@
       "maximum": 1.0,
       "writable": true,
       "note": "临时生效，重启恢复YAML值",
-      "source_config": "ros2_ws/src/clearance_engine/config/clearance_engine_small_board_1cm.yaml",
+      "source_config": "ros2_ws/src/clearance_engine/config/clearance_engine_tunnel_4cm.yaml",
       "ui_visible": true
     }
   ]

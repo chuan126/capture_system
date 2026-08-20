@@ -1,6 +1,6 @@
 # clearance_engine
 
-核对日期：2026-08-17
+核对日期：2026-08-20
 
 该包对补偿后的单帧点云执行顶部 ROI、多候选近水平面提取、连通区域复核和最低
 平面高度计算。
@@ -29,7 +29,8 @@
 
 ## 配置文件
 
-- `clearance_engine_small_board_1cm.yaml`：当前 `bringup` 默认，1 cm 网格实验配置；
+- `clearance_engine_tunnel_4cm.yaml`：当前 `bringup` 和离线调试默认，隧道实测4 cm网格配置；
+- `clearance_engine_small_board_1cm.yaml`：保留的1 cm网格小板实验配置；
 - `clearance_engine.yaml`：较宽顶部区域和 4 cm 体素的风机初始配置；
 - `clearance_engine_roof_default.yaml`：较大结构的屋顶默认配置。
 

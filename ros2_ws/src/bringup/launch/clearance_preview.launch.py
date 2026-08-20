@@ -21,7 +21,7 @@ def generate_launch_description() -> LaunchDescription:
     default_parameters = (
         Path(get_package_share_directory("clearance_engine"))
         / "config"
-        / "clearance_engine_small_board_1cm.yaml"
+        / "clearance_engine_tunnel_4cm.yaml"
     )
     parameters_file = LaunchConfiguration("parameters_file")
 

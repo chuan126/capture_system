@@ -48,7 +48,7 @@ def generate_launch_description() -> LaunchDescription:
                         "transaction_batch_size": 100,
                         "software_version": "0.2.0",
                         "algorithm_version": "clearance_engine-current",
-                        "config_version": "clearance_engine_small_board_1cm.yaml",
+                        "config_version": "clearance_engine_tunnel_4cm.yaml",
                     }
                 ],
             ),

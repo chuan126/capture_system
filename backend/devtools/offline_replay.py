@@ -458,7 +458,7 @@ class OfflineReplayManager:
         source_configs = {
             "odometry": self.project_root / "ros2_ws/src/motion_compensation/config/odometry_timestamp_adapter.yaml",
             "motion": self.project_root / "ros2_ws/src/motion_compensation/config/motion_compensation.yaml",
-            "clearance": self.project_root / "ros2_ws/src/clearance_engine/config/clearance_engine_small_board_1cm.yaml",
+            "clearance": self.project_root / "ros2_ws/src/clearance_engine/config/clearance_engine_tunnel_4cm.yaml",
         }
         node_names = {
             "odometry": "offline_odometry_timestamp_adapter_node",

@@ -1,6 +1,6 @@
 # bringup
 
-核对日期：2026-08-08
+核对日期：2026-08-20
 
 当前包提供四个独立 Launch，便于保持预览、净空和系统监控的故障隔离。
 
@@ -21,7 +21,7 @@ bringup/config/
 ros2 launch bringup clearance_preview.launch.py
 ```
 
-默认加载 `clearance_engine_small_board_1cm.yaml`，并启动：
+默认加载 `clearance_engine_tunnel_4cm.yaml`，并启动：
 
 1. `odometry_timestamp_adapter_node`；
 2. `enu_cloud_transform_node`；

@@ -1,6 +1,6 @@
 # 开发测试工作台
 
-核对日期：2026-08-17
+核对日期：2026-08-20
 
 ## 1. 适用范围
 
@@ -93,14 +93,14 @@ ros2_ws/src/bringup/config/dev_parameter_bindings.yaml
 ```text
 ros2_ws/src/motion_compensation/config/motion_compensation.yaml
 ros2_ws/src/motion_compensation/config/odometry_timestamp_adapter.yaml
-ros2_ws/src/clearance_engine/config/clearance_engine_small_board_1cm.yaml
+ros2_ws/src/clearance_engine/config/clearance_engine_tunnel_4cm.yaml
 ```
 
 因此同一个算法参数不存在两份默认值来源。
 
 单页当前显示 9 项核心参数。运动补偿组为 `processing_poll_interval_ms`、`max_interpolation_gap_s`、`minimum_valid_pose_ratio`。净空组为 `ransac.distance_threshold_m`、`ransac.max_candidate_planes`、`ransac.min_inliers_absolute`、`region.grid_size_m`、`region.min_occupied_cells`、`region.max_residual_p95_m`。主列表同时显示所属正式 YAML 配置值和 ROS 2 节点实际运行值。节点未启动、ROS 发现失败或单项读取超时时，正式配置值仍可见，运行值显示不可用，不使用 YAML 值冒充节点实际值。运行值与正式配置不一致时主列表明确标记。允许动态修改的净空参数需要点开参数详情后才能设置当前 ROS 运行值；运动补偿三项参数只读并注明需要重启。装订表中未显示的里程计和其他实验参数仍参与录制参数快照。运行时修改不改写正式 YAML，节点重启后恢复正式配置。离线检测启动后使用启动瞬间的参数快照，检测过程中禁止继续修改运行参数。
 
-测试页只显示新增的 `ransac_plane_count`，名称为“RANSAC平面”。该值在每次 RANSAC 模型成功提取、回到原始分辨率收集内点且达到 `min_inliers` 后加一。原有 `candidate_count` 继续表示后续质量检查通过的连通区域数，字段语义保持兼容，但不在测试主页显示。参数 `ransac.max_candidate_planes` 是平面提取循环上限；当前 small-board 正式配置为 2500，development 运行时输入上限同步为 2500。
+测试页只显示新增的 `ransac_plane_count`，名称为“RANSAC平面”。该值在每次 RANSAC 模型成功提取、回到原始分辨率收集内点且达到 `min_inliers` 后加一。原有 `candidate_count` 继续表示后续质量检查通过的连通区域数，字段语义保持兼容，但不在测试主页显示。参数 `ransac.max_candidate_planes` 是平面提取循环上限；当前隧道正式配置为 2500，development 运行时输入上限同步为 2500。
 
 ## 5. 录制参数快照
 
