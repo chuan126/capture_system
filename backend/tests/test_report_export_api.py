@@ -127,7 +127,12 @@ def test_preview_and_txt_export_use_only_recorded_completed_task(tmp_path: Path)
     with TestClient(create_app(static_dir, data_root=data_root, start_ros_bridge=False)) as client:
         task = client.post(
             "/api/v1/tasks",
-            json={"tunnel_code": "G45-001", "tunnel_name": "正式记录测试隧道"},
+            json={
+                "tunnel_code": "G45-001",
+                "tunnel_name": "正式记录测试隧道",
+                "clearance_threshold_m": 5.19,
+                "clearance_upper_limit_m": 5.20,
+            },
         ).json()
         attach_measurements(data_root, task)
 
@@ -144,7 +149,11 @@ def test_preview_and_txt_export_use_only_recorded_completed_task(tmp_path: Path)
     preview = preview_response.json()
     assert preview["exportable_task_count"] == 1
     assert preview["tasks"][0]["exportable"] is True
+    assert preview["tasks"][0]["pdf_exportable"] is True
     assert preview["tasks"][0]["minimum_height_m"] == 5.18
+    assert preview["tasks"][0]["normal_minimum_height_m"] == 5.20
+    assert preview["tasks"][0]["clearance_threshold_m"] == 5.19
+    assert preview["tasks"][0]["clearance_upper_limit_m"] == 5.20
     assert generation_response.status_code == 200
     assert generation_response.json()["export_format"] == "txt"
     assert generation_response.json()["batch_id"] is None
@@ -163,8 +172,48 @@ def test_preview_and_txt_export_use_only_recorded_completed_task(tmp_path: Path)
     assert "加速度计Z m/s2" in header
     assert "俯仰 deg" in header
     assert "里程计位置z m" in header
+    first_sample = dict(zip(header, text.splitlines()[3].split("\t"), strict=True))
+    assert first_sample["雷达温度 °C"] == "0"
+    assert first_sample["方位 deg"] == "0"
+    assert first_sample["里程计位置z m"] == "0"
     assert "insufficient_points" not in text
     assert "attachment" in download_response.headers["content-disposition"]
+
+
+def test_pdf_excludes_task_when_no_valid_sample_is_inside_frozen_height_range(tmp_path: Path) -> None:
+    static_dir = tmp_path / "site"
+    make_static_site(static_dir)
+    data_root = tmp_path / "runtime"
+
+    with TestClient(create_app(static_dir, data_root=data_root, start_ros_bridge=False)) as client:
+        task = client.post(
+            "/api/v1/tasks",
+            json={
+                "tunnel_code": "G45-002",
+                "tunnel_name": "无正常区间样本测试隧道",
+                "clearance_threshold_m": 5.22,
+                "clearance_upper_limit_m": 5.30,
+            },
+        ).json()
+        attach_measurements(data_root, task)
+        preview_response = client.post(
+            "/api/v1/reports/clearance-summary/preview",
+            json={"task_ids": [task["task_id"]]},
+        )
+        txt_response = client.post(f"/api/v1/tasks/{task['task_id']}/exports/txt")
+        pdf_response = client.post(
+            "/api/v1/reports/clearance-summary",
+            json={"task_ids": [task["task_id"]]},
+        )
+
+    preview = preview_response.json()
+    assert preview["exportable_task_count"] == 0
+    assert preview["tasks"][0]["exportable"] is True
+    assert preview["tasks"][0]["pdf_exportable"] is False
+    assert preview["tasks"][0]["normal_minimum_height_m"] is None
+    assert preview["tasks"][0]["pdf_blocked_reason"] == "测量区间内没有正常高度样本"
+    assert txt_response.status_code == 200
+    assert pdf_response.status_code == 409
 
 
 def test_test_fixture_is_visible_but_blocked_from_formal_export(tmp_path: Path) -> None:

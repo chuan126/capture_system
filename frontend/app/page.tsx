@@ -40,6 +40,7 @@ type CollectionTaskDraft = {
   tunnelName: string;
   lane: CollectionTaskLane | "";
   clearanceThreshold: string;
+  clearanceUpperLimit: string;
 };
 
 const createTaskDraft = (): CollectionTaskDraft => ({
@@ -47,6 +48,7 @@ const createTaskDraft = (): CollectionTaskDraft => ({
   tunnelName: "",
   lane: "",
   clearanceThreshold: "0.00",
+  clearanceUpperLimit: "20.00",
 });
 
 const createClientRequestId = () => {
@@ -107,14 +109,17 @@ function TaskCreateDialog({ onClose, onCreate }: { onClose: () => void; onCreate
     const tunnelCode = draft.tunnelCode.trim();
     const tunnelName = draft.tunnelName.trim();
     const clearanceThresholdM = Number(draft.clearanceThreshold);
+    const clearanceUpperLimitM = Number(draft.clearanceUpperLimit);
     if (!tunnelCode) { setError("请输入隧道编号"); return; }
     if (!tunnelName) { setError("请输入隧道名称"); return; }
     if (!draft.lane) { setError("请选择作业车道"); return; }
     if (!Number.isFinite(clearanceThresholdM) || clearanceThresholdM < 0 || clearanceThresholdM > 20) { setError("请输入 0 至 20 m 的高度阈值"); return; }
+    if (!Number.isFinite(clearanceUpperLimitM) || clearanceUpperLimitM < 0 || clearanceUpperLimitM > 20) { setError("请输入 0 至 20 m 的高度上限"); return; }
+    if (clearanceThresholdM > clearanceUpperLimitM) { setError("高度阈值不能大于高度上限"); return; }
     setSubmitting(true);
     setError(null);
     try {
-      const created = await onCreate({ tunnelCode, tunnelName, lane: draft.lane, clearanceThreshold: String(clearanceThresholdM) }, idempotencyKey);
+      const created = await onCreate({ tunnelCode, tunnelName, lane: draft.lane, clearanceThreshold: String(clearanceThresholdM), clearanceUpperLimit: String(clearanceUpperLimitM) }, idempotencyKey);
       if (!continueCreating) { onClose(); return; }
       setSavedDisplayId(created.displayId);
       setDraft(createTaskDraft());
@@ -125,7 +130,7 @@ function TaskCreateDialog({ onClose, onCreate }: { onClose: () => void; onCreate
       setSubmitting(false);
     }
   };
-  return <div className="task-dialog-mask" role="dialog" aria-modal="true"><section className="task-dialog-panel"><header className="task-dialog-head"><div><h2>创建检测任务</h2><p>每次保存一个任务。保存成功后可继续创建下一项，任务编号由设备端按创建时间生成，例如 20260807_145601。</p></div><button type="button" disabled={submitting} onClick={onClose}>×</button></header><div className="task-dialog-single"><label><span>隧道编号</span><input value={draft.tunnelCode} onChange={event=>update("tunnelCode",event.target.value)} placeholder="例如 T-001" autoFocus/></label><label><span>隧道名称</span><input value={draft.tunnelName} onChange={event=>update("tunnelName",event.target.value)} placeholder="请输入隧道名称"/></label><label><span>作业车道</span><select value={draft.lane} onChange={event=>update("lane",event.target.value as CollectionTaskLane|"")}><option value="">请选择作业车道</option><option value="上行左车道">上行左车道</option><option value="上行右车道">上行右车道</option><option value="下行左车道">下行左车道</option><option value="下行右车道">下行右车道</option></select></label><label><span>高度阈值</span><div className="task-dialog-measure"><input type="number" min="0" max="20" step="0.01" value={draft.clearanceThreshold} onChange={event=>update("clearanceThreshold",event.target.value)}/><small>m</small></div></label></div>{savedDisplayId&&<p className="task-dialog-success" role="status">已保存任务 {savedDisplayId}，可以继续创建下一项。</p>}{error&&<p className="task-dialog-error" role="alert">{error}</p>}<footer className="task-dialog-actions"><button type="button" className="button" disabled={submitting} onClick={onClose}>取消</button><button type="button" className="button" disabled={submitting} onClick={()=>void submit(false)}>{submitting?"正在保存":"保存并关闭"}</button><button type="button" className="button button--primary" disabled={submitting} onClick={()=>void submit(true)}>{submitting?"正在保存":"保存并继续创建"}</button></footer></section></div>;
+  return <div className="task-dialog-mask" role="dialog" aria-modal="true"><section className="task-dialog-panel"><header className="task-dialog-head"><div><h2>创建检测任务</h2><p>每次保存一个任务。保存成功后可继续创建下一项，任务编号由设备端按创建时间生成，例如 20260807_145601。</p></div><button type="button" disabled={submitting} onClick={onClose}>×</button></header><div className="task-dialog-single"><label><span>隧道编号</span><input value={draft.tunnelCode} onChange={event=>update("tunnelCode",event.target.value)} placeholder="例如 T-001" autoFocus/></label><label><span>隧道名称</span><input value={draft.tunnelName} onChange={event=>update("tunnelName",event.target.value)} placeholder="请输入隧道名称"/></label><label><span>作业车道</span><select value={draft.lane} onChange={event=>update("lane",event.target.value as CollectionTaskLane|"")}><option value="">请选择作业车道</option><option value="上行左车道">上行左车道</option><option value="上行右车道">上行右车道</option><option value="下行左车道">下行左车道</option><option value="下行右车道">下行右车道</option></select></label><div className="task-dialog-height-range"><label><span>高度阈值</span><div className="task-dialog-measure"><input type="number" min="0" max="20" step="0.01" value={draft.clearanceThreshold} onChange={event=>update("clearanceThreshold",event.target.value)}/><small>m</small></div></label><label><span>高度上限</span><div className="task-dialog-measure"><input type="number" min="0" max="20" step="0.01" value={draft.clearanceUpperLimit} onChange={event=>update("clearanceUpperLimit",event.target.value)}/><small>m</small></div></label></div></div>{savedDisplayId&&<p className="task-dialog-success" role="status">已保存任务 {savedDisplayId}，可以继续创建下一项。</p>}{error&&<p className="task-dialog-error" role="alert">{error}</p>}<footer className="task-dialog-actions"><button type="button" className="button" disabled={submitting} onClick={onClose}>取消</button><button type="button" className="button" disabled={submitting} onClick={()=>void submit(false)}>{submitting?"正在保存":"保存并关闭"}</button><button type="button" className="button button--primary" disabled={submitting} onClick={()=>void submit(true)}>{submitting?"正在保存":"保存并继续创建"}</button></footer></section></div>;
 }
 
 function TaskSwitchDialog({
@@ -474,6 +479,8 @@ function Dashboard({
   reloadTasks,
   heightThreshold,
   setHeightThreshold,
+  heightUpperLimit,
+  setHeightUpperLimit,
   mountHeight,
   setMountHeight,
   operationLane,
@@ -487,6 +494,8 @@ function Dashboard({
   reloadTasks: () => Promise<void>;
   heightThreshold: string;
   setHeightThreshold: React.Dispatch<React.SetStateAction<string>>;
+  heightUpperLimit: string;
+  setHeightUpperLimit: React.Dispatch<React.SetStateAction<string>>;
   mountHeight: string;
   setMountHeight: React.Dispatch<React.SetStateAction<string>>;
   operationLane: CollectionTaskLane;
@@ -677,17 +686,27 @@ function Dashboard({
     .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
   const parsedHeightThreshold = Number(heightThreshold);
   const heightThresholdValid = Number.isFinite(parsedHeightThreshold) && parsedHeightThreshold >= 0 && parsedHeightThreshold <= 20;
-  const clearanceAbnormal = displayedClearanceHeightM !== null &&
-    heightThresholdValid && displayedClearanceHeightM < parsedHeightThreshold;
+  const parsedHeightUpperLimit = Number(heightUpperLimit);
+  const heightUpperLimitValid = Number.isFinite(parsedHeightUpperLimit) && parsedHeightUpperLimit >= 0 && parsedHeightUpperLimit <= 20;
+  const heightRangeValid = heightThresholdValid && heightUpperLimitValid && parsedHeightThreshold <= parsedHeightUpperLimit;
+  const clearanceAbnormalReason = displayedClearanceHeightM === null || !heightRangeValid
+    ? null
+    : displayedClearanceHeightM < parsedHeightThreshold
+      ? "低于阈值"
+      : displayedClearanceHeightM > parsedHeightUpperLimit
+        ? "超过上限"
+        : null;
+  const clearanceAbnormal = clearanceAbnormalReason !== null;
 
   useEffect(() => {
     if (!currentTask) return;
     if (currentTask.lidarMountHeightM !== null) setMountHeight(String(currentTask.lidarMountHeightM));
     if (currentTask.clearanceThresholdM !== null) setHeightThreshold(String(currentTask.clearanceThresholdM));
+    if (currentTask.clearanceUpperLimitM !== null) setHeightUpperLimit(String(currentTask.clearanceUpperLimitM));
     if (currentTask.lane !== null && currentTask.lane in laneSelectionParts) {
       setOperationLane(currentTask.lane as CollectionTaskLane);
     }
-  }, [currentTask?.taskId, currentTask?.lidarMountHeightM, currentTask?.clearanceThresholdM, currentTask?.lane, setMountHeight, setHeightThreshold, setOperationLane]);
+  }, [currentTask?.taskId, currentTask?.lidarMountHeightM, currentTask?.clearanceThresholdM, currentTask?.clearanceUpperLimitM, currentTask?.lane, setMountHeight, setHeightThreshold, setHeightUpperLimit, setOperationLane]);
 
   const taskBusy = isTaskControlBusy(currentTask) || controlSubmitting !== null;
   const taskLocked = isTaskActive(currentTask);
@@ -708,6 +727,7 @@ function Dashboard({
       tunnelName: draft.tunnelName,
       lane: draft.lane,
       clearanceThresholdM: Number(draft.clearanceThreshold),
+      clearanceUpperLimitM: Number(draft.clearanceUpperLimit),
     }, idempotencyKey);
     await reloadTasks();
     setSelectedTaskId(preferredTaskId ?? created.taskId);
@@ -743,13 +763,14 @@ function Dashboard({
       currentTask.status !== "待执行" ||
       taskBusy ||
       !controlAvailable ||
-      !heightThresholdValid ||
+      !heightRangeValid ||
       !mountHeightValid
     ) return;
     void executeControl("start", () => startTaskControl(currentTask.taskId, {
       lane: operationLane,
       lidarMountHeightM: parsedMountHeight,
       clearanceThresholdM: parsedHeightThreshold,
+      clearanceUpperLimitM: parsedHeightUpperLimit,
       expectedRevision: currentTask.statusRevision,
       idempotencyKey: createClientRequestId(),
     }));
@@ -835,7 +856,7 @@ function Dashboard({
 
           <div className="health-kpi-grid" aria-label="实时测量摘要">
             <article className={`health-kpi-card health-kpi-card--primary${clearanceAbnormal ? " health-kpi-card--alert" : ""}`}>
-              <span>净空高度</span>
+              <span><b>净空高度</b>{clearanceAbnormalReason && <small>{clearanceAbnormalReason}</small>}</span>
               <strong>{currentHeightText}<small>m</small></strong>
             </article>
             <article className="health-kpi-card health-kpi-card--rtk">
@@ -1041,7 +1062,7 @@ function Dashboard({
                     </select>
                   </label>
 
-                  <label className={heightThresholdValid ? "" : "is-invalid"}>
+                  <label className={heightRangeValid ? "" : "is-invalid"}>
                     <span>高度阈值</span>
                     <div>
                       <input
@@ -1051,13 +1072,31 @@ function Dashboard({
                         step="0.01"
                         value={heightThreshold}
                         disabled={taskLocked}
-                        aria-invalid={!heightThresholdValid}
+                        aria-invalid={!heightRangeValid}
                         onChange={(event) => setHeightThreshold(event.target.value)}
                       />
                       <small>m</small>
                     </div>
                   </label>
+
+                  <label className={heightRangeValid ? "" : "is-invalid"}>
+                    <span>高度上限</span>
+                    <div>
+                      <input
+                        type="number"
+                        min="0"
+                        max="20"
+                        step="0.01"
+                        value={heightUpperLimit}
+                        disabled={taskLocked}
+                        aria-invalid={!heightRangeValid}
+                        onChange={(event) => setHeightUpperLimit(event.target.value)}
+                      />
+                      <small>m</small>
+                    </div>
+                  </label>
                 </div>
+                <small className="task-parameter-range-hint">正常区间：高度阈值 ≤ 净空高度 ≤ 高度上限</small>
               </section>
 
               <section className={`task-current-card task-current-card--${currentTask ? taskRuntimeTone(currentTask) : "idle"}`} aria-label="当前任务">
@@ -1149,13 +1188,13 @@ function Dashboard({
                     currentTask.status !== "待执行" ||
                     taskBusy ||
                     !controlAvailable ||
-                    !heightThresholdValid ||
+                    !heightRangeValid ||
                     !mountHeightValid
                   }
                   title={!currentTask
                     ? "请先创建任务"
-                    : !heightThresholdValid
-                      ? "请输入有效的高度阈值"
+                    : !heightRangeValid
+                      ? "请确认高度阈值不大于高度上限"
                       : !mountHeightValid
                         ? "请输入有效的雷达安装高度"
                         : !controlAvailable
@@ -1231,6 +1270,7 @@ export default function Home() {
   const [tasks, setTasks] = useState<CollectionTask[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [heightThreshold, setHeightThreshold] = useState("0.00");
+  const [heightUpperLimit, setHeightUpperLimit] = useState("20.00");
   const [mountHeight, setMountHeight] = useState("0.00");
   const [operationLane, setOperationLane] = useState<CollectionTaskLane>("上行右车道");
   const [taskQueryState, setTaskQueryState] = useState<"loading" | "ready" | "error">("loading");
@@ -1291,7 +1331,7 @@ export default function Home() {
         {activePage !== "dashboard" && <Header page={activePage} task={selectedTask} />}
         <div className="page-content">
           {taskQueryState !== "ready" && <section className={`task-data-notice task-data-notice--${taskQueryState}`} role={taskQueryState === "error" ? "alert" : "status"}><div><strong>{taskQueryState === "loading" ? "正在读取设备任务记录" : "任务记录读取失败"}</strong><span>{taskQueryState === "loading" ? "任务列表从 FastAPI 持久化接口加载" : taskQueryError ?? "无法读取设备端任务数据库"}</span></div>{taskQueryState === "error" && <button type="button" onClick={() => void loadPersistedData()}>重新读取</button>}</section>}
-          {activePage === "dashboard" && <Dashboard tasks={tasks} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} onNavigate={setActivePage} taskRepositoryReady={taskQueryState === "ready"} reloadTasks={reloadTasks} heightThreshold={heightThreshold} setHeightThreshold={setHeightThreshold} mountHeight={mountHeight} setMountHeight={setMountHeight} operationLane={operationLane} setOperationLane={setOperationLane} />}
+          {activePage === "dashboard" && <Dashboard tasks={tasks} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} onNavigate={setActivePage} taskRepositoryReady={taskQueryState === "ready"} reloadTasks={reloadTasks} heightThreshold={heightThreshold} setHeightThreshold={setHeightThreshold} heightUpperLimit={heightUpperLimit} setHeightUpperLimit={setHeightUpperLimit} mountHeight={mountHeight} setMountHeight={setMountHeight} operationLane={operationLane} setOperationLane={setOperationLane} />}
           {activePage === "playback" && <PlaybackWorkspace tasks={tasks} selectedTaskId={selectedTaskId} onSelectTask={setSelectedTaskId} onDataChanged={reloadTasks} onNavigate={setActivePage} />}
           {activePage === "report" && <ReportWorkspace tasks={tasks} selectedTaskId={selectedTaskId} onSelectTask={setSelectedTaskId} onNavigate={setActivePage} />}
           {activePage === "devtools" && DEVTOOLS_ENABLED && DevToolsWorkspace && <DevToolsWorkspace />}

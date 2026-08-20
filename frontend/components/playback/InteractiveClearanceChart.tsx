@@ -195,13 +195,6 @@ export default function InteractiveClearanceChart({
     setYRange((current) => zoomChartYRange(current, factor));
   };
 
-  const fitVerticalRange = () => {
-    const nextRange = fitChartYRange(visibleSamples.flatMap((sample) => (
-      sample.valid && sample.heightM !== null ? [sample.heightM] : []
-    )));
-    if (nextRange) setYRange(nextRange);
-  };
-
   const commitViewIfChanged = (nextView: NormalizedViewWindow) => {
     setView((current) => (
       Math.abs(current.start - nextView.start) < 1e-9
@@ -422,7 +415,6 @@ export default function InteractiveClearanceChart({
           <button type="button" disabled={!hasData} onClick={() => zoomAt(1.25)} aria-label="缩小曲线">－</button>
           <button type="button" disabled={!hasData || yMax - yMin <= 0.020001} onClick={() => zoomVertically(1.4)} aria-label="纵向放大曲线">Y＋</button>
           <button type="button" disabled={!hasData || yMax - yMin >= 39.999} onClick={() => zoomVertically(1 / 1.4)} aria-label="纵向缩小曲线">Y－</button>
-          <button type="button" className="interactive-clearance-chart-toolbar__fit" disabled={!hasData} onClick={fitVerticalRange}>适配当前窗口</button>
           <button type="button" disabled={!hasData} onClick={resetView}>回到开头</button>
         </div>
       </div>
@@ -488,12 +480,12 @@ export default function InteractiveClearanceChart({
 
         {outOfRange.above > 0 && (
           <div className="interactive-clearance-chart__range-warning is-above">
-            ↑ {outOfRange.above} 个点超出纵轴，可上下拖动或点击“适配当前窗口”
+            ↑ {outOfRange.above} 个点超出纵轴，可上下拖动或使用 Y－扩大范围
           </div>
         )}
         {outOfRange.below > 0 && (
           <div className="interactive-clearance-chart__range-warning is-below">
-            ↓ {outOfRange.below} 个点超出纵轴，可上下拖动或点击“适配当前窗口”
+            ↓ {outOfRange.below} 个点超出纵轴，可上下拖动或使用 Y－扩大范围
           </div>
         )}
 

@@ -35,6 +35,7 @@ class _QueuedCommand:
     lane: str | None
     lidar_mount_height_m: float | None
     clearance_threshold_m: float | None
+    clearance_upper_limit_m: float | None
     future: Future[TaskControlResult]
 
 
@@ -145,6 +146,7 @@ class TaskControlBridge:
         lane: str | None = None,
         lidar_mount_height_m: float | None = None,
         clearance_threshold_m: float | None = None,
+        clearance_upper_limit_m: float | None = None,
         timeout_seconds: float = 15.0,
     ) -> TaskControlResult:
         if self.error is not None or self._thread is None or not self._thread.is_alive():
@@ -160,6 +162,7 @@ class TaskControlBridge:
             lane=lane,
             lidar_mount_height_m=lidar_mount_height_m,
             clearance_threshold_m=clearance_threshold_m,
+            clearance_upper_limit_m=clearance_upper_limit_m,
             future=future,
         )
         try:
@@ -259,6 +262,9 @@ class TaskControlBridge:
                 request.lane_side = resolved_lane
                 request.lidar_mount_height_m = float(command.lidar_mount_height_m or 0.0)
                 request.clearance_threshold_m = float(command.clearance_threshold_m or 0.0)
+                request.clearance_upper_limit_m = float(
+                    20.0 if command.clearance_upper_limit_m is None else command.clearance_upper_limit_m
+                )
             else:
                 request = self._command_request_type()
                 request.task_id = command.task_id

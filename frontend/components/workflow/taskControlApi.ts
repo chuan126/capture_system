@@ -112,6 +112,7 @@ export const startTaskControl = (
     lane: CollectionTaskLane;
     lidarMountHeightM: number;
     clearanceThresholdM: number;
+    clearanceUpperLimitM: number;
     expectedRevision: number;
     idempotencyKey: string;
   },
@@ -123,6 +124,7 @@ export const startTaskControl = (
     lane: laneSelectionParts[options.lane].laneSide,
     lidar_mount_height_m: options.lidarMountHeightM,
     clearance_threshold_m: options.clearanceThresholdM,
+    clearance_upper_limit_m: options.clearanceUpperLimitM,
     expected_revision: options.expectedRevision,
   },
   options.idempotencyKey,

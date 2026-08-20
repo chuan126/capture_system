@@ -28,6 +28,7 @@ from backend.measurements.repository import (
     MeasurementRepository,
     MeasurementStorageError,
     MeasurementSummaryRecord,
+    NormalHeightStatisticsRecord,
     RtkEndpointRecord,
 )
 from backend.tasks.repository import TaskRecord, TaskRepository
@@ -51,6 +52,9 @@ class TaskExportAssessment:
     exportable: bool
     blocked_reason: str | None
     summary: MeasurementSummaryRecord | None
+    pdf_exportable: bool = False
+    pdf_blocked_reason: str | None = None
+    normal_height_statistics: NormalHeightStatisticsRecord | None = None
 
 
 @dataclass(frozen=True)
@@ -132,7 +136,19 @@ class ReportExportService:
             return TaskExportAssessment(task, False, "测量记录未完整结束", summary)
         if summary.statistics.valid_samples <= 0 or summary.statistics.minimum_height_m is None:
             return TaskExportAssessment(task, False, "测量记录中没有有效净空样本", summary)
-        return TaskExportAssessment(task, True, None, summary)
+        try:
+            normal_statistics = self.measurement_repository.load_normal_height_statistics(task)
+        except MeasurementStorageError as error:
+            return TaskExportAssessment(
+                task, True, None, summary, False,
+                f"正常高度统计不可读取：{error}", None,
+            )
+        if normal_statistics.minimum_height_m is None:
+            return TaskExportAssessment(
+                task, True, None, summary, False,
+                "测量区间内没有正常高度样本", normal_statistics,
+            )
+        return TaskExportAssessment(task, True, None, summary, True, None, normal_statistics)
 
     def generate_txt(self, task: TaskRecord) -> GeneratedExport:
         assessment = self.assess_task(task)
@@ -178,7 +194,7 @@ class ReportExportService:
 
     def generate_pdf(self, task_ids: list[str]) -> GeneratedExport:
         assessments = self.preview_tasks(task_ids)
-        eligible = [assessment for assessment in assessments if assessment.exportable]
+        eligible = [assessment for assessment in assessments if assessment.pdf_exportable]
         if not eligible:
             raise ExportBlockedError("所选任务中没有满足正式 PDF 汇总条件的记录")
         report_id = str(uuid.uuid4())
@@ -204,6 +220,16 @@ class ReportExportService:
                 "sha256": report_sha256,
                 "task_ids": [assessment.task.task_id for assessment in eligible],
                 "task_display_ids": [assessment.task.display_id for assessment in eligible],
+                "normal_height_ranges": [
+                    {
+                        "task_id": assessment.task.task_id,
+                        "clearance_threshold_m": assessment.normal_height_statistics.clearance_threshold_m,
+                        "clearance_upper_limit_m": assessment.normal_height_statistics.clearance_upper_limit_m,
+                        "minimum_height_m": assessment.normal_height_statistics.minimum_height_m,
+                    }
+                    for assessment in eligible
+                    if assessment.normal_height_statistics is not None
+                ],
             }
             (report_directory / "manifest.json").write_text(
                 json.dumps(manifest, ensure_ascii=False, indent=2),
@@ -318,26 +344,26 @@ class ReportExportService:
                     ),
                     task.tunnel_code,
                     _lane_text(summary.lane, summary.travel_direction, summary.lane_side),
-                    _format_number(sample.height_m if sample.valid else None, 3),
+                    _format_txt_number(sample.height_m if sample.valid else None, 3),
                     minimum_height,
                     entry_rtk,
                     exit_rtk,
-                    _format_number(sample.gyro_x_rad_s, 6),
-                    _format_number(sample.gyro_y_rad_s, 6),
-                    _format_number(sample.gyro_z_rad_s, 6),
-                    _format_number(sample.accel_x_m_s2, 6),
-                    _format_number(sample.accel_y_m_s2, 6),
-                    _format_number(sample.accel_z_m_s2, 6),
-                    _format_number(sample.radar_temperature_c, 2),
-                    _format_number(sample.minimum_point_x_m, 4),
-                    _format_number(sample.minimum_point_y_m, 4),
-                    _format_number(sample.minimum_point_z_m, 4),
-                    _format_number(sample.vehicle_pitch_deg, 4),
-                    _format_number(sample.vehicle_roll_deg, 4),
-                    _format_number(sample.vehicle_heading_deg, 4),
-                    _format_number(sample.odin_position_x_m, 4),
-                    _format_number(sample.odin_position_y_m, 4),
-                    _format_number(sample.odin_position_z_m, 4),
+                    _format_txt_number(sample.gyro_x_rad_s, 6),
+                    _format_txt_number(sample.gyro_y_rad_s, 6),
+                    _format_txt_number(sample.gyro_z_rad_s, 6),
+                    _format_txt_number(sample.accel_x_m_s2, 6),
+                    _format_txt_number(sample.accel_y_m_s2, 6),
+                    _format_txt_number(sample.accel_z_m_s2, 6),
+                    _format_txt_number(sample.radar_temperature_c, 2),
+                    _format_txt_number(sample.minimum_point_x_m, 4),
+                    _format_txt_number(sample.minimum_point_y_m, 4),
+                    _format_txt_number(sample.minimum_point_z_m, 4),
+                    _format_txt_number(sample.vehicle_pitch_deg, 4),
+                    _format_txt_number(sample.vehicle_roll_deg, 4),
+                    _format_txt_number(sample.vehicle_heading_deg, 4),
+                    _format_txt_number(sample.odin_position_x_m, 4),
+                    _format_txt_number(sample.odin_position_y_m, 4),
+                    _format_txt_number(sample.odin_position_z_m, 4),
                 ]
             )
 
@@ -439,13 +465,16 @@ class ReportExportService:
             summary = assessment.summary
             if summary is None:
                 continue
+            normal_statistics = assessment.normal_height_statistics
+            if normal_statistics is None or normal_statistics.minimum_height_m is None:
+                continue
             time_text = f"{_format_iso_text(summary.started_at)}<br/>{_format_iso_text(summary.ended_at)}"
             rows.append(
                 [
                     Paragraph(assessment.task.display_id, body_style),
                     Paragraph(_escape_pdf_text(assessment.task.tunnel_code), body_style),
                     Paragraph(_lane_text(summary.lane, summary.travel_direction, summary.lane_side), body_style),
-                    Paragraph(_format_number(summary.statistics.minimum_height_m, 3), body_style),
+                    Paragraph(_format_number(normal_statistics.minimum_height_m, 3), body_style),
                     Paragraph(time_text, body_style),
                     Paragraph(_escape_pdf_text(_format_rtk(summary.entry_rtk)), body_style),
                     Paragraph(_escape_pdf_text(_format_rtk(summary.exit_rtk)), body_style),
@@ -478,8 +507,8 @@ class ReportExportService:
             [
                 Spacer(1, 5 * mm),
                 Paragraph(
-                    "说明　无有效 RTK 端点时对应字段留空并标记为未记录。"
-                    "本报告仅汇总数据来源为正式记录、任务正常完成且包含有效净空样本的任务。",
+                    "说明　最低高度仅统计任务冻结高度阈值与高度上限之间（含边界）的算法有效样本。"
+                    "无有效 RTK 端点时对应字段标记为未记录。",
                     body_style,
                 ),
             ]
@@ -533,6 +562,11 @@ def _format_rtk(endpoint: RtkEndpointRecord | None) -> str:
 
 def _format_number(value: float | None, digits: int) -> str:
     return "" if value is None else f"{value:.{digits}f}"
+
+
+def _format_txt_number(value: float | None, digits: int) -> str:
+    # TXT 的 0 只承担缺失占位语义，SQLite 中的 NULL 和有效标志保持不变。
+    return "0" if value is None else f"{value:.{digits}f}"
 
 
 def _parse_datetime(value: str) -> datetime:

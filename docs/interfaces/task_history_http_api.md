@@ -10,7 +10,7 @@ SQLite 文件。写入由 ROS 2 记录器完成，FastAPI 只读加载。
 任务对外显示编号为 `display_id`，由创建时间生成，例如 `20260807_145601`。同秒创建多项任务
 时追加 `_02`、`_03`。内部状态、目录和接口路径始终使用稳定 `task_id` UUID。
 
-新任务创建请求同时保存计划 `travel_direction`、`lane_side` 和 `clearance_threshold_m`。计划值保存在中央任务索引中；开始采集时，任务控制卡片当前值可以覆盖计划作业车道和阈值，设备端随后把实际执行方向、左右车道和阈值冻结到 `task_parameters` 和每任务 `measurements.db`。
+新任务创建请求同时保存计划 `travel_direction`、`lane_side`、`clearance_threshold_m` 和 `clearance_upper_limit_m`。两个高度边界范围均为 `[0, 20] m`，要求阈值不大于上限，上限默认 `20 m`。计划值保存在中央任务索引中；开始采集时，任务控制卡片当前值可以覆盖计划参数，设备端随后把实际执行方向、左右车道、阈值和上限冻结到 `task_parameters` 和每任务 `measurements.db`。
 
 ## 2. 任务逻辑删除
 

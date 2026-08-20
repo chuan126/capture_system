@@ -57,6 +57,8 @@ def _preview_response(assessment: TaskExportAssessment) -> TaskExportPreviewResp
         status=assessment.task.status,
         exportable=assessment.exportable,
         blocked_reason=assessment.blocked_reason,
+        pdf_exportable=assessment.pdf_exportable,
+        pdf_blocked_reason=assessment.pdf_blocked_reason,
         data_origin=summary.data_origin if summary else None,
         lane=summary.lane if summary else None,
         travel_direction=summary.travel_direction if summary else None,
@@ -68,6 +70,18 @@ def _preview_response(assessment: TaskExportAssessment) -> TaskExportPreviewResp
         valid_samples=summary.statistics.valid_samples if summary else None,
         invalid_samples=summary.statistics.invalid_samples if summary else None,
         minimum_height_m=summary.statistics.minimum_height_m if summary else None,
+        normal_minimum_height_m=(
+            assessment.normal_height_statistics.minimum_height_m
+            if assessment.normal_height_statistics else None
+        ),
+        clearance_threshold_m=(
+            assessment.normal_height_statistics.clearance_threshold_m
+            if assessment.normal_height_statistics else None
+        ),
+        clearance_upper_limit_m=(
+            assessment.normal_height_statistics.clearance_upper_limit_m
+            if assessment.normal_height_statistics else None
+        ),
         entry_rtk=_rtk_response(summary.entry_rtk) if summary else None,
         exit_rtk=_rtk_response(summary.exit_rtk) if summary else None,
     )
@@ -105,7 +119,7 @@ def report_preview(payload: ReportSelectionRequest, request: Request) -> ReportP
         raise _export_http_error(error) from error
     return ReportPreviewResponse(
         task_count=len(assessments),
-        exportable_task_count=sum(1 for item in assessments if item.exportable),
+        exportable_task_count=sum(1 for item in assessments if item.pdf_exportable),
         generated_at=datetime.now(timezone.utc),
         tasks=[_preview_response(item) for item in assessments],
     )

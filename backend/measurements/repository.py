@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
@@ -98,6 +99,16 @@ class MeasurementStatisticsRecord:
 
 
 @dataclass(frozen=True)
+class NormalHeightStatisticsRecord:
+    clearance_threshold_m: float
+    clearance_upper_limit_m: float
+    normal_samples: int
+    below_threshold_samples: int
+    above_upper_limit_samples: int
+    minimum_height_m: float | None
+
+
+@dataclass(frozen=True)
 class MeasurementSummaryRecord:
     task_id: str
     recording_schema_version: int
@@ -164,7 +175,7 @@ class MeasurementHistoryRecord:
     samples: list[ClearanceHistorySampleRecord]
 
 
-_SUPPORTED_SCHEMA_VERSIONS = {1, 2, 3, 4, 5, 6, 7, 8, 9}
+_SUPPORTED_SCHEMA_VERSIONS = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
 _MAX_HISTORY_SAMPLES = 500_000
 
 
@@ -207,6 +218,74 @@ class MeasurementRepository:
         finally:
             if query is not None:
                 query.unbind(connection)
+            connection.close()
+
+    def load_normal_height_statistics(self, task: TaskRecord) -> NormalHeightStatisticsRecord:
+        """按任务开始时冻结的业务高度区间计算报告统计，不改写算法有效性。"""
+        database_path = self._resolve_recording_database(task)
+        connection = self._open_readonly(database_path)
+        try:
+            metadata = self._load_metadata(connection, task)
+            metadata_keys = set(metadata.keys())
+
+            def resolve_bound(metadata_name: str, actual: float | None, planned: float | None, fallback: float) -> float:
+                if metadata_name in metadata_keys and metadata[metadata_name] is not None:
+                    return float(metadata[metadata_name])
+                if actual is not None:
+                    return float(actual)
+                if planned is not None:
+                    return float(planned)
+                return fallback
+
+            threshold = resolve_bound(
+                "clearance_threshold_m",
+                task.clearance_threshold_m,
+                task.planned_clearance_threshold_m,
+                0.0,
+            )
+            upper_limit = resolve_bound(
+                "clearance_upper_limit_m",
+                task.clearance_upper_limit_m,
+                task.planned_clearance_upper_limit_m,
+                20.0,
+            )
+            if (
+                not math.isfinite(threshold)
+                or not math.isfinite(upper_limit)
+                or threshold < 0.0
+                or upper_limit > 20.0
+                or threshold > upper_limit
+            ):
+                raise MeasurementStorageError("任务测量数据库中的正常高度区间无效")
+
+            aggregate = connection.execute(
+                """
+                SELECT
+                    SUM(CASE WHEN valid = 1 AND clearance_height_m IS NOT NULL
+                                  AND clearance_height_m BETWEEN ? AND ? THEN 1 ELSE 0 END) AS normal_samples,
+                    SUM(CASE WHEN valid = 1 AND clearance_height_m IS NOT NULL
+                                  AND clearance_height_m < ? THEN 1 ELSE 0 END) AS below_threshold_samples,
+                    SUM(CASE WHEN valid = 1 AND clearance_height_m IS NOT NULL
+                                  AND clearance_height_m > ? THEN 1 ELSE 0 END) AS above_upper_limit_samples,
+                    MIN(CASE WHEN valid = 1 AND clearance_height_m BETWEEN ? AND ?
+                             THEN clearance_height_m END) AS minimum_height_m
+                FROM clearance_samples
+                """,
+                (threshold, upper_limit, threshold, upper_limit, threshold, upper_limit),
+            ).fetchone()
+            return NormalHeightStatisticsRecord(
+                clearance_threshold_m=threshold,
+                clearance_upper_limit_m=upper_limit,
+                normal_samples=int(aggregate["normal_samples"] or 0),
+                below_threshold_samples=int(aggregate["below_threshold_samples"] or 0),
+                above_upper_limit_samples=int(aggregate["above_upper_limit_samples"] or 0),
+                minimum_height_m=_optional_float(aggregate["minimum_height_m"]),
+            )
+        except (MeasurementStorageError, MeasurementNotFoundError):
+            raise
+        except sqlite3.Error as error:
+            raise MeasurementStorageError(f"读取报告正常高度统计失败：{error}") from error
+        finally:
             connection.close()
 
     def load_history(self, task: TaskRecord) -> MeasurementHistoryRecord:

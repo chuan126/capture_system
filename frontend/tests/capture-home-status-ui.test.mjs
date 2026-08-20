@@ -110,10 +110,13 @@ test("task card exposes only one create-task entry", () => {
   assert.doesNotMatch(taskCard, />新建任务<\/button>|>批量创建<\/button>/);
 });
 
-test("task card shows current task lane and threshold and keeps pre-start override controls", () => {
+test("task card shows a two-by-two parameter grid with the inclusive height range", () => {
   assert.match(taskCard, /task-parameter-strip/);
   assert.match(taskCard, />高度阈值</);
   assert.match(taskCard, /value=\{heightThreshold\}/);
+  assert.match(taskCard, />高度上限</);
+  assert.match(taskCard, /value=\{heightUpperLimit\}/);
+  assert.match(taskCard, /正常区间：高度阈值 ≤ 净空高度 ≤ 高度上限/);
   assert.match(taskCard, />雷达安装高度</);
   assert.match(taskCard, /value=\{mountHeight\}/);
   assert.match(taskCard, />作业车道</);
@@ -125,11 +128,13 @@ test("task card shows current task lane and threshold and keeps pre-start overri
   assert.match(taskCard, /disabled=\{taskLocked\}/);
   assert.match(taskCard, /taskLocked \? \(currentTask\.lane \?\? operationLane\) : operationLane/);
   assert.match(page, /useState\("0\.00"\)/);
+  assert.match(page, /useState\("20\.00"\)/);
+  assert.match(css, /\.task-parameter-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2/);
   assert.match(taskCard, /min="0"/);
   assert.match(taskCard, /max="20"/);
 });
 
-test("task creation stores independent planned lane and threshold", () => {
+test("task creation stores independent planned lane and height range", () => {
   assert.match(taskDialog, />创建检测任务</);
   assert.match(taskDialog, /任务编号由设备端按创建时间生成/);
   assert.match(taskDialog, /20260807_145601/);
@@ -137,18 +142,20 @@ test("task creation stores independent planned lane and threshold", () => {
   assert.match(taskDialog, />隧道名称</);
   assert.match(taskDialog, />作业车道</);
   assert.match(taskDialog, />高度阈值</);
+  assert.match(taskDialog, />高度上限</);
   for (const lane of ["上行左车道", "上行右车道", "下行左车道", "下行右车道"]) {
     assert.match(taskDialog, new RegExp(`option value="${lane}"`));
   }
   assert.match(taskDialog, /"保存并关闭"/);
   assert.match(taskDialog, /"保存并继续创建"/);
-  assert.match(taskDialog, /await onCreate\(\{ tunnelCode, tunnelName, lane: draft\.lane, clearanceThreshold:/);
+  assert.match(taskDialog, /await onCreate\(\{ tunnelCode, tunnelName, lane: draft\.lane, clearanceThreshold:[\s\S]*clearanceUpperLimit:/);
   assert.match(taskDialog, /setDraft\(createTaskDraft\(\)\)/);
   assert.doesNotMatch(taskDialog, />＋ 添加任务|>复制<\/button>|>删除<\/button>|rows\.map/);
   assert.doesNotMatch(taskDialog, />雷达安装高度</);
   assert.doesNotMatch(taskDialog, />任务名称|row\.taskName|batchMode|作业批次/);
   assert.match(page, /const created = await createTask\(\{/);
   assert.match(page, /clearanceThresholdM: Number\(draft\.clearanceThreshold\)/);
+  assert.match(page, /clearanceUpperLimitM: Number\(draft\.clearanceUpperLimit\)/);
   assert.doesNotMatch(page, /createTaskBatch\(/);
   assert.match(page, /task\.displayId/);
   assert.doesNotMatch(page, /createTaskId|nextTaskSequence|formatTaskSequence/);
@@ -210,18 +217,24 @@ test("task actions use a dominant start control and outlined secondary controls"
 test("task start validates the shared numeric settings", () => {
   assert.match(page, /parsedMountHeight >= 0 && parsedMountHeight <= 20/);
   assert.match(page, /parsedHeightThreshold >= 0 && parsedHeightThreshold <= 20/);
-  assert.match(page, /!heightThresholdValid \|\|[\s\S]*!mountHeightValid/);
+  assert.match(page, /parsedHeightUpperLimit >= 0 && parsedHeightUpperLimit <= 20/);
+  assert.match(page, /parsedHeightThreshold <= parsedHeightUpperLimit/);
+  assert.match(page, /!heightRangeValid \|\|[\s\S]*!mountHeightValid/);
   assert.match(page, /请输入有效的雷达安装高度/);
   assert.match(page, /startTaskControl\(currentTask\.taskId/);
   assert.match(page, /lidarMountHeightM: parsedMountHeight/);
   assert.match(page, /clearanceThresholdM: parsedHeightThreshold/);
+  assert.match(page, /clearanceUpperLimitM: parsedHeightUpperLimit/);
   assert.doesNotMatch(page, /status: "采集中", lane: operationLane/);
   assert.doesNotMatch(page, /!captureReady/);
 });
 
-test("current clearance turns red only when the live value is below threshold", () => {
-  assert.match(page, /const clearanceAbnormal = displayedClearanceHeightM !== null/);
+test("current clearance turns red outside the inclusive configured height range", () => {
+  assert.match(page, /const clearanceAbnormalReason = displayedClearanceHeightM === null/);
   assert.match(page, /displayedClearanceHeightM < parsedHeightThreshold/);
+  assert.match(page, /displayedClearanceHeightM > parsedHeightUpperLimit/);
+  assert.match(page, /低于阈值/);
+  assert.match(page, /超过上限/);
   assert.match(page, /health-kpi-card--primary\$\{clearanceAbnormal \? " health-kpi-card--alert"/);
   assert.doesNotMatch(page, /latestAbnormalHeightM|health-kpi-card--anomaly/);
   assert.match(css, /\.health-kpi-grid[\s\S]*grid-template-columns:\s*repeat\(3/);
@@ -267,6 +280,7 @@ test("capture dashboard keeps notebook text, icons and controls readable", () =>
   assert.match(css, /\.fusion-position-grid span,[\s\S]*?font-size:\s*11px/i);
   assert.match(css, /\.task-section-heading h3 \{[^}]*font-size:\s*12px/i);
   assert.match(css, /\.task-parameter-grid input,[\s\S]*?\.task-parameter-grid select \{[^}]*height:\s*40px[^}]*font-size:\s*12px/i);
+  assert.match(css, /@media \(max-width:\s*1600px\) and \(min-width:\s*761px\)[\s\S]*?\.task-parameter-grid \{[^}]*gap:\s*10px/i);
   assert.match(css, /\.task-operation-actions \.button \{[^}]*min-height:\s*42px[^}]*font-size:\s*11px/i);
   assert.match(css, /@media \(max-width:\s*1440px\) and \(min-width:\s*1181px\)[\s\S]*?\.dashboard-layout \{ grid-template-columns:\s*1fr/i);
   assert.match(css, /@media \(max-width:\s*1440px\) and \(min-width:\s*1181px\)[\s\S]*?\.main--dashboard \{ overflow-y:\s*auto/i);

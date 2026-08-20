@@ -19,6 +19,8 @@ class TaskExportPreviewResponse(BaseModel):
     status: TaskStatus
     exportable: bool
     blocked_reason: str | None
+    pdf_exportable: bool
+    pdf_blocked_reason: str | None
     data_origin: MeasurementDataOrigin | None
     lane: MeasurementLane | None
     travel_direction: MeasurementTravelDirection | None = None
@@ -30,6 +32,9 @@ class TaskExportPreviewResponse(BaseModel):
     valid_samples: int | None
     invalid_samples: int | None
     minimum_height_m: float | None
+    normal_minimum_height_m: float | None
+    clearance_threshold_m: float | None
+    clearance_upper_limit_m: float | None
     entry_rtk: RtkEndpointResponse | None
     exit_rtk: RtkEndpointResponse | None
 

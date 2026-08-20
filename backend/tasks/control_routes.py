@@ -292,6 +292,7 @@ def start_task(
         lane=resolved_lane,
         lidar_mount_height_m=payload.lidar_mount_height_m,
         clearance_threshold_m=payload.clearance_threshold_m,
+        clearance_upper_limit_m=payload.clearance_upper_limit_m,
     )
 
 

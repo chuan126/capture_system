@@ -32,7 +32,7 @@ def iso_utc(epoch_ns: int) -> str:
 
 
 def create_recording_schema(connection: sqlite3.Connection) -> None:
-    """建立与 data_recorder 当前 schema v9 对齐的测试数据库。"""
+    """建立与 data_recorder 当前 schema v10 对齐的测试数据库。"""
     connection.executescript(
         """
         CREATE TABLE recording_metadata (
@@ -52,6 +52,7 @@ def create_recording_schema(connection: sqlite3.Connection) -> None:
             software_version TEXT,
             lidar_mount_height_m REAL,
             clearance_threshold_m REAL,
+            clearance_upper_limit_m REAL,
             entry_rtk_status TEXT NOT NULL DEFAULT 'pending',
             exit_rtk_status TEXT NOT NULL DEFAULT 'not_requested'
         );
@@ -236,8 +237,8 @@ def create_recording(
                 id, schema_version, task_id, data_origin, lane, travel_direction, lane_side, started_at,
                 ended_at, complete, nominal_sample_rate_hz, algorithm_version,
                 config_version, software_version, lidar_mount_height_m,
-                clearance_threshold_m, entry_rtk_status, exit_rtk_status
-            ) VALUES (1, 9, ?, 'test_fixture', ?, 'up', ?, ?, ?, ?, 50.0, ?, ?, ?, ?, ?, 'confirmed', ?)
+                clearance_threshold_m, clearance_upper_limit_m, entry_rtk_status, exit_rtk_status
+            ) VALUES (1, 10, ?, 'test_fixture', ?, 'up', ?, ?, ?, ?, 50.0, ?, ?, ?, ?, ?, ?, 'confirmed', ?)
             """,
             (
                 task_id,
@@ -251,6 +252,7 @@ def create_recording(
                 "0.2.0-test-fixture",
                 2.30,
                 4.50,
+                20.0,
                 "confirmed" if include_exit_rtk else "unconfirmed",
             ),
         )
@@ -525,8 +527,9 @@ def generate(output: Path, *, force: bool) -> None:
                 entry_rtk_status, exit_rtk_status, has_measurements,
                 recording_path, schema_version,
                 planned_travel_direction, planned_lane_side, planned_clearance_threshold_m,
+                planned_clearance_upper_limit_m,
                 deleted_at, delete_reason
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)
             """,
             [
                 (
@@ -551,6 +554,7 @@ def generate(output: Path, *, force: bool) -> None:
                     "up",
                     "left",
                     4.5,
+                    20.0,
                 ),
                 (
                     TASK_COMPLETED,
@@ -574,6 +578,7 @@ def generate(output: Path, *, force: bool) -> None:
                     "up",
                     "left",
                     4.5,
+                    20.0,
                 ),
                 (
                     TASK_INTERRUPTED,
@@ -597,6 +602,7 @@ def generate(output: Path, *, force: bool) -> None:
                     "down",
                     "right",
                     4.2,
+                    20.0,
                 ),
             ],
         )
@@ -639,7 +645,7 @@ def generate(output: Path, *, force: bool) -> None:
             assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
             assert connection.execute(
                 "SELECT schema_version FROM recording_metadata WHERE id=1"
-            ).fetchone()[0] == 9
+            ).fetchone()[0] == 10
 
     print(output)
 

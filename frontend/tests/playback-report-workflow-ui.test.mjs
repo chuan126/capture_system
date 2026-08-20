@@ -92,7 +92,7 @@ test("interactive clearance chart supports pan, zoom, reset and hover without mo
   assert.match(interactiveChart, /纵向放大曲线/);
   assert.match(interactiveChart, /纵向缩小曲线/);
   assert.match(interactiveChart, /纵轴已锁定/);
-  assert.match(interactiveChart, /适配当前窗口/);
+  assert.doesNotMatch(interactiveChart, /适配当前窗口|fitVerticalRange/);
   assert.match(interactiveChart, /pendingDragYRangeRef/);
   assert.match(interactiveChart, /outOfRange\.above/);
   assert.match(interactiveChart, /outOfRange\.below/);
@@ -211,6 +211,9 @@ test("report enables formal exports only for eligible recorded selected data", (
   assert.match(report, /downloadGeneratedFile/);
   assert.match(report, /disabled=\{!txtReady\|\|txtState==="generating"\}/);
   assert.match(report, /disabled=\{!pdfReady\|\|pdfState==="generating"\}/);
+  assert.match(report, /pdfExportableTasks/);
+  assert.match(report, /normalMinimumHeightM/);
+  assert.match(report, /低于高度阈值、超过高度上限/);
   assert.match(report, /异常中断、测试数据和无有效高度的任务不会进入正式 PDF/);
   assert.match(reportApi, /task_ids:taskIds/);
 });

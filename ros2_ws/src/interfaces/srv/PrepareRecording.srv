@@ -7,6 +7,7 @@ string travel_direction
 string lane_side
 float64 lidar_mount_height_m
 float64 clearance_threshold_m
+float64 clearance_upper_limit_m
 int64 requested_at_ns
 ---
 bool success

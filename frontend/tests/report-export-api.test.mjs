@@ -15,6 +15,8 @@ const taskPayload = {
   status: "completed",
   exportable: true,
   blocked_reason: null,
+  pdf_exportable: true,
+  pdf_blocked_reason: null,
   data_origin: "recorded",
   lane: "left",
   started_at: "2026-08-07T06:56:10Z",
@@ -24,6 +26,9 @@ const taskPayload = {
   valid_samples: 2990,
   invalid_samples: 10,
   minimum_height_m: 5.18,
+  normal_minimum_height_m: 5.20,
+  clearance_threshold_m: 5.19,
+  clearance_upper_limit_m: 5.80,
   entry_rtk: { timestamp_ms: 1, latitude_deg: 39.9, longitude_deg: 116.39, altitude_m: 48.2, fix_type: "RTK_FIXED", valid: true },
   exit_rtk: null,
 };
@@ -52,6 +57,9 @@ test("loads selected-task report exportability from FastAPI without ROS 2 browse
   assert.equal(preview.exportableTaskCount, 1);
   assert.equal(preview.tasks[0].displayId, "20260807_145601");
   assert.equal(preview.tasks[0].lane, "左车道");
+  assert.equal(preview.tasks[0].pdfExportable, true);
+  assert.equal(preview.tasks[0].normalMinimumHeightM, 5.20);
+  assert.equal(preview.tasks[0].clearanceUpperLimitM, 5.80);
 });
 
 test("creates TXT and selected-task PDF through FastAPI HTTP endpoints", async () => {

@@ -52,6 +52,7 @@ export type CollectionTask = {
   lane: CollectionTaskLaneDisplay | null;
   lidarMountHeightM: number | null;
   clearanceThresholdM: number | null;
+  clearanceUpperLimitM: number | null;
   createdAt: string;
   updatedAt: string;
   startRequestedAt: string | null;

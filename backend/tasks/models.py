@@ -61,6 +61,7 @@ class TaskCreateRequest(BaseModel):
     travel_direction: TaskTravelDirection | None = Field(default=None, description="计划行驶方向")
     lane_side: TaskLane | None = Field(default=None, description="计划车道位置")
     clearance_threshold_m: float = Field(default=0.0, ge=0.0, le=20.0, description="计划高度阈值")
+    clearance_upper_limit_m: float = Field(default=20.0, ge=0.0, le=20.0, description="计划高度上限")
 
     @field_validator("tunnel_code")
     @classmethod
@@ -71,6 +72,12 @@ class TaskCreateRequest(BaseModel):
     @classmethod
     def validate_tunnel_name(cls, value: str) -> str:
         return _normalize_required_text(value, "隧道名称", 256)
+
+    @model_validator(mode="after")
+    def validate_clearance_range(self) -> "TaskCreateRequest":
+        if self.clearance_threshold_m > self.clearance_upper_limit_m:
+            raise ValueError("高度阈值不能大于高度上限")
+        return self
 
 
 class TaskBatchCreateRequest(BaseModel):
@@ -110,6 +117,7 @@ class TaskStartRequest(BaseModel):
     lane: TaskLane | None = None
     lidar_mount_height_m: float = Field(ge=0.0, le=20.0)
     clearance_threshold_m: float = Field(ge=0.0, le=20.0)
+    clearance_upper_limit_m: float = Field(default=20.0, ge=0.0, le=20.0)
     expected_revision: int = Field(ge=0)
 
     @model_validator(mode="after")
@@ -119,6 +127,8 @@ class TaskStartRequest(BaseModel):
             raise ValueError("必须提供作业车道")
         if self.lane_side is not None and self.lane is not None and self.lane_side != self.lane:
             raise ValueError("lane 与 lane_side 不一致")
+        if self.clearance_threshold_m > self.clearance_upper_limit_m:
+            raise ValueError("高度阈值不能大于高度上限")
         return self
 
 
@@ -193,11 +203,13 @@ class TaskResponse(BaseModel):
     planned_travel_direction: TaskTravelDirection | None = None
     planned_lane_side: TaskLane | None = None
     planned_clearance_threshold_m: float | None = None
+    planned_clearance_upper_limit_m: float | None = None
     travel_direction: TaskTravelDirection | None = None
     lane_side: TaskLane | None = None
     lane: TaskLane | None = None
     lidar_mount_height_m: float | None = None
     clearance_threshold_m: float | None = None
+    clearance_upper_limit_m: float | None = None
     schema_version: int
     deleted_at: datetime | None
     delete_reason: str | None

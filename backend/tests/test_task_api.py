@@ -414,9 +414,10 @@ def test_task_api_returns_frozen_start_parameters_including_zero(tmp_path: Path)
     assert payload["lane"] == "left"
     assert payload["lidar_mount_height_m"] == 0.0
     assert payload["clearance_threshold_m"] == 0.0
+    assert payload["clearance_upper_limit_m"] == 20.0
 
 
-def test_task_creation_persists_independent_planned_lane_and_threshold(tmp_path: Path) -> None:
+def test_task_creation_persists_independent_planned_lane_and_height_range(tmp_path: Path) -> None:
     import sqlite3
 
     static_dir = tmp_path / "site"
@@ -432,6 +433,7 @@ def test_task_creation_persists_independent_planned_lane_and_threshold(tmp_path:
                 "travel_direction": "down",
                 "lane_side": "left",
                 "clearance_threshold_m": 4.6,
+                "clearance_upper_limit_m": 5.8,
             },
         )
 
@@ -440,15 +442,38 @@ def test_task_creation_persists_independent_planned_lane_and_threshold(tmp_path:
     assert payload["planned_travel_direction"] == "down"
     assert payload["planned_lane_side"] == "left"
     assert payload["planned_clearance_threshold_m"] == 4.6
+    assert payload["planned_clearance_upper_limit_m"] == 5.8
     assert payload["travel_direction"] is None
     assert payload["lane_side"] is None
     assert payload["lane"] is None
     assert payload["clearance_threshold_m"] is None
+    assert payload["clearance_upper_limit_m"] is None
 
     with sqlite3.connect(data_root / "capture.db") as connection:
         row = connection.execute(
-            "SELECT planned_travel_direction, planned_lane_side, planned_clearance_threshold_m "
+            "SELECT planned_travel_direction, planned_lane_side, planned_clearance_threshold_m, "
+            "planned_clearance_upper_limit_m "
             "FROM tasks WHERE task_id=?",
             (payload["task_id"],),
         ).fetchone()
-    assert row == ("down", "left", 4.6)
+    assert row == ("down", "left", 4.6, 5.8)
+
+
+def test_task_creation_rejects_height_threshold_above_upper_limit(tmp_path: Path) -> None:
+    static_dir = tmp_path / "site-range"
+    make_static_site(static_dir)
+    with TestClient(
+        create_app(static_dir, data_root=tmp_path / "runtime-range", start_ros_bridge=False)
+    ) as client:
+        response = client.post(
+            "/api/v1/tasks",
+            json={
+                "tunnel_code": "T-RANGE",
+                "tunnel_name": "高度区间校验测试",
+                "clearance_threshold_m": 5.0,
+                "clearance_upper_limit_m": 4.9,
+            },
+        )
+
+    assert response.status_code == 422
+    assert "高度阈值不能大于高度上限" in response.text

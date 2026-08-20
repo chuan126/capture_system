@@ -463,8 +463,11 @@ private:
       (!request.lane.empty() && request.lane != lane_side) ||
       !std::isfinite(request.lidar_mount_height_m) ||
       !std::isfinite(request.clearance_threshold_m) ||
+      !std::isfinite(request.clearance_upper_limit_m) ||
       request.lidar_mount_height_m < 0.0 || request.lidar_mount_height_m > 20.0 ||
-      request.clearance_threshold_m < 0.0 || request.clearance_threshold_m > 20.0)
+      request.clearance_threshold_m < 0.0 || request.clearance_threshold_m > 20.0 ||
+      request.clearance_upper_limit_m < 0.0 || request.clearance_upper_limit_m > 20.0 ||
+      request.clearance_threshold_m > request.clearance_upper_limit_m)
     {
       return reject_without_task("invalid_parameters", "开始参数无效");
     }
@@ -538,11 +541,14 @@ private:
         sqlite3_prepare_v2(
           database,
           "INSERT INTO task_parameters (task_id, lane, lidar_mount_height_m, "
-          "clearance_threshold_m, captured_at, parameter_schema_version, travel_direction, lane_side) "
-          "VALUES (?, ?, ?, ?, ?, 2, ?, ?) "
+          "clearance_threshold_m, clearance_upper_limit_m, captured_at, "
+          "parameter_schema_version, travel_direction, lane_side) "
+          "VALUES (?, ?, ?, ?, ?, ?, 3, ?, ?) "
           "ON CONFLICT(task_id) DO UPDATE SET lane=excluded.lane, "
           "lidar_mount_height_m=excluded.lidar_mount_height_m, "
-          "clearance_threshold_m=excluded.clearance_threshold_m, captured_at=excluded.captured_at, "
+          "clearance_threshold_m=excluded.clearance_threshold_m, "
+          "clearance_upper_limit_m=excluded.clearance_upper_limit_m, "
+          "captured_at=excluded.captured_at, "
           "parameter_schema_version=excluded.parameter_schema_version, "
           "travel_direction=excluded.travel_direction, lane_side=excluded.lane_side",
           -1, &parameters, nullptr), database, "准备任务参数写入失败");
@@ -550,11 +556,12 @@ private:
       bind_text(parameters, 2, lane_side);
       sqlite3_bind_double(parameters, 3, request.lidar_mount_height_m);
       sqlite3_bind_double(parameters, 4, request.clearance_threshold_m);
-      bind_text(parameters, 5, now_text);
+      sqlite3_bind_double(parameters, 5, request.clearance_upper_limit_m);
+      bind_text(parameters, 6, now_text);
       bind_optional_text(
-        parameters, 6, request.travel_direction.empty() ? std::nullopt :
+        parameters, 7, request.travel_direction.empty() ? std::nullopt :
         std::optional<std::string>(request.travel_direction));
-      bind_text(parameters, 7, lane_side);
+      bind_text(parameters, 8, lane_side);
       check_sqlite(sqlite3_step(parameters), database, "写入任务参数失败");
       sqlite3_finalize(parameters);
       insert_event(
@@ -954,6 +961,7 @@ private:
     recorder_request->lane_side = lane_side;
     recorder_request->lidar_mount_height_m = request.lidar_mount_height_m;
     recorder_request->clearance_threshold_m = request.clearance_threshold_m;
+    recorder_request->clearance_upper_limit_m = request.clearance_upper_limit_m;
     recorder_request->requested_at_ns = task.start_requested_ns > 0 ?
       task.start_requested_ns : system_now_ns();
     auto future = prepare_client_->async_send_request(recorder_request);
