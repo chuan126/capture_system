@@ -113,9 +113,9 @@ function TaskCreateDialog({ onClose, onCreate }: { onClose: () => void; onCreate
     if (!tunnelCode) { setError("请输入隧道编号"); return; }
     if (!tunnelName) { setError("请输入隧道名称"); return; }
     if (!draft.lane) { setError("请选择作业车道"); return; }
-    if (!Number.isFinite(clearanceThresholdM) || clearanceThresholdM < 0 || clearanceThresholdM > 20) { setError("请输入 0 至 20 m 的高度阈值"); return; }
-    if (!Number.isFinite(clearanceUpperLimitM) || clearanceUpperLimitM < 0 || clearanceUpperLimitM > 20) { setError("请输入 0 至 20 m 的高度上限"); return; }
-    if (clearanceThresholdM > clearanceUpperLimitM) { setError("高度阈值不能大于高度上限"); return; }
+    if (!Number.isFinite(clearanceThresholdM) || clearanceThresholdM < 0 || clearanceThresholdM > 20) { setError("请输入 0 至 20 m 的高度下限阈值"); return; }
+    if (!Number.isFinite(clearanceUpperLimitM) || clearanceUpperLimitM < 0 || clearanceUpperLimitM > 20) { setError("请输入 0 至 20 m 的高度上限阈值"); return; }
+    if (clearanceThresholdM > clearanceUpperLimitM) { setError("高度下限阈值不能大于高度上限阈值"); return; }
     setSubmitting(true);
     setError(null);
     try {
@@ -130,7 +130,7 @@ function TaskCreateDialog({ onClose, onCreate }: { onClose: () => void; onCreate
       setSubmitting(false);
     }
   };
-  return <div className="task-dialog-mask" role="dialog" aria-modal="true"><section className="task-dialog-panel"><header className="task-dialog-head"><div><h2>创建检测任务</h2><p>每次保存一个任务。保存成功后可继续创建下一项，任务编号由设备端按创建时间生成，例如 20260807_145601。</p></div><button type="button" disabled={submitting} onClick={onClose}>×</button></header><div className="task-dialog-single"><label><span>隧道编号</span><input value={draft.tunnelCode} onChange={event=>update("tunnelCode",event.target.value)} placeholder="例如 T-001" autoFocus/></label><label><span>隧道名称</span><input value={draft.tunnelName} onChange={event=>update("tunnelName",event.target.value)} placeholder="请输入隧道名称"/></label><label><span>作业车道</span><select value={draft.lane} onChange={event=>update("lane",event.target.value as CollectionTaskLane|"")}><option value="">请选择作业车道</option><option value="上行左车道">上行左车道</option><option value="上行右车道">上行右车道</option><option value="下行左车道">下行左车道</option><option value="下行右车道">下行右车道</option></select></label><div className="task-dialog-height-range"><label><span>高度阈值</span><div className="task-dialog-measure"><input type="number" min="0" max="20" step="0.01" value={draft.clearanceThreshold} onChange={event=>update("clearanceThreshold",event.target.value)}/><small>m</small></div></label><label><span>高度上限</span><div className="task-dialog-measure"><input type="number" min="0" max="20" step="0.01" value={draft.clearanceUpperLimit} onChange={event=>update("clearanceUpperLimit",event.target.value)}/><small>m</small></div></label></div></div>{savedDisplayId&&<p className="task-dialog-success" role="status">已保存任务 {savedDisplayId}，可以继续创建下一项。</p>}{error&&<p className="task-dialog-error" role="alert">{error}</p>}<footer className="task-dialog-actions"><button type="button" className="button" disabled={submitting} onClick={onClose}>取消</button><button type="button" className="button" disabled={submitting} onClick={()=>void submit(false)}>{submitting?"正在保存":"保存并关闭"}</button><button type="button" className="button button--primary" disabled={submitting} onClick={()=>void submit(true)}>{submitting?"正在保存":"保存并继续创建"}</button></footer></section></div>;
+  return <div className="task-dialog-mask" role="dialog" aria-modal="true"><section className="task-dialog-panel"><header className="task-dialog-head"><div><h2>创建检测任务</h2><p>每次保存一个任务。保存成功后可继续创建下一项，任务编号由设备端按创建时间生成，例如 20260807_145601。</p></div><button type="button" disabled={submitting} onClick={onClose}>×</button></header><div className="task-dialog-single"><label><span>隧道编号</span><input value={draft.tunnelCode} onChange={event=>update("tunnelCode",event.target.value)} placeholder="例如 T-001" autoFocus/></label><label><span>隧道名称</span><input value={draft.tunnelName} onChange={event=>update("tunnelName",event.target.value)} placeholder="请输入隧道名称"/></label><label><span>作业车道</span><select value={draft.lane} onChange={event=>update("lane",event.target.value as CollectionTaskLane|"")}><option value="">请选择作业车道</option><option value="上行左车道">上行左车道</option><option value="上行右车道">上行右车道</option><option value="下行左车道">下行左车道</option><option value="下行右车道">下行右车道</option></select></label><div className="task-dialog-height-range"><label><span>高度下限阈值</span><div className="task-dialog-measure"><input type="number" min="0" max="20" step="0.01" value={draft.clearanceThreshold} onChange={event=>update("clearanceThreshold",event.target.value)}/><small>m</small></div></label><label><span>高度上限阈值</span><div className="task-dialog-measure"><input type="number" min="0" max="20" step="0.01" value={draft.clearanceUpperLimit} onChange={event=>update("clearanceUpperLimit",event.target.value)}/><small>m</small></div></label></div></div>{savedDisplayId&&<p className="task-dialog-success" role="status">已保存任务 {savedDisplayId}，可以继续创建下一项。</p>}{error&&<p className="task-dialog-error" role="alert">{error}</p>}<footer className="task-dialog-actions"><button type="button" className="button" disabled={submitting} onClick={onClose}>取消</button><button type="button" className="button" disabled={submitting} onClick={()=>void submit(false)}>{submitting?"正在保存":"保存并关闭"}</button><button type="button" className="button button--primary" disabled={submitting} onClick={()=>void submit(true)}>{submitting?"正在保存":"保存并继续创建"}</button></footer></section></div>;
 }
 
 function TaskSwitchDialog({
@@ -692,9 +692,9 @@ function Dashboard({
   const clearanceAbnormalReason = displayedClearanceHeightM === null || !heightRangeValid
     ? null
     : displayedClearanceHeightM < parsedHeightThreshold
-      ? "低于阈值"
+      ? "低于下限阈值"
       : displayedClearanceHeightM > parsedHeightUpperLimit
-        ? "超过上限"
+        ? "超过上限阈值"
         : null;
   const clearanceAbnormal = clearanceAbnormalReason !== null;
 
@@ -1063,7 +1063,7 @@ function Dashboard({
                   </label>
 
                   <label className={heightRangeValid ? "" : "is-invalid"}>
-                    <span>高度阈值</span>
+                    <span>高度下限阈值</span>
                     <div>
                       <input
                         type="number"
@@ -1080,7 +1080,7 @@ function Dashboard({
                   </label>
 
                   <label className={heightRangeValid ? "" : "is-invalid"}>
-                    <span>高度上限</span>
+                    <span>高度上限阈值</span>
                     <div>
                       <input
                         type="number"
@@ -1096,7 +1096,7 @@ function Dashboard({
                     </div>
                   </label>
                 </div>
-                <small className="task-parameter-range-hint">正常区间：高度阈值 ≤ 净空高度 ≤ 高度上限</small>
+                <small className="task-parameter-range-hint">正常区间：高度下限阈值 ≤ 净空高度 ≤ 高度上限阈值</small>
               </section>
 
               <section className={`task-current-card task-current-card--${currentTask ? taskRuntimeTone(currentTask) : "idle"}`} aria-label="当前任务">
@@ -1194,7 +1194,7 @@ function Dashboard({
                   title={!currentTask
                     ? "请先创建任务"
                     : !heightRangeValid
-                      ? "请确认高度阈值不大于高度上限"
+                      ? "请确认高度下限阈值不大于高度上限阈值"
                       : !mountHeightValid
                         ? "请输入有效的雷达安装高度"
                         : !controlAvailable

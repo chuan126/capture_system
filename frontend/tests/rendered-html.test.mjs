@@ -37,7 +37,8 @@ test("renders the tunnel clearance terminal shell", async () => {
   assert.match(html, /俯仰/);
   assert.match(html, /任务控制/);
   assert.match(html, /创建任务/);
-  assert.match(html, /高度阈值/);
+  assert.match(html, /高度下限阈值/);
+  assert.match(html, /高度上限阈值/);
   assert.match(html, /雷达安装高度/);
   assert.match(html, /作业车道/);
   assert.match(html, /当前任务/);

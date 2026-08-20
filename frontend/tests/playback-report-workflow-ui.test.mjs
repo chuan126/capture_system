@@ -213,7 +213,7 @@ test("report enables formal exports only for eligible recorded selected data", (
   assert.match(report, /disabled=\{!pdfReady\|\|pdfState==="generating"\}/);
   assert.match(report, /pdfExportableTasks/);
   assert.match(report, /normalMinimumHeightM/);
-  assert.match(report, /低于高度阈值、超过高度上限/);
+  assert.match(report, /低于高度下限阈值、超过高度上限阈值/);
   assert.match(report, /异常中断、测试数据和无有效高度的任务不会进入正式 PDF/);
   assert.match(reportApi, /task_ids:taskIds/);
 });

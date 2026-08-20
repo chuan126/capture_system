@@ -28,7 +28,7 @@ interfaces/
 `TaskStatus`发布持久任务状态、执行阶段、状态版本、RTK端点状态、记录路径和错误。
 QoS由`task_manager`设置为reliable、transient local，使FastAPI重连后可获得最近状态。
 
-`StartTask`冻结实际行驶方向、左右车道、雷达安装高度和高度阈值；兼容字段 `lane` 继续承载左右车道。`TaskCommand`执行暂停、继续和停止。
+`StartTask`冻结实际行驶方向、左右车道、雷达安装高度、高度下限阈值和高度上限阈值；兼容字段 `lane` 继续承载左右车道。`TaskCommand`执行暂停、继续和停止。
 `PrepareRecording`把冻结后的实际行驶方向、左右车道和其他正式参数交给 `data_recorder`；`RecordingCommand`用于暂停、继续和停止记录。两者仅用于 `task_manager` 与 `data_recorder` 之间的内部记录控制。
 
 浏览器开始请求先由 FastAPI 根据系统诊断检查雷达原始点云和 RTK 上线状态，检查通过后才调用 `StartTask`。入口或出口 RTK 缺失、无效或超时时，Service 返回 `unconfirmed`，已经进入的任务流程继续执行。

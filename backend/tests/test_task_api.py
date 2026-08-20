@@ -476,4 +476,4 @@ def test_task_creation_rejects_height_threshold_above_upper_limit(tmp_path: Path
         )
 
     assert response.status_code == 422
-    assert "高度阈值不能大于高度上限" in response.text
+    assert "高度下限阈值不能大于高度上限阈值" in response.text

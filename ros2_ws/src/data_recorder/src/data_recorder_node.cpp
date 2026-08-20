@@ -1235,8 +1235,8 @@ private:
     bind_text(statement, 8, config_version_);
     bind_text(statement, 9, software_version_);
     check_sqlite(sqlite3_bind_double(statement, 10, lidar_mount_height_m_), database_, "绑定安装高度失败");
-    check_sqlite(sqlite3_bind_double(statement, 11, clearance_threshold_m_), database_, "绑定高度阈值失败");
-    check_sqlite(sqlite3_bind_double(statement, 12, clearance_upper_limit_m_), database_, "绑定高度上限失败");
+    check_sqlite(sqlite3_bind_double(statement, 11, clearance_threshold_m_), database_, "绑定高度下限阈值失败");
+    check_sqlite(sqlite3_bind_double(statement, 12, clearance_upper_limit_m_), database_, "绑定高度上限阈值失败");
     check_sqlite(sqlite3_step(statement), database_, "写入任务元数据失败");
     sqlite3_finalize(statement);
   }

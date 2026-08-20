@@ -112,11 +112,11 @@ test("task card exposes only one create-task entry", () => {
 
 test("task card shows a two-by-two parameter grid with the inclusive height range", () => {
   assert.match(taskCard, /task-parameter-strip/);
-  assert.match(taskCard, />高度阈值</);
+  assert.match(taskCard, />高度下限阈值</);
   assert.match(taskCard, /value=\{heightThreshold\}/);
-  assert.match(taskCard, />高度上限</);
+  assert.match(taskCard, />高度上限阈值</);
   assert.match(taskCard, /value=\{heightUpperLimit\}/);
-  assert.match(taskCard, /正常区间：高度阈值 ≤ 净空高度 ≤ 高度上限/);
+  assert.match(taskCard, /正常区间：高度下限阈值 ≤ 净空高度 ≤ 高度上限阈值/);
   assert.match(taskCard, />雷达安装高度</);
   assert.match(taskCard, /value=\{mountHeight\}/);
   assert.match(taskCard, />作业车道</);
@@ -141,8 +141,8 @@ test("task creation stores independent planned lane and height range", () => {
   assert.match(taskDialog, />隧道编号</);
   assert.match(taskDialog, />隧道名称</);
   assert.match(taskDialog, />作业车道</);
-  assert.match(taskDialog, />高度阈值</);
-  assert.match(taskDialog, />高度上限</);
+  assert.match(taskDialog, />高度下限阈值</);
+  assert.match(taskDialog, />高度上限阈值</);
   for (const lane of ["上行左车道", "上行右车道", "下行左车道", "下行右车道"]) {
     assert.match(taskDialog, new RegExp(`option value="${lane}"`));
   }
@@ -233,8 +233,8 @@ test("current clearance turns red outside the inclusive configured height range"
   assert.match(page, /const clearanceAbnormalReason = displayedClearanceHeightM === null/);
   assert.match(page, /displayedClearanceHeightM < parsedHeightThreshold/);
   assert.match(page, /displayedClearanceHeightM > parsedHeightUpperLimit/);
-  assert.match(page, /低于阈值/);
-  assert.match(page, /超过上限/);
+  assert.match(page, /低于下限阈值/);
+  assert.match(page, /超过上限阈值/);
   assert.match(page, /health-kpi-card--primary\$\{clearanceAbnormal \? " health-kpi-card--alert"/);
   assert.doesNotMatch(page, /latestAbnormalHeightM|health-kpi-card--anomaly/);
   assert.match(css, /\.health-kpi-grid[\s\S]*grid-template-columns:\s*repeat\(3/);

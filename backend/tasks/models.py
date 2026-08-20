@@ -60,8 +60,8 @@ class TaskCreateRequest(BaseModel):
     tunnel_name: str = Field(description="隧道名称")
     travel_direction: TaskTravelDirection | None = Field(default=None, description="计划行驶方向")
     lane_side: TaskLane | None = Field(default=None, description="计划车道位置")
-    clearance_threshold_m: float = Field(default=0.0, ge=0.0, le=20.0, description="计划高度阈值")
-    clearance_upper_limit_m: float = Field(default=20.0, ge=0.0, le=20.0, description="计划高度上限")
+    clearance_threshold_m: float = Field(default=0.0, ge=0.0, le=20.0, description="计划高度下限阈值")
+    clearance_upper_limit_m: float = Field(default=20.0, ge=0.0, le=20.0, description="计划高度上限阈值")
 
     @field_validator("tunnel_code")
     @classmethod
@@ -76,7 +76,7 @@ class TaskCreateRequest(BaseModel):
     @model_validator(mode="after")
     def validate_clearance_range(self) -> "TaskCreateRequest":
         if self.clearance_threshold_m > self.clearance_upper_limit_m:
-            raise ValueError("高度阈值不能大于高度上限")
+            raise ValueError("高度下限阈值不能大于高度上限阈值")
         return self
 
 
@@ -128,7 +128,7 @@ class TaskStartRequest(BaseModel):
         if self.lane_side is not None and self.lane is not None and self.lane_side != self.lane:
             raise ValueError("lane 与 lane_side 不一致")
         if self.clearance_threshold_m > self.clearance_upper_limit_m:
-            raise ValueError("高度阈值不能大于高度上限")
+            raise ValueError("高度下限阈值不能大于高度上限阈值")
         return self
 
 
