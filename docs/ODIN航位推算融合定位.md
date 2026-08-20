@@ -1,6 +1,6 @@
 # ODIN航位推算融合定位
 
-核对日期：2026-08-10
+核对日期：2026-08-21
 
 本文说明 `localization/dead_reckoning_node` 的数学模型、接口和实车验证要点。该功能用于
 RTK失锁或RTK状态无效后，以最后可靠RTK位置为WGS84锚点，使用ODIN1水平里程计实时输出融合经纬高。
@@ -72,12 +72,18 @@ psi_enu = wrap(pi / 2 - course_rtk)
 
 `track_degrees=0` 是合法正北航迹角，不作为无效值处理。
 
-RTK航迹角不参与正式 `delta_yaw`。正式链路在每个RTK时间戳执行：
+RTK航迹角不参与正式 `delta_yaw`。RTK消息时间戳来自ROS系统时钟，而ODIN消息时间戳是
+设备上电时间，两者不能直接比较。节点用本机单调时钟记录两类消息的接收时刻，ODIN缓存仍
+保留设备时间戳及适配后的400 Hz样本间隔。每个有效RTK点按最近ODIN样本建立时钟映射：
 
 ```text
-t_sync = t_rtk_header + rtk_time_offset_s
+t_sync_odin = t_odin_reference
+              + (t_rtk_received - t_odin_reference_received)
+              + rtk_time_offset_s
 p_odin(t_sync) = (1-alpha) * p_odin(t0) + alpha * p_odin(t1)
 ```
+
+映射后的 `t_sync_odin` 才用于ODIN缓存插值；RTK接收时刻用于拟合样本排序和数据新鲜度。
 
 ## 航向对齐
 
@@ -186,32 +192,6 @@ position_error = norm(position_rtk - position_dr)
 
 原始RTK topic语义不变，记录器将原始RTK和融合定位分表保存。
 
-## 室内RTK模拟测试
-
-节点只提供三个仿真配置入口。`simulation_test_mode=0` 默认关闭仿真并使用真实RTK，改为 `1`
-并重启后，RTK位置由A到B的模拟轨迹替代，ODIN位置、四元数和400 Hz时间戳仍来自真实设备：
-
-```text
-simulation_test_mode: 1
-simulation_rtk_point_a: [24.5738888889, 118.0894444444, 20.0]
-simulation_rtk_point_b: [24.5738912, 118.0894349, 20.0]
-```
-
-仿真模式完全忽略真实RTK是否有效：第一条有效ODIN位置强制对应A点，之后按实际ODIN水平位移
-与A-B距离的比例生成10 Hz模拟LLH，移动约1 m时强制对应B点。模拟Fix使用该ODIN样本自身的
-时间戳并标记为有效，随即以同一时间戳从ODIN缓存取得同一帧进入正式刚体拟合器，不再用ROS
-墙钟等待未来ODIN样本。仿真启用时只在节点内部将采样间距自动调整为A-B距离的1/20、正式
-有效基线调整为A-B距离的90%，并关闭短轨迹粗差剔除；YAML中的实际长轨迹参数不会被修改。
-模拟状态不提供伪造航迹角，航迹角不参与方位拟合；达到B后保持B并打印 `SIMULATION REACHED POINT B`。
-默认A-B约1 m，实际ODIN移动约0.9 m且A/B两个端点样本质量合格后，方位修正生效。
-上位机融合栏不再要求物理RTK设备有效：收到第一帧ODIN后就显示A点坐标。方位修正生效后，融合栏
-方位、TXT载体方位和地图小车方位都来自修正后的 `LocalizationStatus.heading_deg`。
-
-人工步骤：设置模式为1并重启；静止确认进度约0%；沿近似直线移动到约1 m；观察
-`simulation_progress_percent`、`heading_fit_sample_count`、`heading_fit_baseline_m`、
-`heading_fit_delta_yaw_deg`、`delta_yaw_deg`、`heading_fit_valid`、`heading_error_after_deg`；
-完成后恢复模式0并重启。
-
 ## 目标机构建
 
 Ubuntu 22.04 / ROS 2 Humble：
@@ -234,7 +214,8 @@ ros2 launch bringup task_control.launch.py data_root:=/home/cat/Project/capture_
 
 ## 实车验证步骤
 
-1. 在开阔路段确认 `/capture/rtk/fix`、`/capture/rtk/status` 和 `/capture/odometry/high_rate` 时间戳连续。
+1. 在开阔路段确认 `/capture/rtk/fix`、`/capture/rtk/status` 和 `/capture/odometry/high_rate` 持续发布，
+   `localization_rtk_age_s` 与 `localization_odometry_age_s` 保持在超时门限内。
 2. 以稳定车速行驶至少 `heading_fit_valid_baseline_m`，观察 `heading_fit_valid` 是否变为true。
 3. 若开启尺度标定，行驶至少 `scale_min_baseline_m`，确认 `scale_valid`、残差和尺度范围。
 4. 进入RTK遮挡路段，确认模式从RTK切换到 `MODE_DEAD_RECKONING`。

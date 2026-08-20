@@ -38,7 +38,9 @@ test("system overview contains clearance and raw RTK position and removes old su
   assert.doesNotMatch(page, />预留指标二|>预留指标一</);
   assert.match(page, /displayedClearanceHeightM < parsedHeightThreshold/);
   assert.match(css, /health-kpi-card--alert[\s\S]*#c53030/);
-  assert.match(css, /health-kpi-grid[\s\S]*grid-template-columns:\s*minmax\(190px, \.9fr\)/);
+  assert.match(css, /health-kpi-grid[\s\S]*grid-template-columns:\s*minmax\(160px, \.65fr\)/);
+  assert.match(css, /health-kpi-rtk-body[\s\S]*grid-template-columns:\s*minmax\(0, 1fr\) 96px/);
+  assert.match(css, /health-kpi-rtk-coordinate[\s\S]*minmax\(88px, \.75fr\)/);
   assert.match(css, /health-kpi-card--rtk[\s\S]*grid-column:\s*auto/);
   assert.match(page, /formatMetric\(rtkSnapshot\?\.altitude, 2\)/);
 });

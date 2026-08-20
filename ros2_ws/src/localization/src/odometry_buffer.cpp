@@ -24,6 +24,27 @@ std::optional<std::int64_t> applyRtkTimeOffsetNs(
   return static_cast<std::int64_t>(std::llround(synchronized_stamp));
 }
 
+std::optional<std::int64_t> mapReceiptTimeToSensorTimeNs(
+  const std::int64_t target_received_ns, const std::int64_t reference_received_ns,
+  const std::int64_t reference_sensor_stamp_ns, const double sensor_time_offset_s) noexcept
+{
+  if (target_received_ns <= 0 || reference_received_ns <= 0 ||
+    reference_sensor_stamp_ns <= 0 || !std::isfinite(sensor_time_offset_s))
+  {
+    return std::nullopt;
+  }
+  const long double mapped_stamp = static_cast<long double>(reference_sensor_stamp_ns) +
+    static_cast<long double>(target_received_ns) -
+    static_cast<long double>(reference_received_ns) +
+    static_cast<long double>(sensor_time_offset_s) * 1.0e9L;
+  if (mapped_stamp <= 0.0L ||
+    mapped_stamp > static_cast<long double>(std::numeric_limits<std::int64_t>::max()))
+  {
+    return std::nullopt;
+  }
+  return static_cast<std::int64_t>(std::llround(mapped_stamp));
+}
+
 OdometryBuffer::OdometryBuffer(
   const std::int64_t cache_duration_ns, const std::int64_t max_interpolation_gap_ns,
   const std::size_t max_samples)

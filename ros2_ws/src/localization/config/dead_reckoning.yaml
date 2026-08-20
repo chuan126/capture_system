@@ -10,13 +10,6 @@ dead_reckoning_node:
     # IMU角速度超过该时间未更新即不用于短时后备，单位s。
     imu_timeout_s: 0.1
 
-    # 0=关闭仿真并正常使用真实RTK；1=使用真实ODIN和A→B模拟RTK测试。修改后需重启节点。
-    simulation_test_mode: 0
-    # [latitude_deg, longitude_deg, altitude_m]；默认北纬24°34′26″、东经118°05′22″、20m。
-    simulation_rtk_point_a: [24.5738888889, 118.0894444444, 20.0]
-    # [latitude_deg, longitude_deg, altitude_m]；A-B水平距离约1m。
-    simulation_rtk_point_b: [24.5738912, 118.0894349, 20.0]
-
     # 车辆前进方向在ODIN机体系中的单位向量；当前镜头朝天安装时车辆前向对应机体系-Z轴。
     # 若实车直行诊断持续提示方向相反，只修改此YAML为[0.0, 0.0, 1.0]，程序不会自动翻转。
     vehicle_forward_axis_body: [0.0, 0.0, -1.0]
@@ -42,7 +35,8 @@ dead_reckoning_node:
     # ODIN缓存最大样本数，防止无界内存增长。
     odometry_cache_max_samples: 5000
 
-    # RTK消息时间到同步查询时间的补偿：t_sync=t_rtk_header+offset，单位s。
+    # RTK接收时刻映射到ODIN设备时间域后的同步补偿，单位s。
+    # 正值向更新的ODIN样本查询，负值向更早的ODIN样本查询。
     rtk_time_offset_s: 0.0
     # RTK/ODIN长轨迹二维刚体拟合：按ODIN水平位移稀疏采样，单位m。
     heading_fit_sample_spacing_m: 5.0

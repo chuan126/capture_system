@@ -84,8 +84,6 @@ def test_maps_localization_status_as_fused_position_fields() -> None:
         heading_fit_window_span_m=105.0,
         heading_error_before_deg=12.6,
         heading_error_after_deg=0.1,
-        simulation_test_mode=1,
-        simulation_progress_percent=0.0,
         distance_from_anchor_m=120.0,
         dr_duration_s=7.5,
         rtk_age_s=2.0,
@@ -110,5 +108,4 @@ def test_maps_localization_status_as_fused_position_fields() -> None:
     assert snapshot.localization_heading_fit_sample_count == 21
     assert snapshot.localization_heading_fit_valid is True
     assert snapshot.localization_heading_error_after_deg == 0.1
-    assert snapshot.localization_simulation_test_mode == 1
     assert snapshot.localization_invalid_reason == "NONE"

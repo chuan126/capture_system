@@ -83,8 +83,6 @@
   "localization_heading_fit_window_span_m": 105.0,
   "localization_heading_error_before_deg": 12.6,
   "localization_heading_error_after_deg": 0.1,
-  "localization_simulation_test_mode": 1,
-  "localization_simulation_progress_percent": 0.0,
   "localization_distance_from_anchor_m": 0.0,
   "localization_dr_duration_s": 0.0,
   "localization_rtk_age_s": 0.02,

@@ -14,6 +14,10 @@ namespace localization
 std::optional<std::int64_t> applyRtkTimeOffsetNs(
   std::int64_t rtk_stamp_ns, double rtk_time_offset_s) noexcept;
 
+std::optional<std::int64_t> mapReceiptTimeToSensorTimeNs(
+  std::int64_t target_received_ns, std::int64_t reference_received_ns,
+  std::int64_t reference_sensor_stamp_ns, double sensor_time_offset_s) noexcept;
+
 struct OdomSample
 {
   std::int64_t stamp_ns{0};

@@ -61,8 +61,6 @@ export type RtkSnapshot = {
   localization_heading_fit_window_span_m: number | null;
   localization_heading_error_before_deg: number | null;
   localization_heading_error_after_deg: number | null;
-  localization_simulation_test_mode: number | null;
-  localization_simulation_progress_percent: number | null;
   localization_distance_from_anchor_m: number | null;
   localization_dr_duration_s: number | null;
   localization_rtk_age_s: number | null;
@@ -159,8 +157,6 @@ export function parseRtkText(text: string): RtkTextMessage {
     "localization_heading_fit_window_span_m",
     "localization_heading_error_before_deg",
     "localization_heading_error_after_deg",
-    "localization_simulation_test_mode",
-    "localization_simulation_progress_percent",
     "localization_distance_from_anchor_m",
     "localization_dr_duration_s",
     "localization_rtk_age_s",

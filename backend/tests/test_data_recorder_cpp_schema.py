@@ -113,15 +113,13 @@ def test_vehicle_attitude_and_direction_use_expected_sources_without_position_si
     assert "fitHeadingRigid2d" in (
         project_root / "ros2_ws/src/localization/src/heading_rigid_alignment.cpp"
     ).read_text(encoding="utf-8")
-    assert "latest_rtk_status_.rmc_validity = static_cast<std::uint8_t>('A')" in localization_node
-    assert "generateSimulatedRtk(sample, received_ns)" in localization_node
-    assert "updateCalibrationFromLatestRtk(received_ns)" in localization_node
-    assert "const std::int64_t simulation_stamp_ns = odin_sample.stamp_ns" in localization_node
-    assert "latest_fix_ = latest_real_fix_" in localization_node
-    assert "latest_rtk_status_ = latest_real_rtk_status_" in localization_node
-    assert "rtk_path_simulation_.active() ? 0.0 : rtk_time_offset_s_" in localization_node
-    assert "pending_simulation_stamp_ns_" not in localization_node
-    assert "requestSimulatedRtk" not in localization_node
+    assert "steadyNowNanoseconds()" in localization_node
+    assert "latest_fix_.stamp_ns = steadyNowNanoseconds()" in localization_node
+    assert "latest_rtk_status_.stamp_ns = steadyNowNanoseconds()" in localization_node
+    assert "sample.stamp_ns = source_stamp_ns" in localization_node
+    assert "mapReceiptTimeToSensorTimeNs(" in localization_node
+    assert "latest_odom_received_ns_ = received_ns" in localization_node
+    assert "heading_estimate_available_" in localization_node
 
     rtk_heading = re.search(
         r"std::uint8_t currentHeadingSourceForRtk\(.*?\n  std::optional<Output>",
@@ -129,7 +127,7 @@ def test_vehicle_attitude_and_direction_use_expected_sources_without_position_si
         re.DOTALL,
     )
     assert rtk_heading is not None
-    assert "heading_alignment_valid_" in rtk_heading.group(0)
+    assert "heading_estimate_available_" in rtk_heading.group(0)
     assert "latest_rtk_status_.track_degrees" in rtk_heading.group(0)
     assert "HEADING_RTK_TRACK" in rtk_heading.group(0)
 

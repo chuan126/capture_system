@@ -63,10 +63,6 @@ float64 heading_fit_window_span_m
 float64 heading_error_before_deg
 float64 heading_error_after_deg
 
-# 0=关闭仿真并使用真实RTK，1=启用仿真测试；仿真进度单位%。
-uint8 simulation_test_mode
-float64 simulation_progress_percent
-
 float64 distance_from_anchor_m
 float64 dr_duration_s
 

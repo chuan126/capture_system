@@ -70,8 +70,6 @@ class RtkSnapshot:
     localization_heading_fit_window_span_m: float | None = None
     localization_heading_error_before_deg: float | None = None
     localization_heading_error_after_deg: float | None = None
-    localization_simulation_test_mode: int | None = None
-    localization_simulation_progress_percent: float | None = None
     localization_distance_from_anchor_m: float | None = None
     localization_dr_duration_s: float | None = None
     localization_rtk_age_s: float | None = None
@@ -173,10 +171,6 @@ def with_localization_status(snapshot: RtkSnapshot, message: object) -> RtkSnaps
         ),
         localization_heading_error_after_deg=float(
             getattr(message, "heading_error_after_deg")
-        ),
-        localization_simulation_test_mode=int(getattr(message, "simulation_test_mode")),
-        localization_simulation_progress_percent=float(
-            getattr(message, "simulation_progress_percent")
         ),
         localization_distance_from_anchor_m=float(
             getattr(message, "distance_from_anchor_m")

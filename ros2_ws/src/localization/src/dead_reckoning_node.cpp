@@ -3,7 +3,6 @@
 #include "localization/heading_alignment.hpp"
 #include "localization/heading_rigid_alignment.hpp"
 #include "localization/odometry_buffer.hpp"
-#include "localization/rtk_path_simulation.hpp"
 #include "localization/similarity_alignment.hpp"
 #include "localization/attitude_transform.hpp"
 
@@ -75,6 +74,12 @@ double finiteOrZero(const double value) noexcept
   return std::isfinite(value) ? value : 0.0;
 }
 
+std::int64_t steadyNowNanoseconds() noexcept
+{
+  return std::chrono::duration_cast<std::chrono::nanoseconds>(
+    std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
 }  // namespace
 
 class DeadReckoningNode final : public rclcpp::Node
@@ -84,23 +89,13 @@ public:
   : Node("dead_reckoning_node"),
     heading_fit_options_(declareHeadingFitOptions()),
     heading_fit_estimator_(heading_fit_options_),
-    simulation_options_(declareSimulationOptions()),
-    rtk_path_simulation_(simulation_options_),
     odom_buffer_(
       secondsToNs(declare_parameter<double>("odometry_cache_duration_s", 60.0)),
       secondsToNs(declare_parameter<double>("odometry_interpolation_max_gap_s", 0.02)),
       static_cast<std::size_t>(declare_parameter<int>("odometry_cache_max_samples", 5000)))
   {
     declareRemainingParameters();
-    if (rtk_path_simulation_.active()) {
-      heading_fit_options_ = simulationHeadingFitOptions(
-        heading_fit_options_, rtk_path_simulation_.horizontalDistanceM());
-      heading_fit_estimator_ = HeadingRigidAlignmentEstimator(heading_fit_options_);
-    }
     validateParameters();
-    if (rtk_path_simulation_.active()) {
-      rtk_origin_llh_ = rtk_path_simulation_.pointA();
-    }
     scale_status_ = scale_calibration_mode_ == 0 ?
       interfaces::msg::LocalizationStatus::SCALE_DISABLED :
       interfaces::msg::LocalizationStatus::SCALE_COLLECTING;
@@ -147,27 +142,6 @@ public:
       vehicle_attitude_mount_rotation_bm_[4], vehicle_attitude_mount_rotation_bm_[5],
       vehicle_attitude_mount_rotation_bm_[6], vehicle_attitude_mount_rotation_bm_[7],
       vehicle_attitude_mount_rotation_bm_[8]);
-    if (rtk_path_simulation_.active()) {
-      RCLCPP_INFO(
-        get_logger(),
-        "Simulation RTK A=[%.10f, %.10f, %.3f], B=[%.10f, %.10f, %.3f], "
-        "A-B horizontal distance=%.3f m, geographic direction=%.3f deg",
-        rtk_path_simulation_.pointA().latitude_deg,
-        rtk_path_simulation_.pointA().longitude_deg,
-        rtk_path_simulation_.pointA().altitude_m,
-        rtk_path_simulation_.pointB().latitude_deg,
-        rtk_path_simulation_.pointB().longitude_deg,
-        rtk_path_simulation_.pointB().altitude_m,
-        rtk_path_simulation_.horizontalDistanceM(),
-        rtk_path_simulation_.geographicDirectionDeg());
-      RCLCPP_INFO(
-        get_logger(),
-        "Simulation heading fit: spacing=%.3f m, minimum=%.3f m, valid=%.3f m, "
-        "target=%.3f m, minimum samples=%zu",
-        heading_fit_options_.sample_spacing_m, heading_fit_options_.min_baseline_m,
-        heading_fit_options_.valid_baseline_m, heading_fit_options_.target_baseline_m,
-        heading_fit_options_.min_samples);
-    }
   }
 
 private:
@@ -284,22 +258,6 @@ private:
     return options;
   }
 
-  RtkPathSimulationOptions declareSimulationOptions()
-  {
-    RtkPathSimulationOptions options;
-    options.test_mode = declare_parameter<int>("simulation_test_mode", 0);
-    const auto point_a = declare_parameter<std::vector<double>>(
-      "simulation_rtk_point_a", std::vector<double>{24.5738888889, 118.0894444444, 20.0});
-    const auto point_b = declare_parameter<std::vector<double>>(
-      "simulation_rtk_point_b", std::vector<double>{24.5738912, 118.0894349, 20.0});
-    if (point_a.size() != 3U || point_b.size() != 3U) {
-      throw std::invalid_argument("simulation_rtk_point_a/B必须各包含纬度、经度、高度3个数");
-    }
-    options.point_a = Llh{point_a[0], point_a[1], point_a[2]};
-    options.point_b = Llh{point_b[0], point_b[1], point_b[2]};
-    return options;
-  }
-
   void declareRemainingParameters()
   {
     output_rate_hz_ = declare_parameter<double>("output_rate_hz", 10.0);
@@ -396,10 +354,6 @@ private:
     if (scale_target_baseline_m_ < scale_min_baseline_m_) {
       throw std::invalid_argument("scale_target_baseline_m不能小于scale_min_baseline_m");
     }
-    if (!rtk_path_simulation_.valid()) {
-      throw std::invalid_argument(
-              "simulation_test_mode只能为0或1，A/B必须为有效且水平距离非零的经纬高");
-    }
     if (!std::isfinite(rtk_time_offset_s_) || std::abs(rtk_time_offset_s_) > 10.0) {
       throw std::invalid_argument("rtk_time_offset_s必须为[-10,10]内有限数");
     }
@@ -468,82 +422,29 @@ private:
 
   void onRtkFix(sensor_msgs::msg::NavSatFix::SharedPtr message)
   {
-    const std::int64_t stamp_ns = toNanoseconds(message->header.stamp);
-    if (stamp_ns <= 0) {
-      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000, "收到无效RTK fix时间戳");
-      return;
-    }
-    latest_real_fix_.available = true;
-    latest_real_fix_.stamp_ns = stamp_ns;
-    latest_real_fix_.status = message->status.status;
-    latest_real_fix_.llh = Llh{message->latitude, message->longitude, message->altitude};
-    if (!rtk_path_simulation_.active()) {
-      latest_fix_ = latest_real_fix_;
-    }
+    latest_fix_.available = true;
+    latest_fix_.stamp_ns = steadyNowNanoseconds();
+    latest_fix_.status = message->status.status;
+    latest_fix_.llh = Llh{message->latitude, message->longitude, message->altitude};
   }
 
   void onRtkStatus(interfaces::msg::RtkStatus::SharedPtr message)
   {
-    const std::int64_t stamp_ns = toNanoseconds(message->header.stamp);
-    if (stamp_ns <= 0) {
-      return;
-    }
-    latest_real_rtk_status_.available = true;
-    latest_real_rtk_status_.stamp_ns = stamp_ns;
-    latest_real_rtk_status_.rmc_validity = message->rmc_validity;
-    latest_real_rtk_status_.gps_state = message->gps_state;
-    latest_real_rtk_status_.speed_mps = static_cast<double>(message->speed_knots) * kKnotsToMps;
-    latest_real_rtk_status_.track_degrees = message->track_degrees;
-    if (!rtk_path_simulation_.active()) {
-      latest_rtk_status_ = latest_real_rtk_status_;
-    }
-  }
-
-  bool simulatedRtkDue(const std::int64_t received_ns) const noexcept
-  {
-    constexpr std::int64_t kSimulationPeriodNs = 100'000'000LL;
-    return last_simulated_rtk_received_ns_ <= 0 ||
-           received_ns - last_simulated_rtk_received_ns_ >= kSimulationPeriodNs;
-  }
-
-  void generateSimulatedRtk(const OdomSample & odin_sample, const std::int64_t received_ns)
-  {
-    if (!simulatedRtkDue(received_ns)) {
-      return;
-    }
-    const auto simulated = rtk_path_simulation_.generate(odin_sample.position_m);
-    if (!simulated.has_value()) {
-      return;
-    }
-    const std::int64_t simulation_stamp_ns = odin_sample.stamp_ns;
-    last_simulated_rtk_received_ns_ = received_ns;
-    latest_fix_.available = true;
-    latest_fix_.stamp_ns = simulation_stamp_ns;
-    latest_fix_.status = sensor_msgs::msg::NavSatStatus::STATUS_FIX;
-    latest_fix_.llh = simulated->llh;
-
     latest_rtk_status_.available = true;
-    latest_rtk_status_.stamp_ns = simulation_stamp_ns;
-    latest_rtk_status_.rmc_validity = static_cast<std::uint8_t>('A');
-    latest_rtk_status_.gps_state = 4U;
-    latest_rtk_status_.speed_mps = 0.0;
-    latest_rtk_status_.track_degrees = 0.0;
-    simulation_progress_ratio_ = simulated->progress_ratio;
-    updateCalibrationFromLatestRtk(received_ns);
-    if (simulated->reached_point_b && !simulation_reached_logged_) {
-      RCLCPP_INFO(get_logger(), "SIMULATION REACHED POINT B");
-      simulation_reached_logged_ = true;
-    }
+    latest_rtk_status_.stamp_ns = steadyNowNanoseconds();
+    latest_rtk_status_.rmc_validity = message->rmc_validity;
+    latest_rtk_status_.gps_state = message->gps_state;
+    latest_rtk_status_.speed_mps = static_cast<double>(message->speed_knots) * kKnotsToMps;
+    latest_rtk_status_.track_degrees = message->track_degrees;
   }
 
   void onOdometry(nav_msgs::msg::Odometry::SharedPtr message)
   {
-    const std::int64_t received_ns = now().nanoseconds();
+    const std::int64_t received_ns = steadyNowNanoseconds();
+    const std::int64_t source_stamp_ns = toNanoseconds(message->header.stamp);
     OdomSample sample;
-    sample.stamp_ns = toNanoseconds(message->header.stamp);
-    if (sample.stamp_ns <= 0) {
-      sample.stamp_ns = received_ns;
-    }
+    // 保留ODIN设备时间，以免适配节点批量发布时丢失400 Hz样本间隔。
+    sample.stamp_ns = source_stamp_ns;
     sample.position_m = Vector3d{
       message->pose.pose.position.x,
       message->pose.pose.position.y,
@@ -558,18 +459,11 @@ private:
         get_logger(), *get_clock(), 5000, "丢弃时间戳乱序或非有限的ODIN里程计样本");
       return;
     }
-    last_odom_received_ns_ = received_ns;
-    if (rtk_path_simulation_.active()) {
-      if (rtk_path_simulation_.captureOdinOrigin(sample.position_m)) {
-        RCLCPP_INFO(
-          get_logger(), "仿真已记录真实ODIN起点：[%.3f, %.3f, %.3f] m",
-          sample.position_m.x, sample.position_m.y, sample.position_m.z);
-      }
-      generateSimulatedRtk(sample, received_ns);
-    }
+    latest_odom_received_ns_ = received_ns;
+    latest_odom_source_stamp_ns_ = source_stamp_ns;
     validateForwardAxisMotion(sample);
     last_absolute_orientation_ =
-      heading_alignment_valid_ ?
+      heading_estimate_available_ ?
       absoluteQuaternionFromOdin(delta_yaw_rad_, sample.orientation_xyzw) :
       sample.orientation_xyzw;
   }
@@ -608,12 +502,9 @@ private:
 
   void onImu(sensor_msgs::msg::Imu::SharedPtr message)
   {
-    const std::int64_t stamp_ns = toNanoseconds(message->header.stamp);
-    if (stamp_ns <= 0) {
-      return;
-    }
+    const std::int64_t source_stamp_ns = toNanoseconds(message->header.stamp);
     latest_imu_.available = true;
-    latest_imu_.stamp_ns = stamp_ns;
+    latest_imu_.stamp_ns = steadyNowNanoseconds();
     latest_imu_.angular_velocity_rad_s = Vector3d{
       message->angular_velocity.x - gyro_bias_rad_s_.x,
       message->angular_velocity.y - gyro_bias_rad_s_.y,
@@ -624,8 +515,8 @@ private:
     {
       return;
     }
-    if (last_imu_stamp_ns_ > 0 && stamp_ns > last_imu_stamp_ns_) {
-      const double dt_s = static_cast<double>(stamp_ns - last_imu_stamp_ns_) * kNsToSeconds;
+    if (last_imu_stamp_ns_ > 0 && source_stamp_ns > last_imu_stamp_ns_) {
+      const double dt_s = static_cast<double>(source_stamp_ns - last_imu_stamp_ns_) * kNsToSeconds;
       if (dt_s <= imu_timeout_s_ &&
         gyro_fallback_duration_s_ + dt_s <= gyro_fallback_max_duration_s_)
       {
@@ -637,7 +528,9 @@ private:
         }
       }
     }
-    last_imu_stamp_ns_ = stamp_ns;
+    if (source_stamp_ns > 0) {
+      last_imu_stamp_ns_ = source_stamp_ns;
+    }
   }
 
   bool rawFixUsable() const noexcept
@@ -648,14 +541,9 @@ private:
 
   bool rtkReliable(const std::int64_t now_ns) const noexcept
   {
-    const double fix_age_s = rtk_path_simulation_.active() ?
-      ageSeconds(now_ns, last_simulated_rtk_received_ns_) :
-      ageSeconds(now_ns, latest_fix_.stamp_ns);
-    const double status_age_s = rtk_path_simulation_.active() ?
-      ageSeconds(now_ns, last_simulated_rtk_received_ns_) :
-      ageSeconds(now_ns, latest_rtk_status_.stamp_ns);
     if (!rawFixUsable() || !latest_rtk_status_.available ||
-      fix_age_s > rtk_timeout_s_ || status_age_s > rtk_timeout_s_)
+      ageSeconds(now_ns, latest_fix_.stamp_ns) > rtk_timeout_s_ ||
+      ageSeconds(now_ns, latest_rtk_status_.stamp_ns) > rtk_timeout_s_)
     {
       return false;
     }
@@ -677,8 +565,10 @@ private:
     if (!isFinite(rtk_enu)) {
       return;
     }
-    const auto sync_stamp = applyRtkTimeOffsetNs(
-      latest_fix_.stamp_ns, rtk_path_simulation_.active() ? 0.0 : rtk_time_offset_s_);
+    // RTK与ODIN时间原点不同；用最近ODIN样本建立接收时钟到设备时钟的映射。
+    const auto sync_stamp = mapReceiptTimeToSensorTimeNs(
+      latest_fix_.stamp_ns, latest_odom_received_ns_, latest_odom_source_stamp_ns_,
+      rtk_time_offset_s_);
     if (!sync_stamp.has_value()) {
       heading_alignment_reason_ = "INVALID_RTK_SYNC_TIME";
       return;
@@ -693,7 +583,7 @@ private:
     if (scale_calibration_mode_ == 1) {
       calibration_pairs_.push_back(
         CalibrationPair{
-          sync_stamp_ns,
+          latest_fix_.stamp_ns,
           Point2d{odom_at_rtk.position_m.x, odom_at_rtk.position_m.y},
           Point2d{rtk_enu.east_m, rtk_enu.north_m}});
       trimCalibrationPairs();
@@ -701,7 +591,7 @@ private:
 
     const bool fit_sample_added = heading_fit_estimator_.addSample(
       HeadingFitSample{
-        sync_stamp_ns,
+        latest_fix_.stamp_ns,
         odom_at_rtk.position_m.x,
         odom_at_rtk.position_m.y,
         rtk_enu.east_m,
@@ -719,14 +609,19 @@ private:
     const HeadingRigidAlignmentState & heading_state = heading_fit_estimator_.state();
     heading_baseline_m_ = heading_state.baseline_odin_m;
     heading_alignment_reason_ = heading_state.invalid_reason;
+    if (heading_state.estimate_available && heading_state.update_accepted &&
+      heading_state.baseline_odin_m >= heading_fit_options_.min_baseline_m)
+    {
+      heading_estimate_available_ = true;
+      delta_yaw_rad_ = heading_state.delta_yaw_rad;
+    }
     if (heading_state.valid && heading_state.update_accepted) {
       heading_alignment_valid_ = true;
-      delta_yaw_rad_ = heading_state.delta_yaw_rad;
       last_reliable_delta_yaw_rad_ = heading_state.delta_yaw_rad;
     }
     if (heading_state.valid || (!fit_sample_added && heading_alignment_valid_)) {
       last_reliable_anchor_candidate_ =
-        AnchorCandidate{true, sync_stamp_ns, latest_fix_.llh, odom_at_rtk};
+        AnchorCandidate{true, latest_fix_.stamp_ns, latest_fix_.llh, odom_at_rtk};
     }
     last_processed_rtk_stamp_ns_ = latest_fix_.stamp_ns;
   }
@@ -783,20 +678,21 @@ private:
 
   void publishOutput()
   {
-    const std::int64_t now_ns = now().nanoseconds();
-    updateCalibrationFromLatestRtk(now_ns);
-    const bool reliable_rtk = rtkReliable(now_ns);
+    const std::int64_t ros_now_ns = now().nanoseconds();
+    const std::int64_t state_now_ns = steadyNowNanoseconds();
+    updateCalibrationFromLatestRtk(state_now_ns);
+    const bool reliable_rtk = rtkReliable(state_now_ns);
 
     if (mode_ == InternalMode::kWaitingForRtk) {
       if (reliable_rtk) {
         mode_ = InternalMode::kRtkValid;
-      } else if (canEnterDeadReckoning(now_ns)) {
-        enterDeadReckoning(now_ns);
+      } else if (canEnterDeadReckoning(state_now_ns)) {
+        enterDeadReckoning(state_now_ns);
       }
     }
     if (mode_ == InternalMode::kRtkValid && !reliable_rtk) {
-      if (canEnterDeadReckoning(now_ns)) {
-        enterDeadReckoning(now_ns);
+      if (canEnterDeadReckoning(state_now_ns)) {
+        enterDeadReckoning(state_now_ns);
       } else {
         mode_ = InternalMode::kWaitingForRtk;
       }
@@ -807,23 +703,23 @@ private:
         InternalMode::kWaitingForRtk;
     }
     if (mode_ == InternalMode::kDeadReckoning && reliable_rtk) {
-      startRecovery(now_ns);
+      startRecovery(state_now_ns);
     }
 
     Output output;
     if (mode_ == InternalMode::kRtkValid && reliable_rtk) {
-      output = makeRtkOutput(now_ns);
+      output = makeRtkOutput(state_now_ns);
     } else if (mode_ == InternalMode::kDeadReckoning) {
-      output = makeDeadReckoningOutput(now_ns);
+      output = makeDeadReckoningOutput(state_now_ns);
     } else if (mode_ == InternalMode::kRtkRecovery) {
-      output = makeRecoveryOutput(now_ns);
+      output = makeRecoveryOutput(state_now_ns);
     } else {
       output = makeInvalidOutput("NO_VALID_RTK_ANCHOR");
     }
 
-    publishFix(output, now_ns);
-    publishOdometry(output, now_ns);
-    publishStatus(output, now_ns);
+    publishFix(output, ros_now_ns);
+    publishOdometry(output, ros_now_ns);
+    publishStatus(output, ros_now_ns, state_now_ns);
   }
 
   bool canEnterDeadReckoning(const std::int64_t now_ns) const noexcept
@@ -903,7 +799,7 @@ private:
       output.heading_enu_rad = 0.0;
     }
     const auto latest_odom = odom_buffer_.latest();
-    if (heading_alignment_valid_ && latest_odom.has_value() &&
+    if (heading_estimate_available_ && latest_odom.has_value() &&
       odometryUsable(now_ns, *latest_odom))
     {
       output.orientation = absoluteQuaternionFromOdin(delta_yaw_rad_, latest_odom->orientation_xyzw);
@@ -920,7 +816,7 @@ private:
     const std::int64_t now_ns, double & heading_enu_rad)
   {
     const auto latest_odom = odom_buffer_.latest();
-    if (heading_alignment_valid_ && latest_odom.has_value() &&
+    if (heading_estimate_available_ && latest_odom.has_value() &&
       odometryUsable(now_ns, *latest_odom))
     {
       const Quaterniond absolute_orientation = absoluteQuaternionFromOdin(
@@ -932,7 +828,7 @@ private:
         return interfaces::msg::LocalizationStatus::HEADING_ODIN;
       }
     }
-    if (!rtk_path_simulation_.active() && latest_rtk_status_.available &&
+    if (latest_rtk_status_.available &&
       isRmcValid(latest_rtk_status_.rmc_validity) &&
       std::isfinite(latest_rtk_status_.track_degrees))
     {
@@ -1053,7 +949,7 @@ private:
     output.llh = enuToLlh(active_anchor_->llh, blended);
     output.enu = blended;
     const auto latest_odom = odom_buffer_.latest();
-    if (heading_alignment_valid_ && latest_odom.has_value() &&
+    if (heading_estimate_available_ && latest_odom.has_value() &&
       odometryUsable(now_ns, *latest_odom))
     {
       output.orientation = absoluteQuaternionFromOdin(delta_yaw_rad_, latest_odom->orientation_xyzw);
@@ -1110,10 +1006,11 @@ private:
     odometry_publisher_->publish(message);
   }
 
-  void publishStatus(const Output & output, const std::int64_t now_ns)
+  void publishStatus(
+    const Output & output, const std::int64_t ros_now_ns, const std::int64_t state_now_ns)
   {
     interfaces::msg::LocalizationStatus message;
-    message.header.stamp = fromNanoseconds(now_ns);
+    message.header.stamp = fromNanoseconds(ros_now_ns);
     message.header.frame_id = output_frame_id_;
     message.valid = output.valid;
     message.mode = output.mode;
@@ -1159,27 +1056,21 @@ private:
     message.heading_fit_window_span_m = fit.window_span_m;
     message.heading_error_before_deg = finiteOrZero(radiansToDegrees(fit.heading_error_before_rad));
     message.heading_error_after_deg = finiteOrZero(radiansToDegrees(fit.heading_error_after_rad));
-    message.simulation_test_mode = static_cast<std::uint8_t>(simulation_options_.test_mode);
-    message.simulation_progress_percent = 100.0 * simulation_progress_ratio_;
     message.distance_from_anchor_m = output.distance_from_anchor_m;
     message.dr_duration_s = output.dr_duration_s;
-    message.rtk_age_s = rtk_path_simulation_.active() ?
-      statusAgeSeconds(now_ns, last_simulated_rtk_received_ns_) :
-      statusAgeSeconds(now_ns, latest_fix_.stamp_ns);
+    message.rtk_age_s = statusAgeSeconds(state_now_ns, latest_fix_.stamp_ns);
     message.odometry_age_s =
-      latest_odom.has_value() ? odometryAgeSeconds(now_ns, *latest_odom) : -1.0;
-    message.imu_age_s = statusAgeSeconds(now_ns, latest_imu_.stamp_ns);
+      latest_odom.has_value() ? odometryAgeSeconds(state_now_ns, *latest_odom) : -1.0;
+    message.imu_age_s = statusAgeSeconds(state_now_ns, latest_imu_.stamp_ns);
     message.position_difference_to_rtk_m = output.position_difference_to_rtk_m;
     message.invalid_reason = output.valid ? "NONE" : output.invalid_reason;
     status_publisher_->publish(message);
   }
 
   double odometryAgeSeconds(
-    const std::int64_t now_ns, const OdomSample & odom) const noexcept
+    const std::int64_t now_ns, const OdomSample &) const noexcept
   {
-    return rtk_path_simulation_.active() ?
-      statusAgeSeconds(now_ns, last_odom_received_ns_) :
-      statusAgeSeconds(now_ns, odom.stamp_ns);
+    return statusAgeSeconds(now_ns, latest_odom_received_ns_);
   }
 
   bool odometryUsable(const std::int64_t now_ns, const OdomSample & odom) const noexcept
@@ -1235,17 +1126,16 @@ private:
 
   LatestFix latest_fix_;
   LatestRtkStatus latest_rtk_status_;
-  LatestFix latest_real_fix_;
-  LatestRtkStatus latest_real_rtk_status_;
   LatestImu latest_imu_;
   HeadingRigidAlignmentOptions heading_fit_options_;
   HeadingRigidAlignmentEstimator heading_fit_estimator_;
-  RtkPathSimulationOptions simulation_options_;
-  RtkPathSimulation rtk_path_simulation_;
   OdometryBuffer odom_buffer_;
   std::deque<CalibrationPair> calibration_pairs_;
   std::optional<Llh> rtk_origin_llh_;
   std::int64_t last_processed_rtk_stamp_ns_{0};
+  std::int64_t latest_odom_received_ns_{0};
+  std::int64_t latest_odom_source_stamp_ns_{0};
+  bool heading_estimate_available_{false};
   bool heading_alignment_valid_{false};
   double delta_yaw_rad_{0.0};
   double last_reliable_delta_yaw_rad_{0.0};
@@ -1259,10 +1149,6 @@ private:
 
   InternalMode mode_{InternalMode::kWaitingForRtk};
   AnchorCandidate last_reliable_anchor_candidate_;
-  double simulation_progress_ratio_{0.0};
-  bool simulation_reached_logged_{false};
-  std::int64_t last_simulated_rtk_received_ns_{0};
-  std::int64_t last_odom_received_ns_{0};
   std::optional<DeadReckoningAnchor> active_anchor_;
   std::int64_t dr_start_ns_{0};
   std::optional<DeadReckoningResult> last_dr_result_;

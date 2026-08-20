@@ -2,11 +2,11 @@
 #include "localization/heading_alignment.hpp"
 #include "localization/heading_rigid_alignment.hpp"
 #include "localization/odometry_buffer.hpp"
-#include "localization/rtk_path_simulation.hpp"
 
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <limits>
 #include <random>
 #include <vector>
 
@@ -209,124 +209,21 @@ TEST(OdometryBufferTest, AppliesConfiguredRtkTimeOffsetBeforeInterpolation)
   EXPECT_NEAR(output.position_m.y, 10.0, 1.0e-12);
 }
 
-TEST(RtkPathSimulationTest, DisabledModeDoesNotStartSimulation)
+TEST(OdometryBufferTest, MapsMonotonicReceiptTimeIntoOdinDeviceTime)
 {
-  RtkPathSimulation simulation;
-  EXPECT_FALSE(simulation.active());
-  EXPECT_FALSE(simulation.captureOdinOrigin(Vector3d{}));
-  EXPECT_FALSE(simulation.generate(Vector3d{}).has_value());
+  const auto mapped = mapReceiptTimeToSensorTimeNs(
+    50'040'000'000LL, 50'100'000'000LL, 1'200'000'000LL, 0.005);
+  ASSERT_TRUE(mapped.has_value());
+  EXPECT_EQ(*mapped, 1'145'000'000LL);
 }
 
-TEST(RtkPathSimulationTest, CapturesOriginAndGeneratesAHalfwayAndClampedB)
+TEST(OdometryBufferTest, RejectsInvalidReceiptToSensorTimeMapping)
 {
-  RtkPathSimulationOptions options;
-  options.test_mode = 1;
-  RtkPathSimulation simulation(options);
-  ASSERT_TRUE(simulation.captureOdinOrigin(Vector3d{100.0, 200.0, 3.0}));
-  EXPECT_FALSE(simulation.captureOdinOrigin(Vector3d{}));
-
-  const auto at_a = simulation.generate(Vector3d{100.0, 200.0, 3.0});
-  ASSERT_TRUE(at_a.has_value());
-  EXPECT_NEAR(at_a->llh.latitude_deg, options.point_a.latitude_deg, 1.0e-9);
-  EXPECT_NEAR(at_a->progress_ratio, 0.0, 1.0e-12);
-
-  const double half = 0.5 * simulation.horizontalDistanceM();
-  const auto midpoint = simulation.generate(Vector3d{100.0 + half, 200.0, 3.0});
-  ASSERT_TRUE(midpoint.has_value());
-  EXPECT_NEAR(midpoint->progress_ratio, 0.5, 1.0e-12);
-  EXPECT_NEAR(midpoint->enu_from_a.east_m, 0.5 * simulation.pointBEnu().east_m, 1.0e-9);
-  EXPECT_NEAR(midpoint->enu_from_a.north_m, 0.5 * simulation.pointBEnu().north_m, 1.0e-9);
-
-  const auto at_b = simulation.generate(
-    Vector3d{100.0 + 2.0 * simulation.horizontalDistanceM(), 200.0, 3.0});
-  ASSERT_TRUE(at_b.has_value());
-  EXPECT_TRUE(at_b->reached_point_b);
-  EXPECT_NEAR(at_b->llh.latitude_deg, options.point_b.latitude_deg, 1.0e-7);
-  EXPECT_NEAR(at_b->llh.longitude_deg, options.point_b.longitude_deg, 1.0e-7);
-}
-
-TEST(RtkPathSimulationTest, TenHertzSimulationUsesFormalFourHundredHertzInterpolationAndFit)
-{
-  RtkPathSimulationOptions simulation_options;
-  simulation_options.test_mode = 1;
-  simulation_options.point_b = enuToLlh(
-    simulation_options.point_a, Enu{0.0, 150.0, 0.0});
-  RtkPathSimulation simulation(simulation_options);
-  ASSERT_TRUE(simulation.captureOdinOrigin(Vector3d{}));
-
-  OdometryBuffer buffer(20'000'000'000LL, 20'000'000LL, 7000U);
-  constexpr std::int64_t start_ns = 1'000'000'000LL;
-  constexpr std::int64_t odin_period_ns = 2'500'000LL;
-  constexpr double speed_mps = 10.0;
-  for (std::int64_t index = 0; index <= 6000; ++index) {
-    const double seconds = static_cast<double>(index * odin_period_ns) * 1.0e-9;
-    ASSERT_TRUE(buffer.add(
-      OdomSample{
-        start_ns + index * odin_period_ns,
-        Vector3d{speed_mps * seconds, 0.0, 0.0}, Quaterniond{}}));
-  }
-
-  HeadingRigidAlignmentOptions fit_options;
-  fit_options.filter_alpha = 1.0;
-  HeadingRigidAlignmentEstimator estimator(fit_options);
-  for (std::int64_t rtk_index = 0; rtk_index < 150; ++rtk_index) {
-    const std::int64_t rtk_stamp = start_ns + rtk_index * 100'000'000LL + 1'250'000LL;
-    OdomSample odin_for_simulation;
-    ASSERT_TRUE(buffer.interpolate(rtk_stamp, odin_for_simulation));
-    const auto simulated_fix = simulation.generate(odin_for_simulation.position_m);
-    ASSERT_TRUE(simulated_fix.has_value());
-
-    // 正式拟合端仅接收模拟LLH和RTK时间戳，再独立查询ODIN缓存。
-    OdomSample synchronized_odin;
-    ASSERT_TRUE(buffer.interpolate(rtk_stamp, synchronized_odin));
-    const Enu simulated_enu = llhToEnu(simulation.pointA(), simulated_fix->llh);
-    estimator.addSample(
-      HeadingFitSample{
-        rtk_stamp, synchronized_odin.position_m.x, synchronized_odin.position_m.y,
-        simulated_enu.east_m, simulated_enu.north_m});
-  }
-  ASSERT_TRUE(estimator.state().valid);
-  EXPECT_NEAR(estimator.state().delta_yaw_rad, degreesToRadians(90.0), 1.0e-5);
-  EXPECT_GE(estimator.state().baseline_odin_m, 100.0);
-  EXPECT_LE(estimator.sampleCount(), fit_options.max_samples);
-}
-
-TEST(RtkPathSimulationTest, DefaultOneMeterPathProducesValidHeadingCorrection)
-{
-  RtkPathSimulationOptions simulation_options;
-  simulation_options.test_mode = 1;
-  RtkPathSimulation simulation(simulation_options);
-  ASSERT_TRUE(simulation.active());
-  EXPECT_NEAR(simulation.horizontalDistanceM(), 1.0, 0.03);
-  ASSERT_TRUE(simulation.captureOdinOrigin(Vector3d{10.0, 20.0, 0.0}));
-
-  HeadingRigidAlignmentOptions actual_options;
-  const HeadingRigidAlignmentOptions fit_options = simulationHeadingFitOptions(
-    actual_options, simulation.horizontalDistanceM());
-  EXPECT_NEAR(
-    fit_options.valid_baseline_m, 0.9 * simulation.horizontalDistanceM(), 1.0e-12);
-  EXPECT_EQ(fit_options.min_samples, 2U);
-
-  HeadingRigidAlignmentEstimator estimator(fit_options);
-  constexpr std::int64_t start_ns = 1'000'000'000LL;
-  for (std::size_t index = 0; index <= 1U; ++index) {
-    const double distance = simulation.horizontalDistanceM() * static_cast<double>(index);
-    const Vector3d odin_position{10.0 + distance, 20.0, 0.0};
-    const auto simulated_fix = simulation.generate(odin_position);
-    ASSERT_TRUE(simulated_fix.has_value());
-    const Enu simulated_enu = llhToEnu(simulation.pointA(), simulated_fix->llh);
-    estimator.addSample(
-      HeadingFitSample{
-        start_ns + static_cast<std::int64_t>(index) * 1'000'000'000LL,
-        odin_position.x, odin_position.y,
-        simulated_enu.east_m, simulated_enu.north_m});
-  }
-
-  ASSERT_TRUE(estimator.state().valid);
-  EXPECT_NEAR(
-    estimator.state().delta_yaw_rad,
-    std::atan2(simulation.pointBEnu().north_m, simulation.pointBEnu().east_m), 1.0e-5);
-  EXPECT_GE(estimator.state().baseline_odin_m, fit_options.valid_baseline_m);
+  EXPECT_FALSE(mapReceiptTimeToSensorTimeNs(0, 10, 20, 0.0).has_value());
+  EXPECT_FALSE(mapReceiptTimeToSensorTimeNs(10, 0, 20, 0.0).has_value());
+  EXPECT_FALSE(mapReceiptTimeToSensorTimeNs(10, 20, 0, 0.0).has_value());
+  EXPECT_FALSE(mapReceiptTimeToSensorTimeNs(
+    10, 20, 30, std::numeric_limits<double>::quiet_NaN()).has_value());
 }
 
 TEST(DeadReckoningFreezeTest, LaterHeadingFitsDoNotChangeFrozenAnchor)

@@ -765,7 +765,7 @@ th { color: #7f8b9e; background: #fafbfd; font-weight: 600; white-space: nowrap;
 .health-overview__copy > strong { overflow: hidden; font-size: clamp(19px, 1.18vw, 26px); text-overflow: ellipsis; white-space: nowrap; }
 .health-kpi-grid {
   display: grid;
-  grid-template-columns: minmax(190px, .9fr) minmax(0, 2.1fr);
+  grid-template-columns: minmax(160px, .65fr) minmax(0, 2.35fr);
   gap: 10px;
   min-width: 0;
 }
@@ -831,16 +831,16 @@ th { color: #7f8b9e; background: #fafbfd; font-weight: 600; white-space: nowrap;
 .health-kpi-rtk-head .status-pill { max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .health-kpi-rtk-body {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 108px;
+  grid-template-columns: minmax(0, 1fr) 96px;
   align-items: center;
-  gap: 16px;
+  gap: 10px;
   min-width: 0;
 }
 .health-kpi-rtk-coordinate {
   display: grid;
-  grid-template-columns: minmax(118px, 1.2fr) minmax(118px, 1.25fr) minmax(82px, .75fr);
+  grid-template-columns: minmax(120px, 1.2fr) minmax(120px, 1.25fr) minmax(88px, .75fr);
   align-self: center;
-  gap: 14px;
+  gap: 10px;
   min-width: 0;
 }
 .health-kpi-rtk-coordinate > span {
@@ -1820,7 +1820,7 @@ table {
   .health-kpi-card > span { font-size: clamp(13px, .78vw, 16px); }
   .health-kpi-card > strong { font-size: clamp(31px, 2vw, 44px); }
   .health-kpi-card > strong small { font-size: clamp(13px, .72vw, 16px); }
-  .health-kpi-rtk-coordinate { gap: 18px; }
+  .health-kpi-rtk-coordinate { gap: 12px; }
   .health-kpi-rtk-coordinate small,
   .health-kpi-rtk-quality > span { font-size: 11px; }
   .health-kpi-rtk-coordinate strong { font-size: clamp(14px, .82vw, 18px); }

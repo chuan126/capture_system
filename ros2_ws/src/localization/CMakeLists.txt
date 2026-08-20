@@ -37,7 +37,6 @@ add_library(localization_dead_reckoning_core
   src/heading_alignment.cpp
   src/heading_rigid_alignment.cpp
   src/odometry_buffer.cpp
-  src/rtk_path_simulation.cpp
   src/similarity_alignment.cpp
   src/dead_reckoning.cpp
 )

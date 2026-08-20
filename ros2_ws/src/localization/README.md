@@ -1,6 +1,6 @@
 # localization
 
-核对日期：2026-08-10
+核对日期：2026-08-21
 
 > 当前状态：已新增RTK失锁后的ODIN1航位推算、融合定位状态输出、WGS84坐标转换、
 > 航向对齐和可选二维相似变换尺度标定。实车参数仍需现场标定。
@@ -30,7 +30,6 @@ localization/                                      # 定位与局部水平姿态
 │       ├── heading_alignment.hpp                  # 航向角度与RTK状态工具接口
 │       ├── heading_rigid_alignment.hpp            # RTK/ODIN长轨迹二维刚体拟合接口
 │       ├── odometry_buffer.hpp                    # RTK时刻ODIN插值缓存接口
-│       ├── rtk_path_simulation.hpp                # 真实ODIN驱动的A→B模拟RTK接口
 │       └── similarity_alignment.hpp               # 二维相似变换尺度和旋转联合估计接口
 ├── src/                                           # 算法实现和ROS适配节点目录
 │   ├── attitude_transform.cpp                     # 四元数校验、换轴和雷达点转换实现
@@ -38,6 +37,8 @@ localization/                                      # 定位与局部水平姿态
 │   ├── dead_reckoning_node.cpp                    # 订阅RTK/ODIN/IMU并发布融合定位的ROS 2节点
 │   ├── geodesy.cpp                                # WGS84坐标正反转换实现
 │   ├── heading_alignment.cpp                      # 航向wrap和单位转换实现
+│   ├── heading_rigid_alignment.cpp                # 长轨迹刚体拟合、粗差剔除和方位滤波实现
+│   ├── odometry_buffer.cpp                        # ODIN缓存、时钟映射和位置插值实现
 │   └── similarity_alignment.cpp                   # 二维相似变换最小二乘实现
 └── test/                                          # 核心算法单元测试目录
     ├── test_attitude_matrix.cpp                   # 顺序、重力方向、换轴和无效输入测试
@@ -127,9 +128,10 @@ colcon test-result --all --verbose
 /capture/localization/odometry
 ```
 
-RTK有效时，节点使用RTK经纬高作为绝对位置。每条10 Hz RTK按
-`t_sync=t_rtk_header+rtk_time_offset_s` 从400 Hz ODIN缓存中线性插值位置，再按5 m间距加入
-固定容量窗口。窗口内两条轨迹分别去质心，以单位尺度二维刚体拟合
+RTK有效时，节点使用RTK经纬高作为绝对位置。RTK的ROS系统时间与ODIN设备上电时间不共用
+时间原点。节点以本机单调接收时刻建立映射，把每条10 Hz RTK接收时刻投影到ODIN设备时间域，
+再叠加 `rtk_time_offset_s`，从保留真实400 Hz间隔的ODIN缓存中线性插值位置。同步点按5 m间距
+加入固定容量窗口。窗口内两条轨迹分别去质心，以单位尺度二维刚体拟合
 `delta_yaw=atan2(B,A)`。RTK `track_degrees` 只用于原始诊断和融合方位不可用时的显示回退，
 ODIN四元数继续用于车辆姿态，但两者都不参与 `delta_yaw` 拟合。
 
@@ -173,11 +175,3 @@ DR期间ODIN短时超时后，节点保持最后位置，并用IMU角速度对�
 `scale_calibration_mode=0` 时不收集尺度轨迹、不执行拟合，水平尺度固定为1.0，
 `scale_status=SCALE_DISABLED`，且不阻塞航向对齐或进入DR。仅当模式为1时，节点用长轨迹
 RTK/ODIN同步点拟合二维相似变换；只有样本数、基线、残差和尺度范围都满足要求时应用尺度。
-
-室内测试将 `simulation_test_mode` 设为 `1` 并重启。真实RTK可以始终无效；节点把第一条真实
-ODIN位置强制对应A点，以其水平位移进度在A到B之间生成10 Hz有效模拟RTK。模拟Fix复用当前
-ODIN样本时间戳，不依赖ROS墙钟与ODIN设备时钟同域。默认
-A/B水平距离约1 m；仿真启用时，方位拟合采样间距和有效基线根据该距离自动缩短，移动约0.9 m
-且拟合质量合格后开始输出修正方位。设回默认值 `0` 并重启即关闭仿真、恢复真实RTK和长轨迹
-拟合参数。融合栏收到首帧ODIN后即显示A点坐标；完成修正后，融合栏、TXT载体方位和地图小车
-方位均使用同一 `LocalizationStatus.heading_deg`。
