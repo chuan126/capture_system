@@ -16,7 +16,7 @@ clearance_engine_node:
     ransac.voxel_size_m: 0.04
     ransac.max_iterations: 500
     ransac.probability: 0.99
-    ransac.max_candidate_planes: 2500
+    ransac.max_candidate_planes: 200
     ransac.min_remaining_points: 100
     ransac.min_inliers_absolute: 50
     ransac.min_inlier_ratio: 0.0003
@@ -27,3 +27,38 @@ clearance_engine_node:
     region.min_span_cells: 8
     region.min_occupied_cells: 50
     region.max_residual_p95_m: 0.05
+
+    # 启用局部曲面分支；关闭后节点完全退回原有平面检测。
+    surface.enabled: true
+    # 曲面ROI体素边长，单位m；只影响法向估计和Region Growing。
+    surface.voxel_size_m: 0.05
+    # 单点法向量估计使用的K近邻数量。
+    surface.normal_k_neighbors: 20
+    # Region Growing为每个点检查的近邻数量。
+    surface.region_neighbor_number: 20
+    # 相邻法向最大夹角，单位deg。
+    surface.smoothness_threshold_deg: 10.0
+    # Region Growing使用的PCL点曲率上限。
+    surface.curvature_threshold: 0.10
+    # 曲面Cluster最少降采样点数。
+    surface.min_cluster_points: 80
+    # Cluster在两个水平轴上都必须达到的最小跨度，单位m。
+    surface.min_span_m: 0.30
+    # 曲面实际覆盖区域的水平占用网格边长，单位m。
+    surface.grid_size_m: 0.05
+    # 曲面Cluster最少水平占用网格数。
+    surface.min_occupied_cells: 20
+    # 二次曲面拟合绝对残差P95上限，单位m。
+    surface.max_residual_p95_m: 0.10
+    # Cluster法向估计曲率P95上限，用于拒绝粗糙噪声。
+    surface.max_curvature: 0.10
+    # 平均法向必须满足normal_z<=-该值；法向朝传感器定向，负值表示顶部朝下。
+    surface.min_downward_normal_z: 0.05
+    # Region Growing最大输入点数；9999确保复杂分割输入少于10000点。
+    surface.max_input_points: 9999
+    # 进入平面/曲面统一最低高度选择的置信度下限，候选必须严格大于该值。
+    surface.min_confidence: 0.55
+    # 平面与曲面高度差不超过该值时优先保留平面，单位m。
+    surface.plane_preference_tolerance_m: 0.02
+    # 平面有效时曲面分支的最高运行频率，单位Hz；平面无效时立即执行曲面检测。
+    surface.update_rate_hz: 5.0

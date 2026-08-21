@@ -1,14 +1,14 @@
-# 单帧可靠顶部视场内的最低近水平顶面测量结果。
+# 单帧可靠顶部视场内的最低可信平面或局部曲面测量结果。
 std_msgs/Header header
 
 bool valid
 float64 lidar_to_top_m
 # 本帧RANSAC成功提取并达到原始分辨率最少内点要求的平面模型数量。
 uint32 ransac_plane_count
-# 通过区域尺寸、倾角和残差检查的连通区域数量。一个RANSAC模型可以产生多个区域。
+# 通过质量和置信度检查的统一平面/局部曲面候选数量。
 uint32 candidate_count
 uint32 selected_inlier_count
-# 兼容字段名。实际表示选中区域在水平网格上的占用投影面积，不是几何平面表面积。
+# 兼容字段名。实际表示选中平面或曲面区域的水平网格占用投影面积。
 float64 selected_area_m2
 float64 selected_tilt_deg
 float64 residual_median_m

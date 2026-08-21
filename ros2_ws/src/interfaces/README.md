@@ -40,6 +40,10 @@ RTK从未有效或航位推算不可用时使用0占位，并通过`valid=false`
 `mode=MODE_INVALID`和`invalid_reason`明确失效原因。消息同时提供ODIN原始四元数经
 `q2att([w,x,y,z])`换算的俯仰、横滚、方位显示字段，以及独立的航向对齐和尺度模式状态。
 
-`ClearanceResult`区分本帧有效性、沿Up方向的雷达到顶部距离、RANSAC成功平面模型数、候选区域质量和无效原因。`ransac_plane_count` 在模型回到原始分辨率并达到最少内点要求后计数；`candidate_count` 保持后续质量检查通过的连通区域语义。无效结果不得由消费端用上一有效高度补齐。
+`ClearanceResult`区分本帧有效性、沿Up方向的雷达到顶部距离、RANSAC成功平面模型数、
+统一平面/局部曲面候选质量和无效原因。`ransac_plane_count` 在平面模型回到原始分辨率
+并达到最少内点要求后计数；`candidate_count` 表示通过质量和置信度检查的统一候选数。
+消息字段保持兼容，上层不区分最终高度来自平面还是曲面。无效结果不得由消费端用上一
+有效高度补齐。
 
 详细Topic和Service见[ROS 2架构](../../../docs/architecture/ROS2架构.md)。

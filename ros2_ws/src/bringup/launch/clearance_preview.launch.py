@@ -30,7 +30,7 @@ def generate_launch_description() -> LaunchDescription:
             DeclareLaunchArgument(
                 "parameters_file",
                 default_value=str(default_parameters),
-                description="首版净空算法参数文件绝对路径",
+                description="平面与局部曲面净空算法参数文件绝对路径",
             ),
             Node(
                 package="motion_compensation",

@@ -7,7 +7,14 @@ endif()
 
 find_package(ament_cmake REQUIRED)
 find_package(interfaces REQUIRED)
-find_package(PCL 1.12 REQUIRED COMPONENTS common filters sample_consensus segmentation)
+find_package(PCL 1.12 REQUIRED COMPONENTS
+  common
+  features
+  filters
+  sample_consensus
+  search
+  segmentation
+)
 find_package(rclcpp REQUIRED)
 find_package(rcl_interfaces REQUIRED)
 find_package(sensor_msgs REQUIRED)
@@ -15,6 +22,8 @@ find_package(std_msgs REQUIRED)
 
 add_library(clearance_engine_core
   src/clearance_estimator.cpp
+  src/surface_candidate.cpp
+  src/surface_detector.cpp
 )
 target_include_directories(clearance_engine_core
   PUBLIC
@@ -72,6 +81,14 @@ if(BUILD_TESTING)
   )
   target_link_libraries(
     test_clearance_estimator
+    clearance_engine_core
+  )
+  ament_add_gtest(
+    test_surface_detector
+    test/test_surface_detector.cpp
+  )
+  target_link_libraries(
+    test_surface_detector
     clearance_engine_core
   )
   add_launch_test(

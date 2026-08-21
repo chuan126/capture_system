@@ -1,6 +1,6 @@
 # bringup
 
-核对日期：2026-08-20
+核对日期：2026-08-21
 
 当前包提供四个独立 Launch，便于保持预览、净空和系统监控的故障隔离。
 
@@ -26,6 +26,9 @@ ros2 launch bringup clearance_preview.launch.py
 1. `odometry_timestamp_adapter_node`；
 2. `enu_cloud_transform_node`；
 3. `clearance_engine_node`。
+
+净空节点保留原有 RANSAC 平面分支，并按同一配置启动局部二次曲面分支；输出 Topic
+和 `ClearanceResult` 消息格式不变。
 
 ## 点云预览
 

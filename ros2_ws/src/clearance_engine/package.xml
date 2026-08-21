@@ -2,7 +2,7 @@
 <package format="3">
   <name>clearance_engine</name>
   <version>0.1.0</version>
-  <description>可靠顶部视场内的多平面提取与最低顶面高度计算。</description>
+  <description>可靠顶部视场内的平面、局部曲面提取与最低顶面高度计算。</description>
 
   <maintainer email="todo@example.com">capture_system maintainers</maintainer>
   <license>Proprietary</license>
