@@ -11,6 +11,7 @@ def make_message(*, valid: bool, height: float) -> SimpleNamespace:
         valid=valid,
         lidar_to_top_m=height,
         ransac_plane_count=3,
+        surface_count=2,
         candidate_count=4,
         selected_inlier_count=1234,
         selected_area_m2=1.25,
@@ -34,6 +35,7 @@ def test_maps_valid_clearance_result() -> None:
     assert snapshot.frame_id == "odin_lidar"
     assert snapshot.valid is True
     assert snapshot.lidar_to_top_m == 1.723
+    assert snapshot.surface_count == 2
     assert snapshot.minimum_position_east_m == -0.4
     assert snapshot.minimum_position_up_m == 1.723
     assert snapshot.to_message()["type"] == "clearance_snapshot"

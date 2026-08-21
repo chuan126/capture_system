@@ -19,6 +19,7 @@ export type DevTopicTelemetry = {
   valid?: boolean;
   lidar_to_top_m?: number | null;
   ransac_plane_count?: number;
+  surface_count?: number;
   candidate_count?: number;
   selected_inlier_count?: number;
   selected_area_m2?: number | null;

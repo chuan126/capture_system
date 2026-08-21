@@ -7,6 +7,9 @@ enu_cloud_transform_node:
 
     pose_cache_duration_s: 2.0
 
+    # 与里程计适配器一致：大幅回退触发位姿缓存和旧纪元点云重置。
+    timestamp_reset_threshold_s: 1.0
+
     # 高频里程计实测约401 Hz。15 ms约对应6个采样周期。
     # 超过该间隔不再强行插值，避免高角加速度下产生较大姿态误差。
     max_interpolation_gap_s: 0.015

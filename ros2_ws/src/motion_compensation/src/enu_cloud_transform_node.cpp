@@ -85,7 +85,8 @@ public:
       declare_parameter<bool>("use_odometry_translation", true),
       declare_parameter<double>("minimum_valid_pose_ratio", 0.75),
       declare_parameter<double>("max_translation_per_scan_m", 2.5),
-      declare_parameter<bool>("fallback_to_rotation_only", true));
+      declare_parameter<bool>("fallback_to_rotation_only", true),
+      secondsToNanoseconds(declare_parameter<double>("timestamp_reset_threshold_s", 1.0)));
 
     input_topic_ = declare_parameter<std::string>(
       "input_cloud_topic", "/capture/lidar/points_raw");
@@ -215,7 +216,22 @@ private:
     sample.quaternion_xyzw = {
       message->pose.pose.orientation.x, message->pose.pose.orientation.y,
       message->pose.pose.orientation.z, message->pose.pose.orientation.w};
-    if (!transformer_->addPose(sample)) {
+    const auto add_result = transformer_->addPose(sample);
+    if (add_result == PoseBuffer::AddResult::kEpochReset) {
+      std::size_t dropped_count = 0U;
+      {
+        std::lock_guard<std::mutex> lock(pending_clouds_mutex_);
+        dropped_count = pending_clouds_.size();
+        pending_clouds_.clear();
+        diagnostics_.observePendingCloudCount(0U);
+      }
+      for (std::size_t index = 0; index < dropped_count; ++index) {
+        diagnostics_.recordCloudDropped();
+      }
+      RCLCPP_WARN(
+        get_logger(), "检测到里程计时间纪元切换，已清空%zu帧旧纪元待处理点云",
+        dropped_count);
+    } else if (add_result == PoseBuffer::AddResult::kRejected) {
       RCLCPP_WARN_THROTTLE(
         get_logger(), *get_clock(), 5000, "拒绝无效或乱序的高频里程计姿态");
     }

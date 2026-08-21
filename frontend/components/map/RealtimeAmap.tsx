@@ -66,7 +66,6 @@ function wgs84ToGcj02(lat: number, lon: number): [number, number] {
   return [lon + dLon, lat + dLat];
 }
 
-const MAX_TRACK_POINTS = 2500;
 const AMAP_JS_URL =
   "https://webapi.amap.com/maps?v=2.0&plugin=AMap.Scale,AMap.ToolBar";
 type AmapConfig = {
@@ -345,8 +344,6 @@ export default function RealtimeAmap({
       mapRef.current?.destroy?.();
       markerRef.current = null;
       polylineRefs.current = [];
-      trackPointsRef.current = [];
-      setTrackPointCount(0);
 
       const mapInstance = new MapConstructor(containerRef.current, {
         viewMode: "2D",
@@ -458,9 +455,6 @@ export default function RealtimeAmap({
     const last = points.at(-1);
     if (!last || last.lng !== gcj[0] || last.lat !== gcj[1]) {
       points.push({ lng: gcj[0], lat: gcj[1], source });
-      if (points.length > MAX_TRACK_POINTS) {
-        points.splice(0, points.length - MAX_TRACK_POINTS);
-      }
       setTrackPointCount(points.length);
     }
 

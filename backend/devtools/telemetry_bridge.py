@@ -230,6 +230,7 @@ class DevTelemetryBridge:
                     "valid": bool(getattr(msg, "valid", False)),
                     "lidar_to_top_m": _finite_or_none(getattr(msg, "lidar_to_top_m", None)),
                     "ransac_plane_count": int(getattr(msg, "ransac_plane_count", 0)),
+                    "surface_count": int(getattr(msg, "surface_count", 0)),
                     "candidate_count": int(getattr(msg, "candidate_count", 0)),
                     "selected_inlier_count": int(getattr(msg, "selected_inlier_count", 0)),
                     "selected_area_m2": _finite_or_none(getattr(msg, "selected_area_m2", None)),

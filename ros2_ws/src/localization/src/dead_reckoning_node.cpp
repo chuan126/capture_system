@@ -92,7 +92,8 @@ public:
     odom_buffer_(
       secondsToNs(declare_parameter<double>("odometry_cache_duration_s", 60.0)),
       secondsToNs(declare_parameter<double>("odometry_interpolation_max_gap_s", 0.02)),
-      static_cast<std::size_t>(declare_parameter<int>("odometry_cache_max_samples", 5000)))
+      static_cast<std::size_t>(declare_parameter<int>("odometry_cache_max_samples", 5000)),
+      secondsToNs(declare_parameter<double>("odometry_timestamp_reset_threshold_s", 1.0)))
   {
     declareRemainingParameters();
     validateParameters();
@@ -454,7 +455,18 @@ private:
       message->pose.pose.orientation.y,
       message->pose.pose.orientation.z,
       message->pose.pose.orientation.w};
-    if (!odom_buffer_.add(sample)) {
+    const auto add_result = odom_buffer_.add(sample);
+    if (add_result == OdometryBuffer::AddResult::kEpochReset) {
+      // 设备热重连时位置和时间会同时重置，旧锚点不得继续与新里程计混用。
+      active_anchor_.reset();
+      last_dr_result_.reset();
+      last_absolute_orientation_.reset();
+      forward_axis_validation_reference_.reset();
+      recovery_state_ = RecoveryState{};
+      last_reliable_anchor_candidate_ = AnchorCandidate{};
+      mode_ = InternalMode::kWaitingForRtk;
+      RCLCPP_WARN(get_logger(), "检测到ODIN时间纪元切换，已重置航位推算锚点");
+    } else if (add_result == OdometryBuffer::AddResult::kRejected) {
       RCLCPP_WARN_THROTTLE(
         get_logger(), *get_clock(), 5000, "丢弃时间戳乱序或非有限的ODIN里程计样本");
       return;

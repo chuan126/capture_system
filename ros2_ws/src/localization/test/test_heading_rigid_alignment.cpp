@@ -167,7 +167,7 @@ TEST(OdometryBufferTest, InterpolatesFourHundredHertzSamplesAtTenHertzTimestamp)
   OdometryBuffer buffer(2'000'000'000LL, 20'000'000LL, 1000U);
   for (std::int64_t index = 0; index <= 400; ++index) {
     const std::int64_t stamp = 1'000'000'000LL + index * 2'500'000LL;
-    ASSERT_TRUE(buffer.add(OdomSample{stamp, Vector3d{index * 0.025, index * 0.05, 0.0}, Quaterniond{}}));
+    ASSERT_EQ(buffer.add(OdomSample{stamp, Vector3d{index * 0.025, index * 0.05, 0.0}, Quaterniond{}}), OdometryBuffer::AddResult::kAccepted);
   }
   OdomSample output;
   ASSERT_TRUE(buffer.interpolate(1'123'000'000LL, output));
@@ -180,8 +180,8 @@ TEST(OdometryBufferTest, InterpolatesFourHundredHertzSamplesAtTenHertzTimestamp)
 TEST(OdometryBufferTest, RejectsGapLargerThanLimit)
 {
   OdometryBuffer buffer(2'000'000'000LL, 20'000'000LL, 100U);
-  ASSERT_TRUE(buffer.add(OdomSample{1'000'000'000LL, Vector3d{}, Quaterniond{}}));
-  ASSERT_TRUE(buffer.add(OdomSample{1'100'000'000LL, Vector3d{10.0, 0.0, 0.0}, Quaterniond{}}));
+  ASSERT_EQ(buffer.add(OdomSample{1'000'000'000LL, Vector3d{}, Quaterniond{}}), OdometryBuffer::AddResult::kAccepted);
+  ASSERT_EQ(buffer.add(OdomSample{1'100'000'000LL, Vector3d{10.0, 0.0, 0.0}, Quaterniond{}}), OdometryBuffer::AddResult::kAccepted);
   OdomSample output;
   EXPECT_FALSE(buffer.interpolate(1'050'000'000LL, output));
 }
@@ -189,17 +189,17 @@ TEST(OdometryBufferTest, RejectsGapLargerThanLimit)
 TEST(OdometryBufferTest, RejectsDuplicateAndOutOfOrderTimestamps)
 {
   OdometryBuffer buffer(2'000'000'000LL, 20'000'000LL, 100U);
-  ASSERT_TRUE(buffer.add(OdomSample{1'000'000'000LL, Vector3d{}, Quaterniond{}}));
-  EXPECT_FALSE(buffer.add(OdomSample{1'000'000'000LL, Vector3d{1.0, 0.0, 0.0}, Quaterniond{}}));
-  EXPECT_FALSE(buffer.add(OdomSample{999'999'999LL, Vector3d{}, Quaterniond{}}));
+  ASSERT_EQ(buffer.add(OdomSample{1'000'000'000LL, Vector3d{}, Quaterniond{}}), OdometryBuffer::AddResult::kAccepted);
+  EXPECT_EQ(buffer.add(OdomSample{1'000'000'000LL, Vector3d{1.0, 0.0, 0.0}, Quaterniond{}}), OdometryBuffer::AddResult::kRejected);
+  EXPECT_EQ(buffer.add(OdomSample{999'999'999LL, Vector3d{}, Quaterniond{}}), OdometryBuffer::AddResult::kRejected);
   EXPECT_EQ(buffer.size(), 1U);
 }
 
 TEST(OdometryBufferTest, AppliesConfiguredRtkTimeOffsetBeforeInterpolation)
 {
   OdometryBuffer buffer(2'000'000'000LL, 20'000'000LL, 100U);
-  ASSERT_TRUE(buffer.add(OdomSample{1'000'000'000LL, Vector3d{0.0, 0.0, 0.0}, Quaterniond{}}));
-  ASSERT_TRUE(buffer.add(OdomSample{1'010'000'000LL, Vector3d{10.0, 20.0, 0.0}, Quaterniond{}}));
+  ASSERT_EQ(buffer.add(OdomSample{1'000'000'000LL, Vector3d{0.0, 0.0, 0.0}, Quaterniond{}}), OdometryBuffer::AddResult::kAccepted);
+  ASSERT_EQ(buffer.add(OdomSample{1'010'000'000LL, Vector3d{10.0, 20.0, 0.0}, Quaterniond{}}), OdometryBuffer::AddResult::kAccepted);
   const auto synchronized_stamp = applyRtkTimeOffsetNs(1'000'000'000LL, 0.005);
   ASSERT_TRUE(synchronized_stamp.has_value());
   EXPECT_EQ(*synchronized_stamp, 1'005'000'000LL);
@@ -207,6 +207,16 @@ TEST(OdometryBufferTest, AppliesConfiguredRtkTimeOffsetBeforeInterpolation)
   ASSERT_TRUE(buffer.interpolate(*synchronized_stamp, output));
   EXPECT_NEAR(output.position_m.x, 5.0, 1.0e-12);
   EXPECT_NEAR(output.position_m.y, 10.0, 1.0e-12);
+}
+
+TEST(OdometryBufferTest, StartsNewEpochAfterLargeTimestampRollback)
+{
+  OdometryBuffer buffer(2'000'000'000LL, 20'000'000LL, 100U, 500'000'000LL);
+  ASSERT_EQ(buffer.add(OdomSample{2'000'000'000LL, Vector3d{}, Quaterniond{}}), OdometryBuffer::AddResult::kAccepted);
+  EXPECT_EQ(buffer.add(OdomSample{100'000'000LL, Vector3d{}, Quaterniond{}}), OdometryBuffer::AddResult::kEpochReset);
+  ASSERT_TRUE(buffer.latest().has_value());
+  EXPECT_EQ(buffer.latest()->stamp_ns, 100'000'000LL);
+  EXPECT_EQ(buffer.size(), 1U);
 }
 
 TEST(OdometryBufferTest, MapsMonotonicReceiptTimeIntoOdinDeviceTime)

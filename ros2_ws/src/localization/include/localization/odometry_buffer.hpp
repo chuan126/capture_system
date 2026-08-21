@@ -28,11 +28,13 @@ struct OdomSample
 class OdometryBuffer
 {
 public:
+  enum class AddResult {kAccepted, kRejected, kEpochReset};
+
   OdometryBuffer(
     std::int64_t cache_duration_ns, std::int64_t max_interpolation_gap_ns,
-    std::size_t max_samples);
+    std::size_t max_samples, std::int64_t timestamp_reset_threshold_ns = 1000000000LL);
 
-  bool add(OdomSample sample) noexcept;
+  AddResult add(OdomSample sample) noexcept;
   bool interpolate(std::int64_t stamp_ns, OdomSample & output) const noexcept;
   std::optional<OdomSample> latest() const noexcept;
   std::size_t size() const noexcept;
@@ -42,6 +44,7 @@ private:
   std::int64_t cache_duration_ns_{0};
   std::int64_t max_interpolation_gap_ns_{0};
   std::size_t max_samples_{1000U};
+  std::int64_t timestamp_reset_threshold_ns_{1000000000LL};
   std::deque<OdomSample> samples_;
 };
 

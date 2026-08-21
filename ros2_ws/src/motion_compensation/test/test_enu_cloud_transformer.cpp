@@ -22,8 +22,8 @@ PoseSample pose(
 TEST(PoseBufferTest, InterpolatesPositionAndRejectsUncoveredTime)
 {
   PoseBuffer buffer(2000000000LL, 20000000LL);
-  ASSERT_TRUE(buffer.add(pose(1000000000LL, 0.0)));
-  ASSERT_TRUE(buffer.add(pose(1010000000LL, 1.0)));
+  ASSERT_EQ(buffer.add(pose(1000000000LL, 0.0)), PoseBuffer::AddResult::kAccepted);
+  ASSERT_EQ(buffer.add(pose(1010000000LL, 1.0)), PoseBuffer::AddResult::kAccepted);
 
   PoseSample output;
   ASSERT_TRUE(buffer.interpolate(1005000000LL, output));
@@ -35,11 +35,20 @@ TEST(PoseBufferTest, InterpolatesPositionAndRejectsUncoveredTime)
 TEST(PoseBufferTest, RejectsOutOfOrderAndExcessiveGap)
 {
   PoseBuffer buffer(2000000000LL, 5000000LL);
-  ASSERT_TRUE(buffer.add(pose(1000000000LL, 0.0)));
-  EXPECT_FALSE(buffer.add(pose(999000000LL, 0.0)));
-  ASSERT_TRUE(buffer.add(pose(1010000000LL, 1.0)));
+  ASSERT_EQ(buffer.add(pose(1000000000LL, 0.0)), PoseBuffer::AddResult::kAccepted);
+  EXPECT_EQ(buffer.add(pose(999000000LL, 0.0)), PoseBuffer::AddResult::kRejected);
+  ASSERT_EQ(buffer.add(pose(1010000000LL, 1.0)), PoseBuffer::AddResult::kAccepted);
   PoseSample output;
   EXPECT_FALSE(buffer.interpolate(1005000000LL, output));
+}
+
+TEST(PoseBufferTest, ClearsOldEpochAfterLargeTimestampRollback)
+{
+  PoseBuffer buffer(2000000000LL, 20000000LL, 500000000LL);
+  ASSERT_EQ(buffer.add(pose(2000000000LL, 2.0)), PoseBuffer::AddResult::kAccepted);
+  EXPECT_EQ(buffer.add(pose(100000000LL, 0.0)), PoseBuffer::AddResult::kEpochReset);
+  EXPECT_EQ(buffer.oldestStampNs(), 100000000LL);
+  EXPECT_EQ(buffer.newestStampNs(), 100000000LL);
 }
 
 TEST(EnuCloudTransformerTest, AppliesOdometryQuaternionDirectlyToRadarPoint)
@@ -47,8 +56,8 @@ TEST(EnuCloudTransformerTest, AppliesOdometryQuaternionDirectlyToRadarPoint)
   EnuCloudTransformer transformer(2000000000LL, 20000000LL, false);
   const double half_angle = std::sqrt(0.5);
   const std::array<double, 4> yaw_90_xyzw{0.0, 0.0, half_angle, half_angle};
-  ASSERT_TRUE(transformer.addPose(pose(1000000000LL, 0.0, yaw_90_xyzw)));
-  ASSERT_TRUE(transformer.addPose(pose(1010000000LL, 0.0, yaw_90_xyzw)));
+  ASSERT_EQ(transformer.addPose(pose(1000000000LL, 0.0, yaw_90_xyzw)), PoseBuffer::AddResult::kAccepted);
+  ASSERT_EQ(transformer.addPose(pose(1010000000LL, 0.0, yaw_90_xyzw)), PoseBuffer::AddResult::kAccepted);
 
   const std::vector<TimedRadarPoint> input{{1.0F, 0.0F, 0.0F, 0.005F}};
   std::vector<EnuPoint> output;
@@ -63,8 +72,8 @@ TEST(EnuCloudTransformerTest, AppliesOdometryQuaternionDirectlyToRadarPoint)
 TEST(EnuCloudTransformerTest, CompensatesPointTranslationToCloudOrigin)
 {
   EnuCloudTransformer transformer(2000000000LL, 20000000LL, true);
-  ASSERT_TRUE(transformer.addPose(pose(1000000000LL, 0.0)));
-  ASSERT_TRUE(transformer.addPose(pose(1010000000LL, 1.0)));
+  ASSERT_EQ(transformer.addPose(pose(1000000000LL, 0.0)), PoseBuffer::AddResult::kAccepted);
+  ASSERT_EQ(transformer.addPose(pose(1010000000LL, 1.0)), PoseBuffer::AddResult::kAccepted);
 
   const std::vector<TimedRadarPoint> input{{2.0F, 3.0F, 4.0F, 0.005F}};
   std::vector<EnuPoint> output;
@@ -79,8 +88,8 @@ TEST(EnuCloudTransformerTest, CompensatesPointTranslationToCloudOrigin)
 TEST(EnuCloudTransformerTest, MarksUncoveredPointAsNanWithoutChangingLayout)
 {
   EnuCloudTransformer transformer(2000000000LL, 20000000LL, false);
-  ASSERT_TRUE(transformer.addPose(pose(1000000000LL, 0.0)));
-  ASSERT_TRUE(transformer.addPose(pose(1010000000LL, 0.0)));
+  ASSERT_EQ(transformer.addPose(pose(1000000000LL, 0.0)), PoseBuffer::AddResult::kAccepted);
+  ASSERT_EQ(transformer.addPose(pose(1010000000LL, 0.0)), PoseBuffer::AddResult::kAccepted);
 
   const std::vector<TimedRadarPoint> input{{1.0F, 2.0F, 3.0F, 0.020F}};
   std::vector<EnuPoint> output;
@@ -97,8 +106,8 @@ TEST(EnuCloudTransformerTest, PublishesPartialCloudWhenCoverageRatioPasses)
 {
   EnuCloudTransformer transformer(
     2000000000LL, 20000000LL, false, 0.5, 5.0, true);
-  ASSERT_TRUE(transformer.addPose(pose(1000000000LL, 0.0)));
-  ASSERT_TRUE(transformer.addPose(pose(1010000000LL, 0.0)));
+  ASSERT_EQ(transformer.addPose(pose(1000000000LL, 0.0)), PoseBuffer::AddResult::kAccepted);
+  ASSERT_EQ(transformer.addPose(pose(1010000000LL, 0.0)), PoseBuffer::AddResult::kAccepted);
 
   const std::vector<TimedRadarPoint> input{
     {1.0F, 2.0F, 3.0F, 0.005F},
@@ -116,8 +125,8 @@ TEST(EnuCloudTransformerTest, PublishesPartialCloudWhenCoverageRatioPasses)
 TEST(EnuCloudTransformerTest, KeepsVendorZeroPointInvalidDuringMotion)
 {
   EnuCloudTransformer transformer(2000000000LL, 20000000LL, false);
-  ASSERT_TRUE(transformer.addPose(pose(1000000000LL, 0.0)));
-  ASSERT_TRUE(transformer.addPose(pose(1010000000LL, 1.0)));
+  ASSERT_EQ(transformer.addPose(pose(1000000000LL, 0.0)), PoseBuffer::AddResult::kAccepted);
+  ASSERT_EQ(transformer.addPose(pose(1010000000LL, 1.0)), PoseBuffer::AddResult::kAccepted);
 
   const std::vector<TimedRadarPoint> input{
     {0.0F, 0.0F, 0.0F, 0.005F},

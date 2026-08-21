@@ -51,9 +51,13 @@ struct TransformStatistics
 class PoseBuffer
 {
 public:
-  PoseBuffer(std::int64_t cache_duration_ns, std::int64_t max_interpolation_gap_ns);
+  enum class AddResult {kAccepted, kRejected, kEpochReset};
 
-  bool add(const PoseSample & sample) noexcept;
+  PoseBuffer(
+    std::int64_t cache_duration_ns, std::int64_t max_interpolation_gap_ns,
+    std::int64_t timestamp_reset_threshold_ns = 1000000000LL);
+
+  AddResult add(const PoseSample & sample) noexcept;
   bool interpolate(std::int64_t stamp_ns, PoseSample & output) const noexcept;
   bool empty() const noexcept;
   std::int64_t oldestStampNs() const noexcept;
@@ -65,6 +69,7 @@ public:
 private:
   std::int64_t cache_duration_ns_;
   std::int64_t max_interpolation_gap_ns_;
+  std::int64_t timestamp_reset_threshold_ns_;
   mutable std::mutex mutex_;
   std::deque<PoseSample> samples_;
 };
@@ -77,9 +82,10 @@ public:
     bool use_odometry_translation,
     double minimum_valid_pose_ratio = 0.85,
     double max_translation_per_scan_m = 5.0,
-    bool fallback_to_rotation_only = true);
+    bool fallback_to_rotation_only = true,
+    std::int64_t timestamp_reset_threshold_ns = 1000000000LL);
 
-  bool addPose(const PoseSample & sample) noexcept;
+  PoseBuffer::AddResult addPose(const PoseSample & sample) noexcept;
   bool initialized() const noexcept;
   std::int64_t oldestPoseStampNs() const noexcept;
   std::int64_t newestPoseStampNs() const noexcept;

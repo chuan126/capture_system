@@ -2,6 +2,8 @@
 #include <nav_msgs/msg/odometry.hpp>
 #include <rclcpp/rclcpp.hpp>
 
+#include "motion_compensation/odometry_timestamp_expander.hpp"
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -50,15 +52,21 @@ public:
       "packet_timestamp_is_first_sample", true);
     const int flush_timeout_ms = declare_parameter<int>("flush_timeout_ms", 5);
     const int maximum_bundle_samples = declare_parameter<int>("maximum_bundle_samples", 64);
+    const double reset_threshold_s = declare_parameter<double>(
+      "timestamp_reset_threshold_s", 1.0);
 
     if (!(sample_rate_hz > 0.0) || !std::isfinite(sample_rate_hz) ||
-      flush_timeout_ms <= 0 || maximum_bundle_samples <= 0)
+      flush_timeout_ms <= 0 || maximum_bundle_samples <= 0 ||
+      !(reset_threshold_s > 0.0) || !std::isfinite(reset_threshold_s))
     {
       throw std::invalid_argument(
               "sample_rate_hz、flush_timeout_ms和maximum_bundle_samples必须为有限正数");
     }
     sample_period_ns_ = static_cast<std::int64_t>(
       std::llround(1.0e9 / sample_rate_hz));
+    expander_ = std::make_unique<OdometryTimestampExpander>(
+      sample_period_ns_, timestamp_is_first_sample_,
+      static_cast<std::int64_t>(std::llround(reset_threshold_s * 1.0e9)));
     flush_timeout_ = std::chrono::milliseconds(flush_timeout_ms);
     maximum_bundle_samples_ = static_cast<std::size_t>(maximum_bundle_samples);
 
@@ -154,39 +162,33 @@ private:
       bundle_raw_stamp_ns_ = 0;
     }
 
-    const std::int64_t count = static_cast<std::int64_t>(bundle.size());
-    for (std::int64_t index = 0; index < count; ++index) {
-      std::int64_t corrected_stamp_ns = raw_stamp_ns;
-      if (timestamp_is_first_sample_) {
-        corrected_stamp_ns += index * sample_period_ns_;
-      } else {
-        corrected_stamp_ns -= (count - 1 - index) * sample_period_ns_;
-      }
-      if (corrected_stamp_ns <= 0) {
-        RCLCPP_WARN_THROTTLE(
-          get_logger(), *get_clock(), 5000, "展开后的里程计时间戳无效，丢弃当前样本");
-        bundle.pop_front();
-        continue;
-      }
-      if (corrected_stamp_ns <= last_published_stamp_ns_) {
-        corrected_stamp_ns = last_published_stamp_ns_ + 1;
-      }
+    const auto expanded = expander_->expand(raw_stamp_ns, bundle.size());
+    if (expanded.epoch_reset) {
+      RCLCPP_WARN(
+        get_logger(), "检测到ODIN设备时间戳大幅回退，已开启新时间纪元");
+    }
+    if (expanded.stamps_ns.size() != bundle.size()) {
+      RCLCPP_WARN_THROTTLE(
+        get_logger(), *get_clock(), 5000,
+        "丢弃时间戳无效、重叠或小幅乱序的高频里程计数据包");
+      return;
+    }
+    for (const std::int64_t corrected_stamp_ns : expanded.stamps_ns) {
       auto message = std::move(bundle.front());
       bundle.pop_front();
       message.header.stamp = fromNanoseconds(corrected_stamp_ns);
       publisher_->publish(message);
-      last_published_stamp_ns_ = corrected_stamp_ns;
     }
   }
 
   std::string input_topic_;
   std::string output_topic_;
   std::int64_t sample_period_ns_{2500000LL};
-  std::int64_t last_published_stamp_ns_{0};
   std::int64_t bundle_raw_stamp_ns_{0};
   std::size_t maximum_bundle_samples_{64U};
   std::chrono::milliseconds flush_timeout_{5};
   bool timestamp_is_first_sample_{true};
+  std::unique_ptr<OdometryTimestampExpander> expander_;
 
   std::mutex mutex_;
   std::deque<nav_msgs::msg::Odometry> bundle_;

@@ -30,6 +30,7 @@ class ClearanceSnapshot:
     valid: bool
     lidar_to_top_m: float | None
     ransac_plane_count: int
+    surface_count: int
     candidate_count: int
     selected_inlier_count: int
     selected_area_m2: float | None
@@ -56,6 +57,7 @@ def from_ros_message(message: object, sequence: int) -> ClearanceSnapshot:
         valid=bool(getattr(message, "valid")),
         lidar_to_top_m=_finite_or_none(getattr(message, "lidar_to_top_m")),
         ransac_plane_count=int(getattr(message, "ransac_plane_count", 0)),
+        surface_count=int(getattr(message, "surface_count", 0)),
         candidate_count=int(getattr(message, "candidate_count")),
         selected_inlier_count=int(getattr(message, "selected_inlier_count")),
         selected_area_m2=_finite_or_none(getattr(message, "selected_area_m2")),

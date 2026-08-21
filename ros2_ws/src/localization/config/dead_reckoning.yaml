@@ -34,6 +34,8 @@ dead_reckoning_node:
     odometry_interpolation_max_gap_s: 0.02
     # ODIN缓存最大样本数，防止无界内存增长。
     odometry_cache_max_samples: 5000
+    # ODIN热重连后设备时钟大幅回退时开启新纪元并重置旧航位推算锚点。
+    odometry_timestamp_reset_threshold_s: 1.0
 
     # RTK接收时刻映射到ODIN设备时间域后的同步补偿，单位s。
     # 正值向更新的ODIN样本查询，负值向更早的ODIN样本查询。

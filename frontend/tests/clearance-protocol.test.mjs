@@ -13,6 +13,7 @@ test("parses a valid clearance snapshot", () => {
     valid: true,
     lidar_to_top_m: 1.723,
     ransac_plane_count: 3,
+    surface_count: 2,
     candidate_count: 4,
     selected_inlier_count: 1234,
     selected_area_m2: 1.1,
@@ -30,6 +31,7 @@ test("parses a valid clearance snapshot", () => {
   assert.equal(result.type, "clearance_snapshot");
   assert.equal(result.valid, true);
   assert.equal(result.lidar_to_top_m, 1.723);
+  assert.equal(result.surface_count, 2);
 });
 
 test("accepts null measurement fields for an invalid frame", () => {
@@ -42,6 +44,7 @@ test("accepts null measurement fields for an invalid frame", () => {
     valid: false,
     lidar_to_top_m: null,
     ransac_plane_count: 0,
+    surface_count: 0,
     candidate_count: 0,
     selected_inlier_count: 0,
     selected_area_m2: null,

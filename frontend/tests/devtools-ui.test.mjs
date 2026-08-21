@@ -84,9 +84,10 @@ test("dashboard exposes only nine core parameters", () => {
 });
 
 test("clearance card is fixed-height and shows real RANSAC plane count", () => {
-  for (const field of ["ransac_plane_count", "selected_inlier_count", "valid_point_ratio", "processing_time_ms", "selected_area_m2", "selected_tilt_deg"]) {
+  for (const field of ["ransac_plane_count", "surface_count", "selected_inlier_count", "processing_time_ms", "selected_area_m2", "selected_tilt_deg"]) {
     assert.ok(workspace.includes(field), `missing ${field}`);
   }
+  assert.match(workspace, /label="曲面数量"/);
   assert.doesNotMatch(workspace, /snapshot\?\.candidate_count|<Metric label="残差 P95"|候选平面|合格候选区域/);
   assert.match(workspace, /RANSAC平面/);
   assert.match(workspace, /dev-clearance-reason/);

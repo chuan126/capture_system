@@ -131,22 +131,29 @@ EnuPoint nanPoint() noexcept
 }  // namespace
 
 PoseBuffer::PoseBuffer(
-  const std::int64_t cache_duration_ns, const std::int64_t max_interpolation_gap_ns)
-: cache_duration_ns_(cache_duration_ns), max_interpolation_gap_ns_(max_interpolation_gap_ns)
+  const std::int64_t cache_duration_ns, const std::int64_t max_interpolation_gap_ns,
+  const std::int64_t timestamp_reset_threshold_ns)
+: cache_duration_ns_(cache_duration_ns), max_interpolation_gap_ns_(max_interpolation_gap_ns),
+  timestamp_reset_threshold_ns_(timestamp_reset_threshold_ns)
 {
 }
 
-bool PoseBuffer::add(const PoseSample & sample) noexcept
+PoseBuffer::AddResult PoseBuffer::add(const PoseSample & sample) noexcept
 {
   PoseSample normalized = sample;
   if (!validPose(normalized) || cache_duration_ns_ <= 0 || max_interpolation_gap_ns_ <= 0) {
-    return false;
+    return AddResult::kRejected;
   }
   normalizeQuaternion(normalized.quaternion_xyzw);
 
   std::lock_guard<std::mutex> lock(mutex_);
   if (!samples_.empty() && normalized.stamp_ns < samples_.back().stamp_ns) {
-    return false;
+    if (samples_.back().stamp_ns - normalized.stamp_ns > timestamp_reset_threshold_ns_) {
+      samples_.clear();
+      samples_.push_back(normalized);
+      return AddResult::kEpochReset;
+    }
+    return AddResult::kRejected;
   }
   if (!samples_.empty() && normalized.stamp_ns == samples_.back().stamp_ns) {
     samples_.back() = normalized;
@@ -158,7 +165,7 @@ bool PoseBuffer::add(const PoseSample & sample) noexcept
   {
     samples_.pop_front();
   }
-  return true;
+  return AddResult::kAccepted;
 }
 
 bool PoseBuffer::interpolate(const std::int64_t stamp_ns, PoseSample & output) const noexcept
@@ -200,14 +207,15 @@ EnuCloudTransformer::EnuCloudTransformer(
   const std::int64_t cache_duration_ns, const std::int64_t max_interpolation_gap_ns,
   const bool use_odometry_translation,
   const double minimum_valid_pose_ratio, const double max_translation_per_scan_m,
-  const bool fallback_to_rotation_only)
-: pose_buffer_(cache_duration_ns, max_interpolation_gap_ns),
+  const bool fallback_to_rotation_only, const std::int64_t timestamp_reset_threshold_ns)
+: pose_buffer_(cache_duration_ns, max_interpolation_gap_ns, timestamp_reset_threshold_ns),
   use_odometry_translation_(use_odometry_translation),
   minimum_valid_pose_ratio_(minimum_valid_pose_ratio),
   max_translation_per_scan_m_(max_translation_per_scan_m),
   fallback_to_rotation_only_(fallback_to_rotation_only)
 {
-  if (cache_duration_ns <= 0 || max_interpolation_gap_ns <= 0) {
+  if (cache_duration_ns <= 0 || max_interpolation_gap_ns <= 0 ||
+    timestamp_reset_threshold_ns <= 0) {
     throw std::invalid_argument("时间参数必须为正数");
   }
   if (!(minimum_valid_pose_ratio_ > 0.0 && minimum_valid_pose_ratio_ <= 1.0)) {
@@ -218,7 +226,7 @@ EnuCloudTransformer::EnuCloudTransformer(
   }
 }
 
-bool EnuCloudTransformer::addPose(const PoseSample & sample) noexcept
+PoseBuffer::AddResult EnuCloudTransformer::addPose(const PoseSample & sample) noexcept
 {
   return pose_buffer_.add(sample);
 }

@@ -9,3 +9,5 @@ odometry_timestamp_adapter_node:
     packet_timestamp_is_first_sample: true
     flush_timeout_ms: 5
     maximum_bundle_samples: 64
+    # 设备热重连后时钟可能回退；超过1秒视为新时间纪元，小幅乱序仍丢弃。
+    timestamp_reset_threshold_s: 1.0

@@ -228,7 +228,7 @@ function ClearancePanel({ clearance }: { clearance: ClearanceConnectionState }) 
     <div className="dev-metric-grid dev-metric-grid--3">
       <Metric label="RANSAC平面" value={snapshot?.ransac_plane_count ?? "--"} />
       <Metric label="区域内点" value={snapshot?.selected_inlier_count ?? "--"} />
-      <Metric label="有效点比例" value={snapshot?.valid_point_ratio == null ? "--" : `${(snapshot.valid_point_ratio * 100).toFixed(1)}%`} />
+      <Metric label="曲面数量" value={snapshot?.surface_count ?? "--"} />
       <Metric label="处理时间" value={snapshot?.processing_time_ms == null ? "--" : `${fixed(snapshot.processing_time_ms, 2)} ms`} />
       <Metric label="覆盖面积" value={snapshot?.selected_area_m2 == null ? "--" : `${fixed(snapshot.selected_area_m2, 3)} m²`} />
       <Metric label="平面倾角" value={snapshot?.selected_tilt_deg == null ? "--" : `${fixed(snapshot.selected_tilt_deg, 2)}°`} />

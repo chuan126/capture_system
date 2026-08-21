@@ -5,6 +5,8 @@ bool valid
 float64 lidar_to_top_m
 # 本帧RANSAC成功提取并达到原始分辨率最少内点要求的平面模型数量。
 uint32 ransac_plane_count
+# 本帧通过置信度检查的局部曲面候选数量；未执行曲面检测时为0。
+uint32 surface_count
 # 通过质量和置信度检查的统一平面/局部曲面候选数量。
 uint32 candidate_count
 uint32 selected_inlier_count

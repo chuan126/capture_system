@@ -343,6 +343,7 @@ private:
     output.header = message->header;
     output.valid = selection.valid;
     output.ransac_plane_count = static_cast<std::uint32_t>(estimate.ransac_plane_count);
+    output.surface_count = static_cast<std::uint32_t>(accepted_surface_count);
     output.candidate_count = static_cast<std::uint32_t>(selection.accepted_count);
     output.valid_point_ratio = estimate.valid_point_ratio;
     if (selection.valid) {

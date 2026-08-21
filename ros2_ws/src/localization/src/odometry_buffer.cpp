@@ -47,22 +47,30 @@ std::optional<std::int64_t> mapReceiptTimeToSensorTimeNs(
 
 OdometryBuffer::OdometryBuffer(
   const std::int64_t cache_duration_ns, const std::int64_t max_interpolation_gap_ns,
-  const std::size_t max_samples)
+  const std::size_t max_samples, const std::int64_t timestamp_reset_threshold_ns)
 : cache_duration_ns_(cache_duration_ns),
   max_interpolation_gap_ns_(max_interpolation_gap_ns),
-  max_samples_(std::max<std::size_t>(2U, max_samples))
+  max_samples_(std::max<std::size_t>(2U, max_samples)),
+  timestamp_reset_threshold_ns_(timestamp_reset_threshold_ns)
 {
 }
 
-bool OdometryBuffer::add(OdomSample sample) noexcept
+OdometryBuffer::AddResult OdometryBuffer::add(OdomSample sample) noexcept
 {
   if (sample.stamp_ns <= 0 || !isFinite(sample.position_m) ||
     !normalizeQuaternion(sample.orientation_xyzw))
   {
-    return false;
+    return AddResult::kRejected;
+  }
+  if (!samples_.empty() && sample.stamp_ns < samples_.back().stamp_ns &&
+    samples_.back().stamp_ns - sample.stamp_ns > timestamp_reset_threshold_ns_)
+  {
+    samples_.clear();
+    samples_.push_back(sample);
+    return AddResult::kEpochReset;
   }
   if (!samples_.empty() && sample.stamp_ns <= samples_.back().stamp_ns) {
-    return false;
+    return AddResult::kRejected;
   }
   samples_.push_back(sample);
   while (samples_.size() > 1U &&
@@ -71,7 +79,7 @@ bool OdometryBuffer::add(OdomSample sample) noexcept
   {
     samples_.pop_front();
   }
-  return true;
+  return AddResult::kAccepted;
 }
 
 bool OdometryBuffer::interpolate(const std::int64_t stamp_ns, OdomSample & output) const noexcept

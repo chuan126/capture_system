@@ -13,6 +13,7 @@ def snapshot(sequence: int) -> ClearanceSnapshot:
         valid=True,
         lidar_to_top_m=1.7,
         ransac_plane_count=1,
+        surface_count=0,
         candidate_count=1,
         selected_inlier_count=100,
         selected_area_m2=1.0,

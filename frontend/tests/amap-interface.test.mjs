@@ -138,7 +138,7 @@ test("RealtimeAmap component contains WGS-84 to GCJ-02 conversion", async () => 
   assert.match(component, /isOutOfChina/);
   assert.match(component, /transformLat/);
   assert.match(component, /transformLon/);
-  assert.match(component, /MAX_TRACK_POINTS/);
+  assert.doesNotMatch(component, /MAX_TRACK_POINTS|points\.splice\(0/);
   assert.match(component, /\/api\/v1\/map\/config/);
   assert.match(component, /serviceHost/);
   assert.match(component, /loadAmapScript/);
