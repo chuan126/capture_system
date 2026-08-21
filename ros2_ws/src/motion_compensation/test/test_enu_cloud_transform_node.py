@@ -74,12 +74,13 @@ class TestEnuCloudTransformNode(unittest.TestCase):
         self.assertGreater(odometry_publisher.get_subscription_count(), 0)
 
         base_stamp = self.node.get_clock().now().to_msg()
-        for delta_ns in (0, 10_000_000):
+        # 默认需要120 ms连续位姿覆盖后才从RECOVERING恢复NORMAL。
+        for delta_ns in range(0, 131_000_000, 10_000_000):
             odometry = Odometry()
             odometry.header.stamp = add_nanoseconds(base_stamp, delta_ns)
             odometry.pose.pose.orientation.w = 1.0
             odometry_publisher.publish(odometry)
-            rclpy.spin_once(self.node, timeout_sec=0.05)
+            time.sleep(0.002)
 
         fields = [
             PointField(name="x", offset=0, datatype=PointField.FLOAT32, count=1),
@@ -164,12 +165,28 @@ class TestEnuCloudTransformNode(unittest.TestCase):
         self.assertIsNotNone(matching_status)
         values = {item.key: item.value for item in matching_status.values}
         expected_fields = {
+            "motion_state",
+            "state_reason",
             "processing_poll_interval_ms",
+            "max_cloud_wait_ms",
+            "pose_stream_age_ms",
+            "continuous_pose_duration_ms",
+            "max_pose_gap_ms",
+            "cloud_start_stamp_ns",
+            "cloud_end_stamp_ns",
+            "newest_pose_stamp_ns",
+            "cloud_pose_lag_ms",
+            "cloud_wait_ms_last",
             "pending_cloud_count",
+            "pending_oldest_age_ms",
             "pending_cloud_max_count",
             "clouds_received_total",
             "clouds_processed_total",
             "clouds_dropped_total",
+            "clouds_dropped_pose_gap_total",
+            "clouds_dropped_timeout_total",
+            "pose_gap_count",
+            "recovery_count",
             "pose_wait_count",
             "interpolation_failure_count",
             "queue_wait_ms_last",

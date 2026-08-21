@@ -95,6 +95,7 @@ def test_algorithm_and_full_debug_profiles_keep_raw_and_processed_topics_separat
     assert "/capture/lidar/points_compensated_enu" in ALGORITHM_DEBUG_PROFILE.topics
     assert "/capture/odometry/high_rate" in ALGORITHM_DEBUG_PROFILE.topics
     assert "/capture/recording/status" in ALGORITHM_DEBUG_PROFILE.topics
+    assert "/diagnostics" in ALGORITHM_DEBUG_PROFILE.topics
     assert set(RAW_SENSOR_PROFILE.topics).issubset(FULL_DEBUG_PROFILE.topics)
     assert set(ALGORITHM_DEBUG_PROFILE.topics).issubset(FULL_DEBUG_PROFILE.topics)
 

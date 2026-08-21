@@ -49,6 +49,7 @@ DIAGNOSTIC_PROFILE = RecordingProfile(
         "/capture/localization/odometry",
         "/capture/task/status",
         "/capture/system/diagnostics",
+        "/diagnostics",
         "/capture/odometry/high_rate",
     ),
     allow_continuous=False,
@@ -82,6 +83,7 @@ ALGORITHM_DEBUG_PROFILE = RecordingProfile(
         "/capture/task/status",
         "/capture/recording/status",
         "/capture/system/diagnostics",
+        "/diagnostics",
     ),
 )
 

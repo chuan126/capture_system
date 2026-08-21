@@ -32,14 +32,27 @@ TEST(PoseBufferTest, InterpolatesPositionAndRejectsUncoveredTime)
   EXPECT_FALSE(buffer.interpolate(1020000000LL, output));
 }
 
-TEST(PoseBufferTest, RejectsOutOfOrderAndExcessiveGap)
+TEST(PoseBufferTest, RejectsOutOfOrderAndStartsNewContinuousSegmentAfterGap)
 {
   PoseBuffer buffer(2000000000LL, 5000000LL);
   ASSERT_EQ(buffer.add(pose(1000000000LL, 0.0)), PoseBuffer::AddResult::kAccepted);
   EXPECT_EQ(buffer.add(pose(999000000LL, 0.0)), PoseBuffer::AddResult::kRejected);
-  ASSERT_EQ(buffer.add(pose(1010000000LL, 1.0)), PoseBuffer::AddResult::kAccepted);
+  ASSERT_EQ(buffer.add(pose(1010000000LL, 1.0)), PoseBuffer::AddResult::kGapReset);
+  EXPECT_EQ(buffer.oldestStampNs(), 1010000000LL);
+  EXPECT_EQ(buffer.continuousDurationNs(), 0);
   PoseSample output;
   EXPECT_FALSE(buffer.interpolate(1005000000LL, output));
+}
+
+TEST(PoseBufferTest, TracksContinuousDurationAndCanBeCleared)
+{
+  PoseBuffer buffer(2000000000LL, 20000000LL);
+  ASSERT_EQ(buffer.add(pose(1000000000LL, 0.0)), PoseBuffer::AddResult::kAccepted);
+  ASSERT_EQ(buffer.add(pose(1010000000LL, 1.0)), PoseBuffer::AddResult::kAccepted);
+  EXPECT_EQ(buffer.continuousDurationNs(), 10000000LL);
+  buffer.clear();
+  EXPECT_TRUE(buffer.empty());
+  EXPECT_EQ(buffer.continuousDurationNs(), 0);
 }
 
 TEST(PoseBufferTest, ClearsOldEpochAfterLargeTimestampRollback)

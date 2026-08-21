@@ -52,9 +52,15 @@ r_n,i = R_n<-b(t_i) r_l,i + p_n(t_i) - p_n(t_0)
 - 相同`offset_time`点复用一次姿态插值和旋转矩阵计算。
 - 点云、里程计和处理任务使用独立回调组。
 - 里程计订阅使用Reliable QoS。
-- 缺少姿态的少量点写为NaN，不因单点失败清空整帧。
+- 点云计算不持有pending队列互斥锁，每个轮询最多处理一帧。
+- 待处理队列默认只保留2帧，满载时丢弃最旧帧，避免恢复后追赶历史数据。
+- 点云最多等待50 ms补齐位姿；超时后丢弃当前帧，不阻塞后续点云。
+- 位姿间隔超过15 ms时立即切断旧连续段，并重新积累120 ms连续位姿后恢复输出。
+- 雷达上线、离线、时间纪元切换和位姿接收超时都会清空旧位姿及待处理点云。
 - 低于姿态覆盖率门限的帧丢弃，默认不发布空点云。
 - 支持点云和里程计时间偏移标定。
+
+运行模式继续由ODIN设备侧保持High Peak；本节点不调用传感器模式切换服务。
 
 60 km/h时约94 ms扫描内车辆位移约1.57 m。默认单帧最大平移门限为2.5 m，用于拒绝里程计短时跳变。
 
@@ -72,6 +78,12 @@ r_n,i = R_n<-b(t_i) r_l,i + p_n(t_i) - p_n(t_0)
 `motion_compensation/enu_cloud_transform`。当前`system_monitor`只从该入口提取RTK状态，
 不会把ENU明细透传到`/capture/system/diagnostics`，因此维护流程应直接读取`/diagnostics`。
 统计使用原子累计量，不保存逐帧历史：
+
+- `motion_state`为`NORMAL`、`POSE_GAP`或`RECOVERING`，`state_reason`记录最近状态原因。
+- `continuous_pose_duration_ms`、`max_pose_gap_ms`和`pose_stream_age_ms`用于判断数据源连续性。
+- `cloud_start_stamp_ns`、`cloud_end_stamp_ns`、`newest_pose_stamp_ns`和
+  `cloud_pose_lag_ms`用于定位点云与位姿的时间关系。
+- `clouds_dropped_pose_gap_total`和`clouds_dropped_timeout_total`区分恢复期丢帧与等待超时。
 
 - `pending_cloud_count`是发布诊断时的当前队列深度；`pending_cloud_max_count`是进程启动
   后观测到的最大深度。

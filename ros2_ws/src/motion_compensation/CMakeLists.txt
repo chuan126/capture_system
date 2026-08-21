@@ -13,6 +13,7 @@ find_package(nav_msgs REQUIRED)
 find_package(rcl_interfaces REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
 
 add_library(motion_compensation_core
   src/enu_cloud_transformer.cpp
@@ -27,7 +28,7 @@ add_executable(enu_cloud_transform_node src/enu_cloud_transform_node.cpp)
 target_link_libraries(enu_cloud_transform_node motion_compensation_core)
 ament_target_dependencies(
   enu_cloud_transform_node
-  builtin_interfaces diagnostic_msgs nav_msgs rcl_interfaces rclcpp sensor_msgs)
+  builtin_interfaces diagnostic_msgs nav_msgs rcl_interfaces rclcpp sensor_msgs std_msgs)
 
 add_executable(odometry_timestamp_adapter_node src/odometry_timestamp_adapter_node.cpp)
 target_link_libraries(odometry_timestamp_adapter_node motion_compensation_core)

@@ -155,6 +155,13 @@ PoseBuffer::AddResult PoseBuffer::add(const PoseSample & sample) noexcept
     }
     return AddResult::kRejected;
   }
+  if (!samples_.empty() &&
+    normalized.stamp_ns - samples_.back().stamp_ns > max_interpolation_gap_ns_)
+  {
+    samples_.clear();
+    samples_.push_back(normalized);
+    return AddResult::kGapReset;
+  }
   if (!samples_.empty() && normalized.stamp_ns == samples_.back().stamp_ns) {
     samples_.back() = normalized;
   } else {
@@ -180,6 +187,12 @@ bool PoseBuffer::empty() const noexcept
   return samples_.empty();
 }
 
+void PoseBuffer::clear() noexcept
+{
+  std::lock_guard<std::mutex> lock(mutex_);
+  samples_.clear();
+}
+
 std::int64_t PoseBuffer::oldestStampNs() const noexcept
 {
   std::lock_guard<std::mutex> lock(mutex_);
@@ -190,6 +203,12 @@ std::int64_t PoseBuffer::newestStampNs() const noexcept
 {
   std::lock_guard<std::mutex> lock(mutex_);
   return samples_.empty() ? 0 : samples_.back().stamp_ns;
+}
+
+std::int64_t PoseBuffer::continuousDurationNs() const noexcept
+{
+  std::lock_guard<std::mutex> lock(mutex_);
+  return samples_.size() < 2U ? 0 : samples_.back().stamp_ns - samples_.front().stamp_ns;
 }
 
 std::vector<PoseSample> PoseBuffer::snapshot() const
@@ -236,6 +255,11 @@ bool EnuCloudTransformer::initialized() const noexcept
   return !pose_buffer_.empty();
 }
 
+void EnuCloudTransformer::clearPoses() noexcept
+{
+  pose_buffer_.clear();
+}
+
 std::int64_t EnuCloudTransformer::oldestPoseStampNs() const noexcept
 {
   return pose_buffer_.oldestStampNs();
@@ -244,6 +268,11 @@ std::int64_t EnuCloudTransformer::oldestPoseStampNs() const noexcept
 std::int64_t EnuCloudTransformer::newestPoseStampNs() const noexcept
 {
   return pose_buffer_.newestStampNs();
+}
+
+std::int64_t EnuCloudTransformer::continuousPoseDurationNs() const noexcept
+{
+  return pose_buffer_.continuousDurationNs();
 }
 
 bool EnuCloudTransformer::transform(

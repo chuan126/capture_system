@@ -51,7 +51,7 @@ struct TransformStatistics
 class PoseBuffer
 {
 public:
-  enum class AddResult {kAccepted, kRejected, kEpochReset};
+  enum class AddResult {kAccepted, kRejected, kGapReset, kEpochReset};
 
   PoseBuffer(
     std::int64_t cache_duration_ns, std::int64_t max_interpolation_gap_ns,
@@ -60,8 +60,10 @@ public:
   AddResult add(const PoseSample & sample) noexcept;
   bool interpolate(std::int64_t stamp_ns, PoseSample & output) const noexcept;
   bool empty() const noexcept;
+  void clear() noexcept;
   std::int64_t oldestStampNs() const noexcept;
   std::int64_t newestStampNs() const noexcept;
+  std::int64_t continuousDurationNs() const noexcept;
 
   std::vector<PoseSample> snapshot() const;
   std::int64_t maxInterpolationGapNs() const noexcept;
@@ -87,8 +89,10 @@ public:
 
   PoseBuffer::AddResult addPose(const PoseSample & sample) noexcept;
   bool initialized() const noexcept;
+  void clearPoses() noexcept;
   std::int64_t oldestPoseStampNs() const noexcept;
   std::int64_t newestPoseStampNs() const noexcept;
+  std::int64_t continuousPoseDurationNs() const noexcept;
   bool transform(
     std::int64_t cloud_stamp_ns, const std::vector<TimedRadarPoint> & input,
     std::vector<EnuPoint> & output, std::string & invalid_reason,

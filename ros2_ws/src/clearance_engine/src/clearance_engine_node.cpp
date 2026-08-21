@@ -311,7 +311,14 @@ private:
     const double surface_period_s = 1.0 / surface_config.update_rate_hz;
     const bool surface_due = !surface_has_run_ ||
       std::chrono::duration<double>(current_time - last_surface_run_).count() >= surface_period_s;
-    const bool run_surface = surface_config.enabled && (!estimate.valid || surface_due);
+    if (surface_config.enabled && !estimate.valid && !surface_due) {
+      RCLCPP_DEBUG(
+        get_logger(),
+        "平面无有效候选且曲面检测处于限频周期，本帧不发布无效结果，等待下一次曲面检测");
+      return;
+    }
+    // 平面失效时也严格遵守曲面更新频率，避免位姿/点云异常期间RegionGrowing每帧满载运行。
+    const bool run_surface = surface_config.enabled && surface_due;
     if (run_surface) {
       surface_result = surface_detector_.detect(points);
       last_surface_run_ = std::chrono::steady_clock::now();

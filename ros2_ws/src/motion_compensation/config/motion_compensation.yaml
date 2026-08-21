@@ -29,16 +29,25 @@ enu_cloud_transform_node:
     # 同时拒绝单帧内明显的位置跳变。
     max_translation_per_scan_m: 2.5
 
-    # 允许点云尾部最多15 ms暂时缺少里程计覆盖。缺少姿态的尾部点写为NaN，
-    # 不再持续等待到队列溢出。
-    allowed_partial_tail_s: 0.015
+    # 等待超时后不接受缺少姿态的点云尾部。保持0可确保净空检测只使用完整时间覆盖；
+    # 如仅用于降级预览，可单独评估后适当放宽，不能直接用于安全净空结果。
+    allowed_partial_tail_s: 0.0
+
+    # 单帧最多等待50 ms补齐点云尾部位姿。超时立即丢弃该帧，避免队首阻塞后续点云。
+    max_cloud_wait_s: 0.05
+
+    # 高频位姿连续50 ms未到达即判定数据流中断，并清空旧位姿和待处理点云。
+    pose_stream_timeout_s: 0.05
+
+    # 中断恢复后至少重新积累120 ms连续位姿，完整覆盖约94 ms扫描周期后才恢复发布。
+    recovery_continuous_pose_s: 0.12
 
     # 设备时间偏移标定接口。默认不修正，单位为秒。
     odometry_time_offset_s: 0.0
     cloud_time_offset_s: 0.0
 
-    # 点云与里程计回调独立处理，等待队列增加到5帧。
-    pending_cloud_limit: 5
+    # 只缓存最多2帧并在满载时保留最新帧，防止恢复后继续处理过期点云。
+    pending_cloud_limit: 2
 
     # AIO-3588JQ实机A/B/C表明10 ms已获得绝大多数空轮询CPU收益；允许范围[1, 100] ms。
     # 本参数仅在节点启动时读取，修改后需要重启节点或capture-system.service。
@@ -46,6 +55,10 @@ enu_cloud_transform_node:
 
     # 复用系统现有原始诊断入口；ENU明细直接从该Topic读取。
     diagnostics_topic: /diagnostics
+
+    # ODIN重连事件用于立即清空旧纪元缓存；保持High Peak，节点不调用传感器模式服务。
+    device_online_topic: /capture/lidar/device_online
+    device_offline_topic: /capture/lidar/device_offline
 
     # 姿态覆盖率达到75%时，转换器本身会发布含NaN的部分点云。
     # 低于75%的帧默认丢弃，不把稀疏点云送入净空检测。

@@ -67,5 +67,5 @@ clearance_engine_node:
     surface.min_confidence: 0.55
     # 平面与曲面高度差不超过该值时优先保留平面，单位m。
     surface.plane_preference_tolerance_m: 0.02
-    # 平面有效时曲面分支的最高运行频率，单位Hz；平面无效时立即执行曲面检测。
+    # 曲面分支的最高运行频率，单位Hz；平面无效时同样限频，避免故障期间放大CPU压力。
     surface.update_rate_hz: 5.0

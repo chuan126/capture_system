@@ -17,6 +17,11 @@ def test_motion_compensation_yaml_uses_formal_ten_millisecond_default() -> None:
     assert parameters["processing_poll_interval_ms"] == 10
     assert "processing_period_ms" not in parameters
     assert parameters["diagnostics_topic"] == "/diagnostics"
+    assert parameters["max_cloud_wait_s"] == 0.05
+    assert parameters["pose_stream_timeout_s"] == 0.05
+    assert parameters["recovery_continuous_pose_s"] == 0.12
+    assert parameters["pending_cloud_limit"] == 2
+    assert parameters["allowed_partial_tail_s"] == 0.0
 
 
 def test_formal_bringup_loads_motion_compensation_package_yaml() -> None:
@@ -68,4 +73,3 @@ def test_queue_wait_timestamp_is_taken_at_actual_pending_queue_insertion() -> No
 
     assert lock_position < push_position <= timestamp_position
     assert "const auto enqueued_at" not in callback
-
