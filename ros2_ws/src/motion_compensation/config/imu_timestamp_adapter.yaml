@@ -1,0 +1,10 @@
+imu_timestamp_adapter_node:
+  ros__parameters:
+    # 厂商同一IMU数据包内约400 Hz样本共享包时间戳；业务层展开为逐样本设备时间。
+    input_topic: /capture/imu/data_raw
+    output_topic: /capture/imu/data
+    sample_rate_hz: 400.0
+    packet_timestamp_is_first_sample: true
+    flush_timeout_ms: 5
+    maximum_bundle_samples: 64
+    timestamp_reset_threshold_s: 1.0

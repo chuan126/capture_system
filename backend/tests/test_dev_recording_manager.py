@@ -61,11 +61,25 @@ def test_raw_cloud_recording_uses_fixed_mcap_profile(monkeypatch, tmp_path: Path
 
     command = captured["command"]
     assert command[:6] == ["ros2", "bag", "record", "--storage", "mcap", "--output"]
-    assert command[-2:] == [
+    assert command[7:] == list(RAW_CLOUD_PROFILE.topics)
+    assert RAW_CLOUD_PROFILE.topics == (
         "/capture/lidar/points_raw",
+        "/capture/imu/data_raw",
+        "/capture/imu/data",
         "/capture/odometry/high_rate_raw",
-    ]
-    assert len(command) == 9
+        "/capture/odometry/high_rate",
+        "/capture/rtk/fix",
+        "/capture/rtk/status",
+        "/capture/localization/fix",
+        "/capture/localization/status",
+        "/capture/localization/odometry",
+        "/capture/debug/frame_context",
+        "/capture/clearance/result",
+        "/capture/lidar/device_online",
+        "/capture/lidar/device_offline",
+        "/capture/system/diagnostics",
+        "/diagnostics",
+    )
     assert status["active"] is True
     assert status["profile"] == "raw_cloud"
     assert str(tmp_path / "dev-tests" / "raw-cloud") in str(status["path"])
@@ -77,6 +91,7 @@ def test_raw_cloud_recording_uses_fixed_mcap_profile(monkeypatch, tmp_path: Path
 def test_raw_sensor_profile_records_existing_high_rate_sources_without_visual_or_temperature() -> None:
     assert RAW_SENSOR_PROFILE.topics == (
         "/capture/lidar/points_raw",
+        "/capture/imu/data_raw",
         "/capture/imu/data",
         "/capture/odometry/high_rate_raw",
         "/capture/odometry/slam",

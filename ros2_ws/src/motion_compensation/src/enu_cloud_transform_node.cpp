@@ -100,7 +100,7 @@ public:
     input_topic_ = declare_parameter<std::string>(
       "input_cloud_topic", "/capture/lidar/points_raw");
     odometry_topic_ = declare_parameter<std::string>(
-      "odometry_topic", "/capture/odometry/high_rate");
+      "odometry_topic", "/capture/localization/fusion_odometry");
     output_topic_ = declare_parameter<std::string>(
       "output_cloud_topic", "/capture/lidar/points_compensated_enu");
     output_frame_id_ = declare_parameter<std::string>("output_frame_id", "lidar_local_enu");
@@ -467,6 +467,10 @@ private:
     sample.quaternion_xyzw = {
       message->pose.pose.orientation.x, message->pose.pose.orientation.y,
       message->pose.pose.orientation.z, message->pose.pose.orientation.w};
+    sample.translation_valid =
+      std::isfinite(message->pose.covariance[0]) && message->pose.covariance[0] >= 0.0 &&
+      std::isfinite(message->pose.covariance[7]) && message->pose.covariance[7] >= 0.0 &&
+      std::isfinite(message->pose.covariance[14]) && message->pose.covariance[14] >= 0.0;
     std::lock_guard<std::mutex> pose_lock(pose_stream_mutex_);
     const std::int64_t previous_pose_stamp_ns = transformer_->newestPoseStampNs();
     const auto add_result = transformer_->addPose(sample);
@@ -725,7 +729,7 @@ private:
     if (statistics.mode == TransformMode::kRotationOnly) {
       RCLCPP_WARN_THROTTLE(
         get_logger(), *get_clock(), 5000,
-        "本帧使用ROTATION_ONLY：ODIN平移不可用或超过门限，最大帧内位移=%.3fm",
+        "本帧使用ROTATION_ONLY：融合平移质量无效或超过门限，最大帧内位移=%.3fm",
         statistics.maximum_translation_m);
     }
 

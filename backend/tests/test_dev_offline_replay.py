@@ -109,6 +109,13 @@ def test_offline_commands_reuse_formal_nodes_with_isolated_topics(tmp_path: Path
     assert f"output_cloud_topic:={OFFLINE_COMPENSATED_CLOUD_TOPIC}" in commands["motion"]
     assert f"input_topic:={OFFLINE_COMPENSATED_CLOUD_TOPIC}" in commands["clearance"]
     assert f"output_topic:={OFFLINE_CLEARANCE_TOPIC}" in commands["clearance"]
+    player = commands["player"]
+    topics_index = player.index("--topics")
+    remap_index = player.index("--remap")
+    assert player[topics_index + 1:remap_index] == [
+        "/capture/lidar/points_raw",
+        "/capture/odometry/high_rate_raw",
+    ]
     assert "ransac.max_candidate_planes:=2500" in commands["clearance"]
     assert "processing_poll_interval_ms:=10" in commands["motion"]
 

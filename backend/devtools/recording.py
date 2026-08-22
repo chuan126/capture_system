@@ -29,11 +29,25 @@ class RecordingProfile:
 RAW_CLOUD_PROFILE = RecordingProfile(
     name="raw_cloud",
     directory_prefix="raw-cloud",
-    # 界面仍定义为“原始点云样本”。high_rate_raw只用于离线重放完整运动补偿链，
-    # 不作为独立用户数据类型暴露。
+    # 测试页按一个“综合测试样本”管理。原始点云与位姿保留完整离线重放能力，
+    # 其余低带宽Topic用于保留RTK、IMU、采样序号、算法结果和诊断上下文。
     topics=(
         "/capture/lidar/points_raw",
+        "/capture/imu/data_raw",
+        "/capture/imu/data",
         "/capture/odometry/high_rate_raw",
+        "/capture/odometry/high_rate",
+        "/capture/rtk/fix",
+        "/capture/rtk/status",
+        "/capture/localization/fix",
+        "/capture/localization/status",
+        "/capture/localization/odometry",
+        "/capture/debug/frame_context",
+        "/capture/clearance/result",
+        "/capture/lidar/device_online",
+        "/capture/lidar/device_offline",
+        "/capture/system/diagnostics",
+        "/diagnostics",
     ),
 )
 
@@ -60,6 +74,7 @@ RAW_SENSOR_PROFILE = RecordingProfile(
     directory_prefix="raw-sensor",
     topics=(
         "/capture/lidar/points_raw",
+        "/capture/imu/data_raw",
         "/capture/imu/data",
         "/capture/odometry/high_rate_raw",
         "/capture/odometry/slam",

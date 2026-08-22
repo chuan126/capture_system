@@ -12,7 +12,7 @@ def generate_launch_description() -> LaunchDescription:
     localization_parameters = (
         Path(get_package_share_directory("localization"))
         / "config"
-        / "dead_reckoning.yaml"
+        / "fusion_navigation.yaml"
     )
     return LaunchDescription(
         [
@@ -23,8 +23,8 @@ def generate_launch_description() -> LaunchDescription:
             ),
             Node(
                 package="localization",
-                executable="dead_reckoning_node",
-                name="dead_reckoning_node",
+                executable="fusion_navigation_node",
+                name="fusion_navigation_node",
                 output="screen",
                 parameters=[str(localization_parameters)],
             ),

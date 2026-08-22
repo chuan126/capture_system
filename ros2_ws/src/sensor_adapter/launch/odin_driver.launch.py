@@ -8,7 +8,8 @@ from launch_ros.parameter_descriptions import ParameterValue
 TOPIC_REMAPPINGS = (
     ("cloud/raw", "/capture/lidar/points_raw"),
     ("cloud/slam", "/capture/lidar/points_slam"),
-    ("imu", "/capture/imu/data"),
+    # 厂商包内IMU样本共享时间戳，先保留raw入口，再由业务适配器展开到/capture/imu/data。
+    ("imu", "/capture/imu/data_raw"),
     ("odometry_hf", "/capture/odometry/high_rate_raw"),
     ("odometry", "/capture/odometry/slam"),
 )

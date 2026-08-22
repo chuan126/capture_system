@@ -18,6 +18,8 @@ struct PoseSample
   std::int64_t stamp_ns{0};
   std::array<double, 3> position_m{};
   std::array<double, 4> quaternion_xyzw{};
+  // false表示仍可用于旋转插值，但平移不得进入正式动态补偿。
+  bool translation_valid{true};
 };
 
 struct TimedRadarPoint

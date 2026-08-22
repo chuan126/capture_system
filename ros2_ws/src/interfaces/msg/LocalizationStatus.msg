@@ -9,11 +9,20 @@ uint8 HEADING_RTK_TRACK=1
 uint8 HEADING_RTK_POSITION=2
 uint8 HEADING_ODIN=3
 uint8 HEADING_IMU_GYRO=4
+uint8 HEADING_FUSION=5
 
 uint8 SCALE_DISABLED=0
 uint8 SCALE_COLLECTING=1
 uint8 SCALE_VALID=2
 uint8 SCALE_REJECTED=3
+
+# 连续组合导航模式；该字段独立于上面的旧版mode，避免破坏既有界面协议。
+uint8 FUSION_MODE_INVALID=0
+uint8 FUSION_MODE_LOCAL_INS=1
+uint8 FUSION_MODE_LOCAL_LIO=2
+uint8 FUSION_MODE_GLOBAL_RTK_INS=3
+uint8 FUSION_MODE_GLOBAL_RTK_LIO=4
+uint8 FUSION_MODE_GLOBAL_ALIGNING=5
 
 std_msgs/Header header
 
@@ -28,7 +37,7 @@ float64 altitude
 # 用户显示用地理航向，单位deg，North=0，East=90，顺时针为正。
 float64 heading_deg
 
-# ODIN四元数按安装矩阵换算得到的车辆安装姿态，单位deg。
+# 融合四元数按安装矩阵换算得到的车辆安装姿态，单位deg。
 # 界面和TXT的车辆方位使用上面的heading_deg；vehicle_heading_deg仅保留协议兼容。
 bool vehicle_attitude_valid
 float64 vehicle_pitch_deg
@@ -72,3 +81,35 @@ float64 imu_age_s
 
 float64 position_difference_to_rtk_m
 string invalid_reason
+
+# 新组合导航质量。local有效不代表可以输出经纬高或绝对航向。
+uint8 fusion_mode
+bool local_navigation_valid
+bool global_position_valid
+bool rtk_update_valid
+bool lidar_update_valid
+bool translation_compensation_valid
+float64 local_position_east_m
+float64 local_position_north_m
+float64 local_position_up_m
+float64 local_velocity_east_mps
+float64 local_velocity_north_mps
+float64 local_velocity_up_mps
+float64 accelerometer_bias_x_mps2
+float64 accelerometer_bias_y_mps2
+float64 accelerometer_bias_z_mps2
+float64 position_std_m
+float64 velocity_std_mps
+float64 attitude_std_deg
+float64 inertial_only_duration_s
+float64 lidar_fitness_score_m2
+float64 lidar_initial_fitness_score_m2
+float64 lidar_inlier_ratio
+uint8 lidar_observable_dof
+uint8 lidar_observable_rotation_dof
+bool lidar_large_rotation_pending
+uint8 lidar_large_rotation_confirmation_count
+uint32 lidar_map_point_count
+float64 last_attitude_correction_deg
+uint8 last_fusion_update_iteration_count
+string fusion_quality_reason

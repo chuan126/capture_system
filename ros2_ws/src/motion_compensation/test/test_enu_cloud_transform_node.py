@@ -55,7 +55,7 @@ class TestEnuCloudTransformNode(unittest.TestCase):
             PointCloud2, "/capture/lidar/points_raw", reliable
         )
         odometry_publisher = self.node.create_publisher(
-            Odometry, "/capture/odometry/high_rate", reliable
+            Odometry, "/capture/localization/fusion_odometry", reliable
         )
         outputs = []
         contexts = []

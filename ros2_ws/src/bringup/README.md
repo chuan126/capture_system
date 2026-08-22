@@ -24,8 +24,9 @@ ros2 launch bringup clearance_preview.launch.py
 默认加载 `clearance_engine_tunnel_4cm.yaml`，并启动：
 
 1. `odometry_timestamp_adapter_node`；
-2. `enu_cloud_transform_node`；
-3. `clearance_engine_node`。
+2. `imu_timestamp_adapter_node`；
+3. `enu_cloud_transform_node`；
+4. `clearance_engine_node`。
 
 净空节点保留原有 RANSAC 平面分支，并按同一配置启动局部二次曲面分支；输出 Topic
 和 `ClearanceResult` 消息格式不变。
@@ -54,14 +55,14 @@ ros2 launch bringup task_control.launch.py \
   data_root:=<project_root>/runtime
 ```
 
-该入口启动 `dead_reckoning_node`、`data_recorder_node` 和 `task_manager_node`。开始与停止流程不会等待
+该入口启动 `fusion_navigation_node`、`data_recorder_node` 和 `task_manager_node`。开始与停止流程不会等待
 雷达或 RTK 真实数据检查。入口和出口 RTK 使用当时最近快照，坐标缺失时只记录
 `unconfirmed`，不会阻塞任务。
 
-`dead_reckoning_node`加载 `localization/config/dead_reckoning.yaml`，发布
-`/capture/localization/fix`、`/capture/localization/status` 和
-`/capture/localization/odometry`。记录器会同时保存原始RTK和融合定位结果，不能用
-DR坐标覆盖原始RTK历史数据。
+`fusion_navigation_node`加载 `localization/config/fusion_navigation.yaml`，发布高频
+`/capture/localization/fusion_odometry`以及既有业务 `fix/status/odometry`。运动补偿只从
+高频融合Topic获取平移，ODIN位置只保留作诊断。记录器会同时保存原始RTK和融合定位结果，
+不能用融合坐标覆盖原始RTK历史数据。
 
 ## 开发核心参数装订
 

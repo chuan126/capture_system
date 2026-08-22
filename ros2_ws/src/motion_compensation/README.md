@@ -5,7 +5,7 @@
 > 当前状态：逐点旋转和平移补偿已实现；杆臂、外参和时间偏移仍需实测标定。
 
 
-该包负责高频里程计时间适配、位姿缓存、逐点运动补偿和局部导航坐标点云输出。
+该包负责ODIN四元数与IMU包时间适配、融合位姿缓存、逐点运动补偿和局部导航坐标点云输出。
 
 ## 数据链路
 
@@ -15,13 +15,23 @@
 → odometry_timestamp_adapter_node
 → /capture/odometry/high_rate
 
+厂商驱动 imu
+→ /capture/imu/data_raw
+→ imu_timestamp_adapter_node
+→ /capture/imu/data
+
+/capture/odometry/high_rate + /capture/imu/data + RTK + compensated cloud
+→ fusion_navigation_node
+→ /capture/localization/fusion_odometry
+
 /capture/lidar/points_raw
-/capture/odometry/high_rate
+/capture/localization/fusion_odometry
 → enu_cloud_transform_node
 → /capture/lidar/points_compensated_enu
 ```
 
-厂商驱动源码保持不变。业务侧时间适配节点将同一包内具有重复时间戳的高频里程计样本按配置采样率展开。默认高频采样率为400 Hz，包时间戳按第一个样本解释。
+厂商驱动源码保持不变。两个业务侧时间适配节点分别将同一包内具有重复时间戳的高频
+四元数和IMU样本按配置采样率展开。默认高频采样率为400 Hz，包时间戳按第一个样本解释。
 
 点云与里程计统一使用 ODIN 设备时间域。设备热重连导致时间戳回退超过
 `timestamp_reset_threshold_s`（默认 1 秒）时，适配器开启新时间纪元，并由运动补偿
@@ -42,9 +52,10 @@ t_i = cloud.header.stamp + offset_time_i
 r_n,i = R_n<-b(t_i) r_l,i + p_n(t_i) - p_n(t_0)
 ```
 
-`R_n<-b(t_i)`由高频里程计四元数SLERP插值得到，`p_n(t_i)`由高频里程计位置线性插值得到。输出字段固定为`x=East/local horizontal 1`、`y=North/local horizontal 2`、`z=Up`。高度检测只要求第三轴稳定为Up，水平轴不必严格对应真实地理东、北。
-
-本模块不使用IMU瞬时加速度修正Up。
+`R_n<-b(t_i)`与`p_n(t_i)`都从`/capture/localization/fusion_odometry`插值得到。姿态已经
+包含ODIN相邻四元数增量传播以及RTK/LiDAR有限角修正，位置来自IMU预测及RTK/LiDAR更新。
+ODIN `pose.position`和`twist.linear`不再进入正式运动补偿。输出字段固定为
+`x=East/local horizontal 1`、`y=North/local horizontal 2`、`z=Up`。
 
 ## 高动态处理
 

@@ -17,8 +17,11 @@
 ```text
 ODIN1 Lite 原始点云
 → /capture/lidar/points_raw
-→ 高频里程计时间戳展开
-→ 逐点姿态插值和扫描内相对平移补偿
+ODIN高频四元数 + IMU
+→ 逐样本时间戳展开
+→ RTK/IMU/ODIN/LiDAR连续融合导航
+→ /capture/localization/fusion_odometry
+→ 逐点融合姿态插值和扫描内相对平移补偿
 → /capture/lidar/points_compensated_enu
 ├→ clearance_engine
 │  → /capture/clearance/result
@@ -29,8 +32,8 @@ RTK 串口
 → /capture/rtk/fix
 → /capture/rtk/status
 
-ODIN高频里程计 + RTK
-→ localization
+ODIN高频四元数 + IMU + RTK + 补偿点云
+→ fusion_navigation_node
 → /capture/localization/fix
 → /capture/localization/status
 → /capture/localization/odometry
@@ -63,11 +66,12 @@ FastAPI
 ## 已实现能力
 
 - ODIN1 Lite 厂商驱动接入及稳定 `/capture/...` Topic remapping。
-- 高频里程计重复时间戳展开。
-- 原始点云逐点姿态补偿和扫描内相对平移补偿。
+- 高频里程计与IMU包内重复时间戳展开。
+- ODIN有限旋转增量、IMU加速度、RTK位置和LiDAR局部地图的连续融合导航。
+- 原始点云按融合位姿逐点姿态补偿和扫描内相对平移补偿；平移质量不足时整帧仅旋转降级。
 - 单帧顶部 ROI、多候选近水平面 RANSAC、连通区域复核和最低平面高度输出。
 - RTK 串口接入、NMEA 解析结果发布和网页字段映射。
-- RTK失锁后的ODIN1航位推算、融合定位经纬高输出和状态诊断。
+- 室外RTK约束与失锁后IMU/ODIN/LiDAR局部导航、融合经纬高输出和状态诊断。
 - 雷达、RTK、RK3588 资源和数据目录容量的统一系统诊断。
 - 局部东北天点云的 5 Hz、最多 10,000 点网页预览。
 - FastAPI 静态页面托管、健康检查、任务元数据 SQLite 持久化、历史测量文件读取和实时 WebSocket。
@@ -90,8 +94,8 @@ FastAPI
 - 数据回放页面读取任务测量 SQLite 文件时采用 prefix 首段和按视图加载的曲线接口。初始长任务只读取开头固定样本段，已加载窗口按 `sample_index` 合并缓存在当前页面；回拖到分辨率足够的已加载区域不重复请求，放大时只对分辨率不足的区域补读。显示降采样保留局部最低值、最高值和无效断点，正式 50 Hz 数据不改变。报告页已经接入正式 TXT 明细和 PDF 汇总生成。正常停止且包含有效样本的正式记录可以导出。
 - 开始和停止均为单击执行，不显示确认弹窗。停止完成后按创建时间自动选中下一项待执行任务，但不会自动开始。
 - 数据回放页面支持单项、多项、按日期和当前筛选结果全选后逻辑删除。采集中和已暂停任务不能删除，批量删除由 FastAPI 单事务处理。物理数据清理接口仍保留给维护使用，但客户回放页面不再显示清理入口。
-- `localization` 已实现RTK失锁后的实时ODIN航位推算；进出洞语义化稳定窗口和出口
-  后处理约束修正仍需结合实车数据继续验证。
+- `localization` 已接入连续组合导航首版；时间偏移、IMU零偏、LiDAR退化门限、长期漂移和
+  出口RTK约束后的轨迹一致性仍需使用版本化实车数据继续验证。
 - 当前没有正式路面模型和车辆通行包络。任务级最低值由回放和报告后端从正式测量数据库计算。
 
 完整状态见 [当前实现状态](docs/当前实现状态.md)。

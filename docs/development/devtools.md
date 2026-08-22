@@ -21,7 +21,7 @@ bash scripts/build/build.sh all --release --variant customer
 
 - 定位状态。复用采集首页 `/ws/v1/rtk`，同时显示 RTK 解状态、卫星数、HDOP、串口状态以及融合定位模式、经纬高、车辆方位、俯仰和横滚；
 - 净空算法。复用 `/ws/v1/clearance`，显示原始 `lidar_to_top_m`、本帧真实 RANSAC 平面模型数、区域内点、有效点比例、处理时间、网格覆盖面积和平面倾角；
-- 保存原始点云。页面只提供保存、停止、删除三种样本操作。样本主数据为 `/capture/lidar/points_raw`，同时在同一 MCAP 中保存 `/capture/odometry/high_rate_raw`，后者只用于离线重现完整运动补偿链；
+- 保存综合测试样本。页面只提供保存、停止、删除三种样本操作。同一 MCAP 完整保存原始点云、IMU、原始与时间适配后高频里程计、RTK Fix/质量/时间、融合定位、点云帧序号与补偿上下文、净空结果、设备上下线和诊断；
 - 核心配置。主列表只读显示 9 项关键参数的正式 YAML 值和当前 ROS 运行值，运行值不一致时明确标记；可写参数需要打开详情后才能设置当前运行值。
 
 当前页面不调用 `/api/dev/overview`，因此打开测试页不会续租 `DevTelemetryBridge` 的原始点云、补偿点云和高频里程计订阅。后端 overview 接口继续保留供直接诊断使用。页面也不连接 `/ws/dev/raw-cloud-preview`；三维点云统一在采集首页查看。
@@ -36,6 +36,7 @@ bash scripts/build/build.sh all --release --variant customer
 
 ```text
 /capture/lidar/points_raw
+/capture/imu/data_raw
 /capture/imu/data
 /capture/odometry/high_rate_raw
 /capture/odometry/slam
@@ -43,7 +44,9 @@ bash scripts/build/build.sh all --release --variant customer
 /capture/lidar/device_offline
 ```
 
-`/capture/imu/data` 保存厂商当前提供的 `sensor_msgs/Imu` 原始消息。高频姿态四元数主要保存在 `/capture/odometry/high_rate_raw` 的 `nav_msgs/Odometry.pose.pose.orientation` 中。
+`/capture/imu/data_raw` 保存厂商同包共享时间戳的原始 `sensor_msgs/Imu`，
+`/capture/imu/data` 保存业务适配器展开后的逐样本时间戳。高频姿态四元数主要保存在
+`/capture/odometry/high_rate_raw` 的 `nav_msgs/Odometry.pose.pose.orientation` 中。
 
 本版不新增视觉数据录制，也不新增雷达或 IMU 内部温度字段。等待厂商后续驱动提供稳定来源后再接入。
 
@@ -68,7 +71,28 @@ bash scripts/build/build.sh all --release --variant customer
 
 三种新 profile 支持 5、10、30 秒和手动停止的连续录制。同一时间只允许一个开发录制。磁盘可用空间低于 2 GiB 时后台自动停止。
 
-`raw_sensor`、`algorithm_debug`、`full_debug` 以及旧 `/recordings/diagnostic/start` 接口继续保留，供专项故障分析直接调用。日常单页测试界面只暴露 `raw-cloud` 样本入口。该 profile 固定记录 `/capture/lidar/points_raw` 与 `/capture/odometry/high_rate_raw`，前端仍按一个“原始点云样本”管理，不把辅助里程计作为独立数据类型暴露。
+`raw_sensor`、`algorithm_debug`、`full_debug` 以及旧 `/recordings/diagnostic/start` 接口继续保留，供专项故障分析直接调用。日常单页测试界面只暴露 `raw-cloud` 综合测试样本入口。该 profile 在同一 MCAP 中记录：
+
+```text
+/capture/lidar/points_raw              # 完整原始点云和每点offset_time
+/capture/imu/data_raw                  # 厂商包时间戳IMU，用于核对展开逻辑
+/capture/imu/data                      # 三轴角速度、三轴加速度和IMU时间
+/capture/odometry/high_rate_raw        # ODIN原始位置、四元数和速度
+/capture/odometry/high_rate            # 时间适配后位姿，用于对照
+/capture/rtk/fix                       # RTK消息时间、纬度、经度和高程
+/capture/rtk/status                    # GNSS UTC、PDOP、HDOP、星数、解状态和误差指标
+/capture/localization/fix              # 融合后地理位置
+/capture/localization/status           # 定位模式、车辆姿态、航向、时效和标定状态
+/capture/localization/odometry         # 融合局部里程
+/capture/debug/frame_context           # cloud_sequence、点云首尾时间和补偿诊断
+/capture/clearance/result              # 净空值、最低点XYZ、质量和无效原因
+/capture/lidar/device_online           # 雷达上线事件
+/capture/lidar/device_offline          # 雷达离线事件
+/capture/system/diagnostics            # 系统汇总诊断
+/diagnostics                           # ROS算法和数据链诊断
+```
+
+补偿后整帧点云不在该 profile 重复保存，避免文件大小接近翻倍；它由原始点云、原始里程计和参数快照离线重建。离线检测只重放两个原始输入到隔离 Topic，不会把录制的RTK、IMU或诊断回放到正式命名空间。
 
 数据目录分别位于：
 
@@ -156,7 +180,7 @@ MCAP points_raw + high_rate_raw
 
 核心配置区同时显示正式 YAML 配置值和最近一次真实 ROS 运行值。ROS 节点不可用时，运行值保持空值并显示真实错误，不能以 YAML 配置值替代运行值。
 
-开发录制启动不等待参数 Service。`ros2 bag record` 创建录制目录后立即进入活动状态，参数快照随后异步写入。测试页原始点云区只提供“保存、停止、删除”，并列出最近样本供选择。正在保存或正在被离线算法使用的样本不能删除。旧版本仅包含 `/capture/lidar/points_raw` 的样本会标记为缺少辅助里程计，不允许完整离线检测。
+开发录制启动不等待参数 Service。`ros2 bag record` 创建录制目录后立即进入活动状态，参数快照随后异步写入。测试页综合测试样本区只提供“保存、停止、删除”，并列出最近样本供选择。正在保存或正在被离线算法使用的样本不能删除。旧版本仅包含 `/capture/lidar/points_raw` 的样本会标记为缺少辅助里程计，不允许完整离线检测。
 
 ## 9. 开发数据目录
 

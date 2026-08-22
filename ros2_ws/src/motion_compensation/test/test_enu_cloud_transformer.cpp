@@ -208,8 +208,30 @@ TEST(EnuCloudTransformerTest, RejectsTranslationOutlierWhenFallbackDisabled)
   std::string reason;
   TransformStatistics statistics;
   EXPECT_FALSE(transformer.transform(1000000000LL, input, output, reason, &statistics));
-  EXPECT_EQ(reason, "ODOM_TRANSLATION_OUTLIER");
+  EXPECT_EQ(reason, "FUSION_TRANSLATION_OUTLIER");
   EXPECT_EQ(statistics.mode, TransformMode::kReject);
+}
+
+TEST(EnuCloudTransformerTest, FusionQualityMarkerFallsBackWholeFrameToRotationOnly)
+{
+  EnuCloudTransformer transformer(
+    2000000000LL, 20000000LL, true, 0.75, 2.5, true);
+  PoseSample first = pose(1000000000LL, 0.0);
+  PoseSample second = pose(1010000000LL, 1.0);
+  first.translation_valid = false;
+  second.translation_valid = false;
+  ASSERT_EQ(transformer.addPose(first), PoseBuffer::AddResult::kAccepted);
+  ASSERT_EQ(transformer.addPose(second), PoseBuffer::AddResult::kAccepted);
+
+  const std::vector<TimedRadarPoint> input{{2.0F, 0.0F, 0.0F, 0.005F}};
+  std::vector<EnuPoint> output;
+  std::string reason;
+  TransformStatistics statistics;
+  ASSERT_TRUE(transformer.transform(1000000000LL, input, output, reason, &statistics));
+  EXPECT_EQ(statistics.mode, TransformMode::kRotationOnly);
+  EXPECT_TRUE(statistics.translation_fallback);
+  ASSERT_EQ(output.size(), 1U);
+  EXPECT_NEAR(output[0].east, 2.0, 1.0e-6);
 }
 
 

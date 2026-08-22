@@ -1,7 +1,8 @@
 enu_cloud_transform_node:
   ros__parameters:
     input_cloud_topic: /capture/lidar/points_raw
-    odometry_topic: /capture/odometry/high_rate
+    # 正式平移和姿态缓存来自连续组合导航；禁止切回ODIN原始pose.position。
+    odometry_topic: /capture/localization/fusion_odometry
     output_cloud_topic: /capture/lidar/points_compensated_enu
     output_frame_id: lidar_local_enu
 
@@ -14,8 +15,8 @@ enu_cloud_transform_node:
     # 超过该间隔不再强行插值，避免高角加速度下产生较大姿态误差。
     max_interpolation_gap_s: 0.015
 
-    # 使用p_n(t_i)-p_n(t_0)补偿约94 ms滚动扫描期间的车辆平移。
-    # 这里只使用同一帧内的相对位移，不使用累计位置作为最终测距结果。
+    # 使用p_fusion(t_i)-p_fusion(t_0)补偿约94 ms滚动扫描期间的车辆平移。
+    # 融合位置质量无效时整帧退化为ROTATION_ONLY，不使用ODIN平移兜底。
     use_odometry_translation: true
 
     # 帧起始位姿无法插值时，本帧退化为仅旋转补偿，避免直接清空整帧。

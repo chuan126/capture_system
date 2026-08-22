@@ -1,177 +1,163 @@
 # localization
 
-核对日期：2026-08-21
+核对日期：2026-08-22
 
-> 当前状态：已新增RTK失锁后的ODIN1航位推算、融合定位状态输出、WGS84坐标转换、
-> 航向对齐和可选二维相似变换尺度标定。实车参数仍需现场标定。
+正式节点为 `fusion_navigation_node`。它维护一套跨室外、隧道和室内连续的局部导航状态。
+旧 `dead_reckoning_node` 仅保留兼容，不由正式bringup启动。厂商驱动不在本包修改范围内。
 
-
-负责 RTK 稳定窗口、入口/出口候选、洞内相对里程、实时轨迹质量和出口约束后的
-修正关系。本包区分实时估计与后处理修正，不把未经标定的 ODIN1 Lite 里程当作精确
-桩号；任务生命周期仍由 `task_manager` 管理。
-
-## 当前文件结构
+## 正式输入
 
 ```text
-localization/                                      # 定位与局部水平姿态算法ROS 2包根目录
-├── Attitude/                                      # 用户提供的独立姿态与矩阵算法目录
-│   ├── attitude_matrix.cpp                        # 原四元数、欧拉角和矩阵计算公式
-│   └── attitude_matrix.h                          # 独立算法函数声明和数据顺序约定
-├── CMakeLists.txt                                 # 姿态矩阵、航位推算核心库、ROS节点和单元测试构建配置
-├── config/                                        # localization正式参数目录
-│   └── dead_reckoning.yaml                        # RTK/ODIN融合定位和DR参数
-├── package.xml                                    # ROS 2包元数据与测试依赖
-├── README.md                                      # 模块职责、坐标语义和验证说明
-├── include/                                       # 可供运动补偿和净空模块复用的头文件目录
-│   └── localization/                              # localization命名空间头文件目录
-│       ├── attitude_transform.hpp                 # ROS顺序校验及雷达点转换适配接口
-│       ├── dead_reckoning.hpp                     # ODIN锚点航位推算和陀螺积分纯数学接口
-│       ├── geodesy.hpp                            # WGS84 LLH/ECEF/ENU坐标转换接口
-│       ├── heading_alignment.hpp                  # 航向角度与RTK状态工具接口
-│       ├── heading_rigid_alignment.hpp            # RTK/ODIN长轨迹二维刚体拟合接口
-│       ├── odometry_buffer.hpp                    # RTK时刻ODIN插值缓存接口
-│       └── similarity_alignment.hpp               # 二维相似变换尺度和旋转联合估计接口
-├── src/                                           # 算法实现和ROS适配节点目录
-│   ├── attitude_transform.cpp                     # 四元数校验、换轴和雷达点转换实现
-│   ├── dead_reckoning.cpp                         # ODIN相对位移到锚点ENU/LLH的航位推算实现
-│   ├── dead_reckoning_node.cpp                    # 订阅RTK/ODIN/IMU并发布融合定位的ROS 2节点
-│   ├── geodesy.cpp                                # WGS84坐标正反转换实现
-│   ├── heading_alignment.cpp                      # 航向wrap和单位转换实现
-│   ├── heading_rigid_alignment.cpp                # 长轨迹刚体拟合、粗差剔除和方位滤波实现
-│   ├── odometry_buffer.cpp                        # ODIN缓存、时钟映射和位置插值实现
-│   └── similarity_alignment.cpp                   # 二维相似变换最小二乘实现
-└── test/                                          # 核心算法单元测试目录
-    ├── test_attitude_matrix.cpp                   # 顺序、重力方向、换轴和无效输入测试
-    └── test_dead_reckoning_math.cpp               # WGS84、航向、尺度和DR数学测试
+/capture/odometry/high_rate            ODIN时间戳和quaternion
+/capture/imu/data                      400 Hz展开后的加速度
+/capture/rtk/fix                       latitude/longitude/altitude
+/capture/rtk/status                    RTK质量
+/capture/lidar/points_compensated_enu  使用上一时刻融合状态去畸变的局部点云
 ```
 
-## 姿态矩阵转换
+正式融合不读取ODIN `pose.position`、ODIN `twist.linear`、RTK速度、RTK航迹角、
+Doppler速度，也不使用NHC。ODIN position只在原始Topic中保留诊断。
 
-`Attitude/`与业务代码隔离，类似`rtk_driver/NMEA0183/`。其中保留既有
-`m2qua`、`m2att`、`a2mat`、`a2qua`、`q2att`、`q2mat`、`attsyn`和基础矩阵函数
-的公式，并独立构建为`attitude_matrix`静态库。原片段中的`a2qua`调用了未提供的
-矩阵乘标量重载，本目录仅补齐该重载和函数声明，不改变姿态转换公式。
+## 状态与传播
 
-业务适配保留在`include/localization/attitude_transform.hpp`和
-`src/attitude_transform.cpp`。既有算法使用`[w,x,y,z]`四元数和行主序矩阵；
-`rosQuaternionToMatrix`负责把ROS消息的`[x,y,z,w]`顺序转换并归一化，再调用独立
-算法库的`q2mat`。
-
-当前雷达放置姿态直接规定为局部ENU零姿态：
+名义状态为：
 
 ```text
-雷达X = East
-雷达Y = North
-雷达Z = Up
+p_local, v_local, C_local<-body, ba
 ```
 
-公共接口分别使用`RadarPoint3d{x,y,z}`表示雷达体坐标，使用
-`EnuPoint3d{east,north,up}`表示局部东北天坐标，避免仅靠数组下标或注释区分
-两种坐标语义。
-
-任务初始化时保存当前姿态矩阵的转置：
+`C_local<-body`以归一化四元数保存，是完成外部观测修正后的正式完整姿态。误差状态为：
 
 ```text
-Cenu_odom = C(q0)ᵀ
-p_enu(t) = C(q0)ᵀ × C(qt) × p_lidar
+delta_x = [delta_p, delta_v, delta_attitude, delta_ba]
 ```
 
-因此初始化时`C(q0)ᵀ×C(q0)=I`，输入雷达`[x,y,z]`会原样输出为
-`[East,North,Up]`。这一定义不需要RTK、不包含平移，但它是人为规定的局部ENU，
-不代表真实地理东向。初始化前仍须确认设备静止，当前雷达Z轴应按现场要求朝上。
+共12维。`delta_attitude`只用于当前线性化点附近的局部误差，不代表累计总失准角。
 
-本库只完成姿态表达和单点纯旋转，不订阅Topic、不估计四元数，也不对整帧点云做
-时间补偿。生产链路应由`motion_compensation`根据每点`offset_time`插值高频
-四元数后调用本库；位姿覆盖不足、四元数无效或点坐标非有限时必须输出无效结果。
-
-无RTK或绝对航向源时，`East/North`只是当前雷达`X/Y`轴的局部名称；`Up`直接采用
-当前雷达`Z`轴。若要求`Up`严格沿重力反方向，初始化时必须另做水平度校验。
-
-生产净空链路使用`initializeGravityAlignedEnuReference`。该接口只消除初始化航向：
+ODIN quaternion只提供相邻有限旋转：
 
 ```text
-Cenu_odom = Rz(-yaw0)
-p_enu(t) = Rz(-yaw0) × C(qt) × p_lidar
+Delta_C_odin(k) = C_odin(k-1)^T * C_odin(k)
+C_fusion_pred(k) = C_fusion(k-1) * Delta_C_odin(k)
 ```
 
-它不会消除里程计坐标中的横滚和俯仰，因此即使初始化时雷达存在倾斜，`Up`仍沿
-里程计重力方向。旧的`initializeLocalEnuReference`保留给“启动时xyz原样对应
-East/North/Up”的局部零姿态用途，不能混用于严格重力高度计算。
+因此RTK或LiDAR写入的姿态修正不会在下一帧被原始ODIN姿态覆盖。设备时间纪元切换时保留
+`p/v/C/ba`，只把新ODIN quaternion登记为下一次增量的起点。
 
-## 构建与测试
+IMU传播使用融合姿态：
+
+```text
+a_local = C_fusion * (f_body - ba) - [0, 0, g]
+```
+
+误差传播包含姿态误差到加速度、速度和位置的耦合，因此RTK/LiDAR观测可通过交叉协方差
+间接修正速度和加速度计零偏。
+
+## 有限角姿态注入
+
+实现位于：
+
+```text
+Attitude/attitude_matrix.cpp                  项目既有a2mat/m2att
+src/finite_attitude_correction.cpp            Eigen适配、有限角注入和协方差reset
+src/fusion_navigator.cpp                      正式状态注入与迭代更新
+```
+
+输入顺序和单位固定为：
+
+```text
+[delta_theta, delta_psi, delta_phi], rad
+```
+
+每次正式修正执行：
+
+```text
+Cnn1 = a2mat([delta_theta, delta_psi, delta_phi])
+Cnb = Cnn1 * Cn1b
+```
+
+`Cn1b`是本次更新前的完整融合姿态，`Cnn1`是本次有限失准角修正，`Cnb`是更新后的正式
+融合姿态。代码没有使用 `I +/- skew(phi)` 执行累计姿态补偿。姿态注入后由四元数归一化
+保持SO(3)，协方差reset Jacobian也由同一套 `a2mat/m2att` 有限旋转数值求导得到。
+
+## RTK位置松组合
+
+RTK只形成三维位置残差。启动阶段继续使用local轨迹与RTK ENU轨迹的中心化二维刚体拟合，
+得到独立的local-to-global完整水平旋转和平移。全局初始对齐与运行中的动态姿态失准分别
+维护，不合并为一个小角度参数。
+
+RTK观测矩阵直接选择位置状态。位置观测通过传播形成的协方差交叉项修正 `v/C/ba`。
+由于位置观测本身是线性的，单次更新不需要虚假的重复量测；姿态修正仍采用有限角注入，
+长期累计可以超过小角度范围。
+
+## LiDAR完整位姿组合
+
+LiDAR前端执行：
+
+```text
+体素降采样
+ -> scan-to-local-map ICP
+ -> 最近邻内点统计
+ -> H = J^T J六自由度信息矩阵
+ -> 特征值退化分析
+ -> position + attitude观测
+ -> 迭代误差状态更新
+```
+
+不可观方向在LiDAR观测协方差中赋予很大方差，可靠方向正常更新。完全退化、内点率不足、
+fitness过大或位置创新异常时只拒绝当前LiDAR观测，不影响IMU/RTK传播。
+
+大姿态残差不按角度直接拒绝。超过配置门限后，同时要求：
+
+```text
+匹配残差改善
+内点率合格
+旋转方向可观
+连续多帧修正方向一致
+```
+
+满足确认帧数后才进入迭代融合。每次迭代重新计算当前姿态残差，再使用完整 `a2mat`
+从更新前名义状态构造候选姿态，直到修正变化收敛或达到最大次数。
+
+RTK更新成功后，局部地图同步施加同一个完整刚体坐标修正，防止地图停留在旧状态并在
+下一帧把融合结果拉回。RTK地图修正和LiDAR配准由独立互斥量保护；LiDAR观测更新自身
+保持地图固定，只修正车辆状态。
+
+## 点云运动补偿
+
+`motion_compensation`订阅 `/capture/localization/fusion_odometry`，最终逐点公式为：
+
+```text
+r_i = C_fusion(t_i) * r_l,i + p_fusion(t_i) - p_fusion(t_ref)
+```
+
+姿态和位置都来自融合状态，不使用ODIN position，也不重新代入原始ODIN quaternion。
+位置质量不足时仅当前帧退化为rotation-only；四元数覆盖不足或原始点无效时拒绝当前帧。
+
+## 关键诊断
+
+`LocalizationStatus`和 `/diagnostics`输出：
+
+```text
+position/velocity/attitude std
+LiDAR initial/final fitness、inlier ratio
+LiDAR可观自由度和可观旋转自由度
+大旋转待确认状态和连续确认次数
+本次姿态修正角与迭代次数
+最后外部修正来源
+```
+
+## 构建测试
 
 ```bash
 source /opt/ros/humble/setup.bash
 cd /path/to/capture_system/ros2_ws
-colcon build --symlink-install --packages-select localization
+colcon build --symlink-install --packages-select interfaces localization motion_compensation bringup
 source install/setup.bash
-colcon test --packages-select localization
+colcon test --packages-select localization motion_compensation sensor_adapter
 colcon test-result --all --verbose
 ```
 
-## 融合定位与航位推算
-
-新增 `dead_reckoning_node` 订阅：
-
-```text
-/capture/rtk/fix
-/capture/rtk/status
-/capture/odometry/high_rate
-/capture/imu/data
-```
-
-发布：
-
-```text
-/capture/localization/fix
-/capture/localization/status
-/capture/localization/odometry
-```
-
-RTK有效时，节点使用RTK经纬高作为绝对位置。RTK的ROS系统时间与ODIN设备上电时间不共用
-时间原点。节点以本机单调接收时刻建立映射，把每条10 Hz RTK接收时刻投影到ODIN设备时间域，
-再叠加 `rtk_time_offset_s`，从保留真实400 Hz间隔的ODIN缓存中线性插值位置。同步点按5 m间距
-加入固定容量窗口。窗口内两条轨迹分别去质心，以单位尺度二维刚体拟合
-`delta_yaw=atan2(B,A)`。RTK `track_degrees` 只用于原始诊断和融合方位不可用时的显示回退，
-ODIN四元数继续用于车辆姿态，但两者都不参与 `delta_yaw` 拟合。
-
-RTK状态无效或失锁且满足曾有可靠RTK锚点、ODIN有效、`delta_yaw`已可靠等条件后，节点冻结：
-
-```text
-LLH_anchor
-p_o_anchor
-delta_yaw_anchor
-horizontal_scale_anchor
-vertical_scale_anchor
-```
-
-洞内位置只使用ODIN已经处于水平坐标系的position：
-
-```text
-delta_p_o = p_o(t) - p_o_anchor
-delta_p_enu = Rz(delta_yaw_anchor) * S * delta_p_o
-p_enu(t) = delta_p_enu
-LLH(t) = ENU_to_WGS84(LLH_anchor, p_enu(t))
-```
-
-这里禁止再次将ODIN position乘实时姿态矩阵。完整绝对姿态使用：
-
-```text
-R_n_from_b = Rz(delta_yaw_anchor) * R_o_from_b
-```
-
-最终车辆航向仍由完整绝对姿态旋转车辆前向轴并投影到ENU水平面得到，不经过Euler角往返。
-界面和TXT的车辆俯仰、横滚使用独立显示链路：先由ODIN四元数得到 `Cnb`，再按
-`Cnm = Cnb * Cbm` 换算车辆矩阵，最后调用 `m2att`。车辆体系为 `+mX` 向右、`+mY`
-向前、`+mZ` 向上，默认 `Cbm=[0,0,1; -1,0,0; 0,-1,0]`，参数名为
-`vehicle_attitude_mount_rotation_bm`。启动时校验其正交性和行列式；该矩阵不进入ODIN位置、
-航位推算、运动补偿、点云或净空计算。融合栏、地图和TXT方位统一优先使用
-`LocalizationStatus.heading_deg`，由拟合后的 `delta_yaw` 与ODIN实时姿态得到。
-
-DR期间ODIN短时超时后，节点保持最后位置，并用IMU角速度对完整四元数做最多
-`gyro_fallback_max_duration_s`的桥接，航向来源标记为`HEADING_IMU_GYRO`。IMU超时或达到
-时限后输出无效；加速度计不用于航向修正。
-
-`scale_calibration_mode=0` 时不收集尺度轨迹、不执行拟合，水平尺度固定为1.0，
-`scale_status=SCALE_DISABLED`，且不阻塞航向对齐或进入DR。仅当模式为1时，节点用长轨迹
-RTK/ODIN同步点拟合二维相似变换；只有样本数、基线、残差和尺度范围都满足要求时应用尺度。
+测试覆盖 `a2mat` 0/1/5/20/45/90度、大三轴失准角、ODIN漂移修正保持、40度姿态观测、
+LiDAR大旋转和几何退化，以及运动补偿融合位姿接口。最终精度仍需使用目标机ROS 2/PCL环境
+和版本化实车bag回放验收。

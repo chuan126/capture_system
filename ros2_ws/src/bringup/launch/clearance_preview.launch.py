@@ -18,6 +18,11 @@ def generate_launch_description() -> LaunchDescription:
         / "config"
         / "odometry_timestamp_adapter.yaml"
     )
+    imu_adapter_parameters = (
+        Path(get_package_share_directory("motion_compensation"))
+        / "config"
+        / "imu_timestamp_adapter.yaml"
+    )
     default_parameters = (
         Path(get_package_share_directory("clearance_engine"))
         / "config"
@@ -38,6 +43,13 @@ def generate_launch_description() -> LaunchDescription:
                 name="odometry_timestamp_adapter_node",
                 output="screen",
                 parameters=[str(odometry_adapter_parameters)],
+            ),
+            Node(
+                package="motion_compensation",
+                executable="imu_timestamp_adapter_node",
+                name="imu_timestamp_adapter_node",
+                output="screen",
+                parameters=[str(imu_adapter_parameters)],
             ),
             Node(
                 package="motion_compensation",

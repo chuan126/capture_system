@@ -2,7 +2,7 @@
 
 文档状态：当前接口与规划接口并列
 
-核对日期：2026-08-06
+核对日期：2026-08-22
 
 命名空间：`/capture`
 
@@ -13,8 +13,8 @@
 | `interfaces` | 已实现 | `RtkStatus`、`ClearanceResult`、任务与记录消息和Service |
 | `rtk_driver` | 已实现 | `rtk_driver_node` |
 | `sensor_adapter` | 已实现 | Launch remapping，无独立中继节点 |
-| `motion_compensation` | 已实现 | 时间适配节点、ENU点云补偿节点 |
-| `localization` | 部分实现 | 姿态变换工具 |
+| `motion_compensation` | 已实现 | ODIN/IMU时间适配节点、融合位姿ENU点云补偿节点 |
+| `localization` | 已实现首版 | `fusion_navigation_node`、有限角姿态、RTK/IMU/LiDAR融合与质量门控 |
 | `clearance_engine` | 已实现首版 | `clearance_engine_node` |
 | `cloud_visualization` | 已实现 | `cloud_visualization_node` |
 | `system_monitor` | 已实现 | `system_monitor_node` |
@@ -28,14 +28,16 @@
 | --- | --- | --- | --- | --- |
 | `/capture/lidar/points_raw` | `PointCloud2` | ODIN 经 remap | 点云补偿 | 原始雷达点，包含逐点时间 |
 | `/capture/lidar/points_slam` | `PointCloud2` | ODIN 经 remap | RViz2、辅助诊断 | 厂商 SLAM 世界点云，当前网页不使用 |
-| `/capture/imu/data` | `Imu` | ODIN 经 remap | 后续定位 | 当前补偿节点未用加速度修正 Up |
+| `/capture/imu/data_raw` | `Imu` | ODIN 经 remap | IMU时间适配 | 厂商同包共享时间戳的原始样本 |
+| `/capture/imu/data` | `Imu` | IMU时间适配节点 | 融合导航 | 约400 Hz逐样本设备时间 |
 | `/capture/odometry/high_rate_raw` | `Odometry` | ODIN 经 remap | 时间适配 | 厂商高频里程计 |
-| `/capture/odometry/high_rate` | `Odometry` | 时间适配节点 | 点云补偿 | 重复时间戳已展开 |
+| `/capture/odometry/high_rate` | `Odometry` | 时间适配节点 | 融合导航 | 重复时间戳已展开；正式融合只使用四元数增量 |
+| `/capture/localization/fusion_odometry` | `Odometry` | 融合导航 | 点云补偿 | 高频完整融合姿态、位置及平移质量标记 |
 | `/capture/lidar/points_compensated_enu` | `PointCloud2` | 点云补偿 | 净空、预览 | 局部东北天，`lidar_local_enu` |
 | `/capture/clearance/result` | `ClearanceResult` | 净空算法 | FastAPI、记录器 | 单帧顶面距离和质量 |
 | `/capture/visualization/cloud_preview` | `PointCloud2` | 预览节点 | FastAPI | 5 Hz、xyz、最多 10,000 点 |
-| `/capture/rtk/fix` | `NavSatFix` | RTK驱动 | FastAPI、记录器、后续定位 | WGS84位置 |
-| `/capture/rtk/status` | `RtkStatus` | RTK驱动 | FastAPI、记录器、后续定位 | 解析器原始状态集合 |
+| `/capture/rtk/fix` | `NavSatFix` | RTK驱动 | FastAPI、记录器、融合导航 | WGS84位置 |
+| `/capture/rtk/status` | `RtkStatus` | RTK驱动 | FastAPI、记录器、融合导航 | 解析器原始状态集合 |
 | `/capture/system/diagnostics` | `DiagnosticArray` | 系统监控 | FastAPI | 四类统一诊断 |
 | `/capture/task/status` | `TaskStatus` | 任务管理器 | FastAPI | 持久任务状态和执行阶段 |
 | `/capture/recording/status` | `RecordingStatus` | 记录器 | 任务管理器 | 写入状态、计数和错误 |

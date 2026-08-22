@@ -359,7 +359,7 @@ check_not_running() {
     die "检测到 capture-system.service 正在运行。请先执行 sudo bash scripts/operation/stop_capture_system.sh；该命令只停止当前实例，不会关闭下次开机自启"
   fi
 
-  process_pattern='run_lan_preview\.sh|run_ros_stack\.sh|task_manager_node|data_recorder_node|clearance_engine_node|dead_reckoning_node|odometry_timestamp_adapter_node|enu_cloud_transform_node|cloud_visualization_node|rtk_driver_node|system_monitor_node|odin_driver_|odin_hotplug_manager|odin_param_reader|web_.*_bridge'
+  process_pattern='run_lan_preview\.sh|run_ros_stack\.sh|task_manager_node|data_recorder_node|clearance_engine_node|dead_reckoning_node|fusion_navigation_node|odometry_timestamp_adapter_node|imu_timestamp_adapter_node|enu_cloud_transform_node|cloud_visualization_node|rtk_driver_node|system_monitor_node|odin_driver_|odin_hotplug_manager|odin_param_reader|web_.*_bridge'
   local_processes="$(pgrep -af "${process_pattern}" 2>/dev/null || true)"
   if [[ -n "${local_processes}" ]]; then
     printf '%s\n' "${local_processes}" >&2

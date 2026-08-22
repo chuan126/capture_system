@@ -19,7 +19,7 @@ def test_driver_launch_declares_expected_topic_contract():
     assert module.TOPIC_REMAPPINGS == (
         ("cloud/raw", "/capture/lidar/points_raw"),
         ("cloud/slam", "/capture/lidar/points_slam"),
-        ("imu", "/capture/imu/data"),
+        ("imu", "/capture/imu/data_raw"),
         ("odometry_hf", "/capture/odometry/high_rate_raw"),
         ("odometry", "/capture/odometry/slam"),
     )

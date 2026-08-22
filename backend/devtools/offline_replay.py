@@ -504,7 +504,10 @@ class OfflineReplayManager:
             ),
             "player": [
                 "ros2", "bag", "play", "-s", "mcap", str(recording_path),
-                "--disable-keyboard-controls", "-d", "1.0", "--remap",
+                # 综合测试样本还含RTK、IMU和诊断。离线算法只重放两个原始输入，
+                # 禁止其余录制Topic回放到正式命名空间干扰实时监视。
+                "--disable-keyboard-controls", "-d", "1.0", "--topics",
+                _SOURCE_RAW_CLOUD_TOPIC, _SOURCE_RAW_ODOMETRY_TOPIC, "--remap",
                 f"{_SOURCE_RAW_CLOUD_TOPIC}:={OFFLINE_RAW_CLOUD_TOPIC}",
                 f"{_SOURCE_RAW_ODOMETRY_TOPIC}:={OFFLINE_RAW_ODOMETRY_TOPIC}",
             ],

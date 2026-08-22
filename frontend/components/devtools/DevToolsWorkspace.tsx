@@ -59,7 +59,7 @@ function useRawCloudRecording() {
       const items = await listDevRecordings();
       setRecords(items.filter((record) => record.profile === "raw_cloud"));
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "原始点云样本读取失败");
+      setError(reason instanceof Error ? reason.message : "综合测试样本读取失败");
     }
   }, []);
 
@@ -86,7 +86,7 @@ function useRawCloudRecording() {
     try {
       setStatus(await startDevRecording("raw-cloud", null));
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "原始点云保存启动失败");
+      setError(reason instanceof Error ? reason.message : "综合测试数据保存启动失败");
     } finally {
       setBusy(false);
     }
@@ -114,7 +114,7 @@ function useRawCloudRecording() {
       await deleteDevRecording(recordingId);
       await refreshRecords();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "删除原始点云样本失败");
+      setError(reason instanceof Error ? reason.message : "删除综合测试样本失败");
     } finally {
       setBusy(false);
     }
@@ -269,12 +269,12 @@ function RawCloudPanel({
 
   const removeSelected = async () => {
     if (!selected || busy || offlineActive) return;
-    if (!window.confirm(`确认删除原始点云样本 ${selected.recording_id}？删除后不可恢复。`)) return;
+    if (!window.confirm(`确认删除综合测试样本 ${selected.recording_id}？删除后不可恢复。`)) return;
     await controller.remove(selected.recording_id);
   };
 
   return <section className="panel dev-dashboard-card dev-raw-cloud-card">
-    <div className="panel-head"><div><h2>保存原始点云</h2><p>样本主数据为完整 `/capture/lidar/points_raw`；同步保存完整算法重放必需的原始高频里程计。</p></div><span className={`dev-inline-state ${activeRawCloud ? "dev-inline-state--ok" : blockedByOtherProfile ? "dev-inline-state--warn" : ""}`}>{busy ? "处理中" : activeRawCloud ? `保存中 ${status?.elapsed_seconds.toFixed(1)} s` : blockedByOtherProfile ? "其他开发录制占用" : "空闲"}</span></div>
+    <div className="panel-head"><div><h2>保存综合测试数据</h2><p>同一 MCAP 保存原始点云、IMU、里程计、RTK、融合定位、采样序号、净空结果和诊断。</p></div><span className={`dev-inline-state ${activeRawCloud ? "dev-inline-state--ok" : blockedByOtherProfile ? "dev-inline-state--warn" : ""}`}>{busy ? "处理中" : activeRawCloud ? `保存中 ${status?.elapsed_seconds.toFixed(1)} s` : blockedByOtherProfile ? "其他开发录制占用" : "空闲"}</span></div>
     <div className="dev-record-actions">
       <button className="button" disabled={busy || status?.active === true || offlineActive} onClick={() => void controller.start()}>保存</button>
       <button className="button button--danger-outline" disabled={busy || !activeRawCloud} onClick={() => void controller.stop()}>停止</button>
@@ -286,8 +286,8 @@ function RawCloudPanel({
       <Metric label="剩余空间" value={status ? bytesText(status.free_bytes) : "--"} />
     </div>
     <div className="dev-card-divider" />
-    <div className="dev-card-subhead"><strong>原始点云样本</strong><span>{records.length} 个</span></div>
-    <div className="dev-sample-list" role="listbox" aria-label="原始点云样本">
+    <div className="dev-card-subhead"><strong>综合测试样本</strong><span>{records.length} 个</span></div>
+    <div className="dev-sample-list" role="listbox" aria-label="综合测试样本">
       {records.length === 0 && <div className="dev-sample-empty">暂无已保存样本</div>}
       {records.slice(0, 8).map((record) => <button
         type="button"

@@ -1,0 +1,111 @@
+fusion_navigation_node:
+  ros__parameters:
+    # 业务状态、fix和低频odometry输出频率，单位Hz；高频fusion odometry跟随IMU传播。
+    output_rate_hz: 10.0
+
+    # ODIN四元数与展开后IMU加速度的设备时间同步参数。
+    sensor_sync_max_gap_s: 0.015
+    sensor_sync_max_samples: 2000
+    timestamp_reset_threshold_s: 1.0
+    maximum_imu_propagation_interval_s: 0.020
+    state_history_duration_s: 10.0
+    state_history_max_samples: 10000
+
+    # 名义状态[p,v,Cnb,ba]与12维误差状态[dp,dv,datt,dba]传播参数。
+    # ODIN四元数仅提供相邻有限旋转增量；IMU加速度始终使用修正后的Cnb投影。
+    gravity_mps2: 9.80665
+    maximum_acceleration_mps2: 50.0
+    accelerometer_noise_mps2_sqrt_hz: 0.20
+    odin_attitude_increment_noise_rad_sqrt_hz: 0.01
+    accelerometer_bias_random_walk_mps3_sqrt_hz: 0.01
+    initial_position_std_m: 0.10
+    initial_velocity_std_mps: 1.0
+    initial_attitude_std_deg: 20.0
+    initial_accelerometer_bias_std_mps2: 0.30
+    # RTK/LiDAR观测在当前名义状态附近迭代重线性化；正式注入始终使用完整a2mat有限旋转。
+    iterated_update_max_iterations: 8
+    iterated_update_position_tolerance_m: 0.0001
+    iterated_update_attitude_tolerance_rad: 0.00001
+    large_attitude_correction_deg: 5.0
+    # 超过位置标准差或纯惯性时长后，点云平移补偿自动退化为ROTATION_ONLY。
+    maximum_translation_position_std_m: 1.0
+    maximum_inertial_only_duration_s: 5.0
+
+    # RTK只作为三维位置松组合；不读取speed_knots、track_degrees或任何Doppler速度。
+    rtk_timeout_s: 1.0
+    rtk_time_offset_s: 0.0
+    minimum_rtk_satellites: 4
+    maximum_rtk_hdop: 5.0
+    minimum_rtk_horizontal_std_m: 0.10
+    minimum_rtk_vertical_std_m: 0.20
+    maximum_rtk_innovation_m: 10.0
+    active_update_timeout_s: 1.0
+
+    # local轨迹与RTK ENU轨迹的中心化二维刚体拟合；基线不足时不发布绝对heading。
+    heading_fit_sample_spacing_m: 2.0
+    heading_fit_max_samples: 200
+    heading_fit_min_samples: 5
+    heading_fit_min_baseline_m: 10.0
+    heading_fit_valid_baseline_m: 30.0
+    heading_fit_target_baseline_m: 100.0
+    heading_baseline_ratio_min: 0.5
+    heading_baseline_ratio_max: 1.5
+    heading_fit_max_rmse_m: 3.0
+    heading_fit_max_p95_residual_m: 5.0
+    heading_fit_outlier_rejection_enabled: true
+    heading_fit_outlier_min_threshold_m: 3.0
+    heading_fit_outlier_mad_multiplier: 3.0
+    heading_fit_min_inlier_ratio: 0.70
+
+    # 当前镜头朝天安装：车辆前向对应ODIN机体系-Z；只用于absolute heading投影。
+    vehicle_forward_axis_body: [0.0, 0.0, -1.0]
+    heading_projection_min_norm: 0.20
+
+    # LiDAR scan-to-local-map ICP，输出完整位置和姿态几何观测。
+    lidar.enabled: true
+    lidar.voxel_size_m: 0.15
+    lidar.minimum_scan_points: 300
+    lidar.maximum_scan_points: 8000
+    lidar.minimum_map_points: 500
+    lidar.maximum_map_points: 80000
+    lidar.map_radius_m: 60.0
+    lidar.maximum_correspondence_distance_m: 1.5
+    lidar.maximum_iterations: 40
+    lidar.transformation_epsilon: 0.00001
+    lidar.fitness_epsilon: 0.00001
+    lidar.maximum_fitness_score_m2: 0.20
+    lidar.maximum_position_correction_m: 2.0
+    # 大旋转不按角度直接拒绝；以下质量和连续性参数用于区分真实漂移与错误匹配。
+    lidar.minimum_inlier_ratio: 0.50
+    # 退化分析最多抽样2500点，每点用局部目标邻域法向构造点到面J^T J。
+    lidar.maximum_quality_points: 2500
+    lidar.normal_neighbor_count: 10
+    lidar.maximum_surface_variation: 0.20
+    lidar.minimum_second_eigenvalue_m2: 0.01
+    lidar.degeneracy_relative_eigenvalue: 0.0001
+    lidar.degeneracy_absolute_eigenvalue: 0.00001
+    lidar.minimum_observable_dof: 4
+    lidar.unobservable_variance: 1000000.0
+    lidar.position_noise_floor_m: 0.05
+    lidar.attitude_noise_floor_deg: 0.20
+    lidar.large_rotation_threshold_deg: 5.0
+    lidar.large_rotation_confirmation_frames: 3
+    lidar.large_rotation_consistency_deg: 8.0
+    lidar.large_rotation_minimum_fitness_improvement_ratio: 0.10
+    lidar.large_rotation_minimum_observable_rotation_dof: 2
+    lidar.map_update_interval: 2
+
+    # 稳定Topic和frame沿用项目现有定义；ODIN pose.position不在任何正式输入中。
+    odin_orientation_topic: /capture/odometry/high_rate
+    imu_topic: /capture/imu/data
+    rtk_fix_topic: /capture/rtk/fix
+    rtk_status_topic: /capture/rtk/status
+    compensated_cloud_topic: /capture/lidar/points_compensated_enu
+    fusion_odometry_topic: /capture/localization/fusion_odometry
+    localization_odometry_topic: /capture/localization/odometry
+    localization_fix_topic: /capture/localization/fix
+    localization_status_topic: /capture/localization/status
+    diagnostics_topic: /diagnostics
+    local_frame_id: local_enu
+    global_frame_id: map
+    child_frame_id: base_link

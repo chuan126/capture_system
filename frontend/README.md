@@ -107,9 +107,9 @@ TXT 文件名使用任务时间编号，例如 `20260807_145601_T-001_50Hz测量
 
 ## 3. 开发测试工作台
 
-测试工作台只存在于 `development` 构建。浏览器仍然只访问 FastAPI 和正式同源 WebSocket，不直接连接 ROS 2。当前页面取消七个页签，采用左右两列单页布局：左列依次显示核心配置和离线算法调试，右列依次显示净空算法、RTK与融合定位、原始点云样本；两列整体高度由同一网格行约束，末卡自动吸收剩余高度。净空卡片为无效原因预留固定高度，只显示新增 `ransac_plane_count` 对应的“RANSAC平面”，不再把 `candidate_count` 误标成平面数。页面复用采集首页的 `/ws/v1/rtk` 与 `/ws/v1/clearance`，不调用 `/api/dev/overview`，因此普通打开测试页不会续租原始点云、补偿点云和高频里程计 development telemetry。
+测试工作台只存在于 `development` 构建。浏览器仍然只访问 FastAPI 和正式同源 WebSocket，不直接连接 ROS 2。当前页面取消七个页签，采用左右两列单页布局：左列依次显示核心配置和离线算法调试，右列依次显示净空算法、RTK与融合定位、综合测试样本；两列整体高度由同一网格行约束，末卡自动吸收剩余高度。净空卡片为无效原因预留固定高度，只显示新增 `ransac_plane_count` 对应的“RANSAC平面”，不再把 `candidate_count` 误标成平面数。页面复用采集首页的 `/ws/v1/rtk` 与 `/ws/v1/clearance`，不调用 `/api/dev/overview`，因此普通打开测试页不会续租原始点云、补偿点云和高频里程计 development telemetry。
 
-主页面的原始点云样本只提供保存、停止和删除。一个样本 MCAP 固定保存完整 `/capture/lidar/points_raw`，并同步保存完整运动补偿必需的 `/capture/odometry/high_rate_raw`；辅助里程计不作为独立用户数据项显示。样本可直接启动隔离的 1× 离线完整算法链。离线停止后 elapsed/progress 使用冻结的 monotonic 结束时间，不再继续增长；监控线程周期检查 rosbag、时间适配、运动补偿和净空进程，算法节点提前退出时立即终止其余离线进程并返回日志末尾。净空卡保留最后一次有效 `lidar_to_top_m`，同时单独显示当前帧是否有效和无效原因，并读取离线 ENU diagnostics 的接收、处理、丢帧、插值失败和队列计数。`raw_sensor`、`algorithm_debug`、`full_debug` 等高级开发录制接口继续保留，供专项故障分析直接调用，但不占据日常测试界面。所有录制都由 rosbag2 直接订阅 Topic 写 MCAP，不经过浏览器预览，不设置降频。
+主页面的综合测试样本只提供保存、停止和删除。一个样本 MCAP 同步保存原始点云、厂商包时间戳与逐样本展开后的IMU六轴、原始与时间适配后高频里程计、RTK经纬高/质量/GNSS UTC、融合定位、点云帧序号与补偿上下文、净空结果和诊断。样本可直接启动隔离的 1× 离线完整算法链；离线播放只重放原始点云和原始里程计，不把其余录制Topic发布到正式命名空间。离线停止后 elapsed/progress 使用冻结的 monotonic 结束时间，不再继续增长；监控线程周期检查 rosbag、时间适配、运动补偿和净空进程，算法节点提前退出时立即终止其余离线进程并返回日志末尾。净空卡保留最后一次有效 `lidar_to_top_m`，同时单独显示当前帧是否有效和无效原因，并读取离线 ENU diagnostics 的接收、处理、丢帧、插值失败和队列计数。`raw_sensor`、`algorithm_debug`、`full_debug` 等高级开发录制接口继续保留，供专项故障分析直接调用，但不占据日常测试界面。所有录制都由 rosbag2 直接订阅 Topic 写 MCAP，不经过浏览器预览，不设置降频。
 
 核心参数由 `ros2_ws/src/bringup/config/dev_parameter_bindings.yaml` 装订。单页显示三项运动补偿启动参数 `processing_poll_interval_ms`、`max_interpolation_gap_s`、`minimum_valid_pose_ratio`，以及六项净空参数 `ransac.distance_threshold_m`、`ransac.max_candidate_planes`、`ransac.min_inliers_absolute`、`region.grid_size_m`、`region.min_occupied_cells`、`region.max_residual_p95_m`。主列表同时显示正式 YAML 配置值和 ROS 2 实际运行值，二者不一致时明确标记。可写参数需要点开详情后才能设置当前运行值，主列表不提供直接输入框。`ransac.max_candidate_planes` 的 development 上限与当前 small-board 正式值统一为 2500。运行时修改不写回 YAML，节点重启后恢复正式配置。其余装订参数继续用于开发录制参数快照。
 

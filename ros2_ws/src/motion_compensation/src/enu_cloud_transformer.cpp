@@ -111,6 +111,7 @@ bool interpolateSamples(
   }
   output.quaternion_xyzw = slerp(
     lower->quaternion_xyzw, upper->quaternion_xyzw, fraction);
+  output.translation_valid = lower->translation_valid && upper->translation_valid;
   return true;
 }
 
@@ -356,8 +357,9 @@ bool EnuCloudTransformer::transform(
 
   bool translation_active = use_odometry_translation_;
   PoseSample reference_pose;
-  if (translation_active && !interpolateSamples(
-      pose_samples, pose_buffer_.maxInterpolationGapNs(), cloud_stamp_ns, reference_pose))
+  if (translation_active && (!interpolateSamples(
+      pose_samples, pose_buffer_.maxInterpolationGapNs(), cloud_stamp_ns, reference_pose) ||
+      !reference_pose.translation_valid))
   {
     if (!fallback_to_rotation_only_) {
       invalid_reason = "REFERENCE_POSE_NOT_COVERED";
@@ -378,6 +380,10 @@ bool EnuCloudTransformer::transform(
       {
         continue;
       }
+      if (!point_pose.translation_valid) {
+        translation_outlier = true;
+        break;
+      }
       double squared_translation = 0.0;
       for (std::size_t index = 0; index < 3U; ++index) {
         const double delta = point_pose.position_m[index] - reference_pose.position_m[index];
@@ -397,7 +403,7 @@ bool EnuCloudTransformer::transform(
     }
     if (translation_outlier) {
       if (!fallback_to_rotation_only_) {
-        invalid_reason = "ODOM_TRANSLATION_OUTLIER";
+        invalid_reason = "FUSION_TRANSLATION_OUTLIER";
         if (statistics != nullptr) {
           *statistics = local_statistics;
         }
@@ -478,8 +484,8 @@ bool EnuCloudTransformer::transform(
 
     const double radar_point[3]{point.x, point.y, point.z};
 
-    // 雷达坐标系与里程计机体系方向一致，杆臂按0处理：
-    // r_n = R_n<-b(t_i) * r_l + p_n(t_i) - p_n(t_0)。
+    // 雷达坐标系与ODIN机体系方向一致，杆臂按0处理；平移来自Fusion Local Navigation：
+    // r_n = R_n<-b(t_i) * r_l + p_fusion(t_i) - p_fusion(t_0)。
     double navigation_point[3];
     multiplyMatrixVector(cached_rotation_navigation_from_body, radar_point, navigation_point);
     for (std::size_t index = 0; index < 3U; ++index) {
