@@ -110,21 +110,7 @@
       "minimum": 0.001,
       "maximum": 1.0,
       "writable": false,
-      "note": "超时后清空旧位姿和待处理点云",
-      "source_config": "ros2_ws/src/motion_compensation/config/motion_compensation.yaml",
-      "ui_visible": false
-    },
-    {
-      "key": "motion.recovery_continuous_pose_s",
-      "node": "/enu_cloud_transform_node",
-      "parameter": "recovery_continuous_pose_s",
-      "label": "连续位姿恢复窗口",
-      "unit": "s",
-      "kind": "float",
-      "minimum": 0.01,
-      "maximum": 1.0,
-      "writable": false,
-      "note": "位姿流恢复后达到该连续时长才重新发布补偿点云",
+      "note": "超时只更新诊断；点云继续逐帧判断，不清空位姿缓存",
       "source_config": "ros2_ws/src/motion_compensation/config/motion_compensation.yaml",
       "ui_visible": false
     },

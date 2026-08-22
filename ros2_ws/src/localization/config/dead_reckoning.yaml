@@ -19,8 +19,9 @@ dead_reckoning_node:
     # 车辆前向经ODIN姿态旋转后，其水平投影模长下限；低于该值不参与航向对准。
     heading_projection_min_norm: 0.2
 
-    # 稳定直行时检查车辆前向轴与ODIN水平位移方向；仅告警，不自动修改配置。
-    forward_axis_motion_validation_enabled: true
+    # 当前实车ODIN位移出现明显异常尺度，按20 m位移触发会造成高频日志洪泛。
+    # 在完成位移尺度修复和告警限频前关闭该诊断；不影响定位、姿态、点云或净空计算。
+    forward_axis_motion_validation_enabled: false
     # 前向轴运动诊断最低RTK速度，单位m/s。
     forward_axis_validation_min_speed_mps: 5.0
     # 每次前向轴运动诊断所需最小ODIN水平位移，单位m。

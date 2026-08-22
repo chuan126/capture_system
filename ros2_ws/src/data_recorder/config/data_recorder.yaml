@@ -11,6 +11,7 @@ data_recorder_node:
     odometry_topic: "/capture/odometry/high_rate"
     # 标准sensor_msgs/Temperature输入；当前厂商驱动未发布时导出列留空。
     radar_temperature_topic: "/capture/lidar/temperature"
+    # 以50 Hz保存最近净空源帧保持序列；is_repeated和repeat_index明确标识重复来源。
     sample_rate_hz: 50.0
     source_timeout_ms: 250.0
     endpoint_rtk_max_age_ms: 2000.0

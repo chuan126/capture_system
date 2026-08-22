@@ -66,7 +66,7 @@ test("playback task browser follows task creation order", () => {
 test("playback keeps one task curve workspace and supports filtered multi-task deletion", () => {
   assert.match(playback, /选择回放任务/);
   assert.match(playback, /净空高度曲线/);
-  assert.match(playback, /50 Hz 测量序列/);
+  assert.match(playback, /10 Hz 测量序列/);
   assert.match(playback, /统计与数据质量/);
   assert.match(playback, /deleteSelectedTasks\(deleteIds\)/);
   assert.match(playback, /删除所选任务/);
@@ -200,21 +200,23 @@ test("report removes task-name fields and aggregates only user-selected tasks", 
   assert.match(report, /隧道出口 RTK/);
   assert.match(report, /checkedTaskIds=\{checked\}/);
   assert.match(report, /heading="选择导出任务" sortOrder="asc"/);
-  assert.match(report, /generateSummaryPdf\(selectedIds\)/);
+  assert.match(report, /startSummaryPdfJob\(selectedIds\)/);
   assert.doesNotMatch(report, /任务名称|taskName|batchId|selectedBatch/);
 });
 
 test("report enables formal exports only for eligible recorded selected data", () => {
-  assert.match(report, /loadReportPreview\(selectedIds\)/);
-  assert.match(report, /generateTaskTxt\(selectedTask\.taskId\)/);
-  assert.match(report, /generateSummaryPdf\(selectedIds\)/);
-  assert.match(report, /downloadGeneratedFile/);
-  assert.match(report, /disabled=\{!txtReady\|\|txtState==="generating"\}/);
-  assert.match(report, /disabled=\{!pdfReady\|\|pdfState==="generating"\}/);
+  assert.match(report, /loadReportPreview\(selectedIds,controller\.signal\)/);
+  assert.match(report, /startTaskTxtJob\(selectedTask\.taskId\)/);
+  assert.match(report, /startSummaryPdfJob\(selectedIds\)/);
+  assert.match(report, /downloadExportJob/);
+  assert.match(report, /txtState==="generating"\?cancel/);
+  assert.match(report, /pdfState==="generating"\?cancel/);
+  assert.match(report, /localStorage\.setItem\(jobKey\(kind\),created\.jobId\)/);
   assert.match(report, /pdfExportableTasks/);
   assert.match(report, /normalMinimumHeightM/);
-  assert.match(report, /低于高度下限阈值、超过高度上限阈值/);
-  assert.match(report, /异常中断、测试数据和无有效高度的任务不会进入正式 PDF/);
+  assert.match(report, /高置信度偶发异常可从最低值统计中排除/);
+  assert.match(report, /待复核低值仍保守计入/);
+  assert.match(report, /周期性设施和具有连续空间证据的单个结构受到保护/);
   assert.match(reportApi, /task_ids:taskIds/);
 });
 

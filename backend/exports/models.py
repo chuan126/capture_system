@@ -35,6 +35,12 @@ class TaskExportPreviewResponse(BaseModel):
     normal_minimum_height_m: float | None
     clearance_threshold_m: float | None
     clearance_upper_limit_m: float | None
+    raw_min_clearance_m: float | None = None
+    effective_min_clearance_m: float | None = None
+    has_review_required: bool | None = None
+    review_required_count: int | None = None
+    outlier_count: int | None = None
+    protected_structure_count: int | None = None
     entry_rtk: RtkEndpointResponse | None
     exit_rtk: RtkEndpointResponse | None
 
@@ -67,3 +73,24 @@ class ExportFileResponse(BaseModel):
     # 兼容旧客户端，时间编号版本不再使用批次字段。
     batch_id: str | None = None
     batch_code: str | None = None
+
+
+class ExportJobResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    job_id: str
+    export_format: Literal["txt", "pdf"]
+    task_ids: list[str]
+    state: Literal["queued", "running", "completed", "failed", "cancelled"]
+    phase: str
+    progress: float = Field(ge=0.0, le=1.0)
+    created_at: datetime
+    updated_at: datetime
+    error: str | None = None
+    file_name: str | None = None
+    file_size_bytes: int | None = None
+    generated_at: datetime | None = None
+    download_url: str | None = None
+    report_id: str | None = None
+    task_id: str | None = None
+    included_task_count: int | None = None

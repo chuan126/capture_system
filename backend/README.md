@@ -40,7 +40,7 @@ FastAPI 是浏览器访问 RK3588 的唯一 HTTP 和 WebSocket 入口。当前�
 | `/ws/v1/system-status` | WebSocket JSON | `/capture/system/diagnostics` |
 | `/ws/v1/task-status` | WebSocket JSON | `/capture/task/status` |
 | `/api/v1/reports/clearance-summary/preview` | HTTP POST JSON | 所选任务摘要和正式导出资格 |
-| `/api/v1/tasks/{task_id}/exports/txt` | HTTP POST | 从正式测量数据库生成 50 Hz TXT |
+| `/api/v1/tasks/{task_id}/exports/txt` | HTTP POST | 从正式测量数据库生成约10 Hz真实测量TXT及异常分析JSON |
 | `/api/v1/tasks/{task_id}/exports/txt/download` | HTTP TXT | 下载已生成的任务明细 |
 | `/api/v1/reports/clearance-summary` | HTTP POST JSON | 汇总所选任务中满足条件的正式记录并生成 PDF |
 | `/api/v1/reports/{report_id}/download` | HTTP PDF | 下载已生成的汇总报告 |
@@ -121,9 +121,11 @@ WebSocket 实际存在客户端时运行。
 - `/ws/v1/task-status` 转发设备端阶段、RTK 端点状态、记录路径和错误；
 - 开始不使用雷达、RTK 或系统诊断卡片作为前置条件；入口和出口 RTK 未确认时不阻塞开始或停止。
 
-`data_recorder` 按 50 Hz 写入最近净空源帧保持序列。重复值保存源帧序号、源时间、源年龄和重复序号。没有源数据或源数据超过配置超时时间时记录无效样本，不继续复制最后一个有效值。
+`data_recorder`以50 Hz写入最近净空源帧保持序列，并在每行保存源序号、源时间、年龄和重复来源字段；真实算法源帧另存于`clearance_source_frames`。每个20 ms区间内约400 Hz IMU样本求平均。只根据可靠源序号或时间戳识别通信层重复帧，不按相同高度或相同最低点去重。
 
-PDF 报告由客户端显式提交任务 ID 集合，后端只汇总其中满足正式记录条件的任务，不再依赖作业批次。TXT 面向单个任务生成，文件名使用任务时间编号。报告预览和 PDF 汇总统一按任务稳定创建顺序输出。报告时间解析兼容 ROS/C++ 产生的纳秒级 ISO 8601 小数秒，正式显示到毫秒。
+PDF 报告由客户端显式提交任务 ID 集合，后端只汇总其中满足正式记录条件的任务，不再依赖作业批次。TXT 面向单个任务生成48列明细；同时生成可追溯的异常分析JSON。报告最低净空只排除`HIGH_CONFIDENCE_OUTLIER`，`REVIEW_REQUIRED`仍保守计入，真实单个结构和周期性结构受到保护。距离不可用时使用有界样本窗口并禁止自动排除，周期候选过多时同样保守降级。分析结果按数据库身份和算法版本原子缓存。
+
+正式TXT和PDF导出使用持久化单并发作业：创建接口立即返回作业ID，前端显示阶段与进度、支持取消，并在刷新后从`localStorage`恢复轮询。工作负载在独立低优先级进程执行；正式任务运行或暂停时保持排队，不与采集链路争用CPU。同步导出接口暂时保留用于兼容。
 
 旧 `/api/v1/batches...` 接口和数据库批次字段暂时保留用于历史数据兼容，不作为当前前端工作流。
 

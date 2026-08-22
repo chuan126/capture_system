@@ -74,6 +74,7 @@ ALGORITHM_DEBUG_PROFILE = RecordingProfile(
     topics=(
         "/capture/odometry/high_rate",
         "/capture/lidar/points_compensated_enu",
+        "/capture/debug/frame_context",
         "/capture/clearance/result",
         "/capture/rtk/fix",
         "/capture/rtk/status",

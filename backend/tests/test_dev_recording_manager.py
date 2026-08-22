@@ -93,6 +93,7 @@ def test_raw_sensor_profile_records_existing_high_rate_sources_without_visual_or
 def test_algorithm_and_full_debug_profiles_keep_raw_and_processed_topics_separate() -> None:
     assert "/capture/lidar/points_raw" not in ALGORITHM_DEBUG_PROFILE.topics
     assert "/capture/lidar/points_compensated_enu" in ALGORITHM_DEBUG_PROFILE.topics
+    assert "/capture/debug/frame_context" in ALGORITHM_DEBUG_PROFILE.topics
     assert "/capture/odometry/high_rate" in ALGORITHM_DEBUG_PROFILE.topics
     assert "/capture/recording/status" in ALGORITHM_DEBUG_PROFILE.topics
     assert "/diagnostics" in ALGORITHM_DEBUG_PROFILE.topics
@@ -117,8 +118,7 @@ def test_recording_writes_parameter_snapshot_and_source_hashes(monkeypatch, tmp_
     for _ in range(100):
         if manager.status()["parameter_snapshot_complete"] is True:
             break
-        import time as _time
-        _time.sleep(0.01)
+        threading.Event().wait(0.01)
     assert manager.status()["parameter_snapshot_complete"] is True
     saved_snapshot = json.loads((path / "parameter_snapshot.yaml").read_text(encoding="utf-8"))
     hashes = (path / "source_config_sha256.txt").read_text(encoding="utf-8")
@@ -163,10 +163,12 @@ def test_recording_start_does_not_wait_for_parameter_snapshot(monkeypatch, tmp_p
     prepare_runtime(monkeypatch, captured)
     snapshot_started = threading.Event()
     release_snapshot = threading.Event()
+    snapshot_finished = threading.Event()
 
     def slow_snapshot():
         snapshot_started.set()
         release_snapshot.wait(timeout=2.0)
+        snapshot_finished.set()
         return {
             "schema_version": 1,
             "complete": True,
@@ -188,10 +190,11 @@ def test_recording_start_does_not_wait_for_parameter_snapshot(monkeypatch, tmp_p
     assert elapsed < 0.2, "录制启动不得等待参数快照完成"
     assert manager.status()["parameter_snapshot_complete"] is None
     release_snapshot.set()
+    assert snapshot_finished.wait(timeout=0.2)
     for _ in range(100):
         if manager.status()["parameter_snapshot_complete"] is True:
             break
-        time.sleep(0.01)
+        threading.Event().wait(0.01)
     assert manager.status()["parameter_snapshot_complete"] is True
     manager.stop()
 

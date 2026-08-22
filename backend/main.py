@@ -24,6 +24,7 @@ from backend.websocket.routes import router as websocket_router
 from backend.measurements.repository import MeasurementRepository
 from backend.measurements.query_coordinator import MeasurementQueryCoordinator
 from backend.exports.routes import router as export_router
+from backend.exports.jobs import ExportJobManager
 from backend.batches.routes import router as batch_router
 from backend.exports.service import ReportExportService
 from backend.tasks.repository import TaskRepository, TaskStorageError
@@ -109,6 +110,23 @@ def create_app(
         measurement_repository,
         pdf_font_path=resolved_pdf_font_path,
     )
+
+    def export_has_active_task() -> bool:
+        try:
+            return bool(
+                task_repository.list_tasks(status="running", limit=1)
+                or task_repository.list_tasks(status="paused", limit=1)
+            )
+        except (TaskStorageError, ValueError):
+            # 无法确认任务状态时优先保护实时采集链路，不启动重型导出。
+            return True
+
+    export_job_manager = ExportJobManager(
+        runtime_data_root,
+        project_root=PROJECT_ROOT,
+        pdf_font_path=resolved_pdf_font_path,
+        active_task_provider=export_has_active_task,
+    )
     development_tools_enabled = resolve_devtools_enabled() if devtools_enabled is None else devtools_enabled
     device_settings_store = DeviceSettingsStore(runtime_data_root)
     wifi_manager = NetworkManagerWifi()
@@ -177,6 +195,7 @@ def create_app(
         except TaskStorageError as error:
             # 实时监视仍可启动，但任务接口会明确返回503，不能退化为浏览器临时任务。
             LOGGER.error("%s", error)
+        export_job_manager.start()
 
         rtk_bridge: RtkBridge | None = None
         system_status_bridge: SystemStatusBridge | None = None
@@ -235,6 +254,7 @@ def create_app(
         try:
             yield
         finally:
+            export_job_manager.stop()
             cloud_preview_bridge = application.state.cloud_preview_bridge
             if cloud_preview_bridge is not None:
                 cloud_preview_bridge.stop()
@@ -279,6 +299,7 @@ def create_app(
     application.state.measurement_repository = measurement_repository
     application.state.measurement_query_coordinator = measurement_query_coordinator
     application.state.report_export_service = report_export_service
+    application.state.export_job_manager = export_job_manager
     application.state.task_control_bridge = None
     application.state.runtime_data_root = runtime_data_root
     application.state.capture_version = resolve_version()

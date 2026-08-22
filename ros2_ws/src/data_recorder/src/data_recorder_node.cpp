@@ -290,6 +290,17 @@ private:
     std::string fix_type{"UNKNOWN"};
   };
 
+  struct LatestRtkStatus
+  {
+    bool available{false};
+    std::int64_t received_monotonic_ns{0};
+    std::uint8_t satellite_count{0};
+    double hdop{0.0};
+    double pdop{0.0};
+    double speed_knots{0.0};
+    double track_degrees{0.0};
+  };
+
   struct ImuAccumulator
   {
     std::uint64_t count{0};
@@ -308,6 +319,10 @@ private:
     double position_x_m{0.0};
     double position_y_m{0.0};
     double position_z_m{0.0};
+    double qx{0.0};
+    double qy{0.0};
+    double qz{0.0};
+    double qw{1.0};
   };
 
   struct LatestVehicleAttitude
@@ -666,11 +681,19 @@ private:
   {
     std::lock_guard<std::mutex> lock(mutex_);
     LatestClearance latest;
-    latest.sequence = ++source_sequence_;
     latest.source_timestamp_ns = rclcpp::Time(message->header.stamp).nanoseconds();
     if (latest.source_timestamp_ns <= 0) {
       latest.source_timestamp_ns = system_now_ns();
     }
+    if (latest.source_timestamp_ns == last_received_clearance_timestamp_ns_) {
+      RCLCPP_WARN_THROTTLE(
+        get_logger(), *get_clock(), 5000,
+        "忽略源时间戳完全相同的重复净空帧：%ld",
+        static_cast<long>(latest.source_timestamp_ns));
+      return;
+    }
+    last_received_clearance_timestamp_ns_ = latest.source_timestamp_ns;
+    latest.sequence = ++source_sequence_;
     latest.received_timestamp_ns = system_now_ns();
     latest.valid = message->valid && std::isfinite(message->lidar_to_top_m);
     if (std::isfinite(message->lidar_to_top_m)) {
@@ -721,6 +744,17 @@ private:
   {
     std::lock_guard<std::mutex> lock(mutex_);
     latest_fix_.fix_type = rtk_fix_type(message->gps_state);
+    latest_rtk_status_.available = std::isfinite(message->hdop) &&
+      std::isfinite(message->pdop) && std::isfinite(message->speed_knots) &&
+      std::isfinite(message->track_degrees);
+    if (latest_rtk_status_.available) {
+      latest_rtk_status_.received_monotonic_ns = steady_now_ns();
+      latest_rtk_status_.satellite_count = message->satellite_count;
+      latest_rtk_status_.hdop = message->hdop;
+      latest_rtk_status_.pdop = message->pdop;
+      latest_rtk_status_.speed_knots = message->speed_knots;
+      latest_rtk_status_.track_degrees = message->track_degrees;
+    }
   }
 
   void on_localization_fix(const sensor_msgs::msg::NavSatFix::SharedPtr message)
@@ -800,7 +834,13 @@ private:
   {
     std::lock_guard<std::mutex> lock(mutex_);
     const auto & position = message->pose.pose.position;
+    const auto & orientation = message->pose.pose.orientation;
     if (!std::isfinite(position.x) || !std::isfinite(position.y) || !std::isfinite(position.z))
+    {
+      return;
+    }
+    if (!std::isfinite(orientation.x) || !std::isfinite(orientation.y) ||
+      !std::isfinite(orientation.z) || !std::isfinite(orientation.w))
     {
       return;
     }
@@ -809,6 +849,10 @@ private:
     latest_odin_.position_x_m = position.x;
     latest_odin_.position_y_m = position.y;
     latest_odin_.position_z_m = position.z;
+    latest_odin_.qx = orientation.x;
+    latest_odin_.qy = orientation.y;
+    latest_odin_.qz = orientation.z;
+    latest_odin_.qw = orientation.w;
   }
 
   void on_radar_temperature(const sensor_msgs::msg::Temperature::SharedPtr message)
@@ -914,6 +958,14 @@ private:
         static_cast<double>(std::max<std::int64_t>(
           0, monotonic_now_ns - latest_odin_.received_monotonic_ns)) / 1'000'000.0 <=
         odometry_snapshot_max_age_ms_;
+      const bool rtk_fix_fresh = latest_fix_.available &&
+        static_cast<double>(std::max<std::int64_t>(
+          0, monotonic_now_ns - latest_fix_.received_monotonic_ns)) / 1'000'000.0 <=
+        endpoint_rtk_max_age_ms_;
+      const bool rtk_status_fresh = latest_rtk_status_.available &&
+        static_cast<double>(std::max<std::int64_t>(
+          0, monotonic_now_ns - latest_rtk_status_.received_monotonic_ns)) / 1'000'000.0 <=
+        endpoint_rtk_max_age_ms_;
       const bool vehicle_attitude_fresh = latest_vehicle_attitude_.available &&
         static_cast<double>(std::max<std::int64_t>(
           0, monotonic_now_ns - latest_vehicle_attitude_.received_monotonic_ns)) / 1'000'000.0 <=
@@ -935,12 +987,15 @@ private:
            "sample_index, source_timestamp_ns, recorded_timestamp_ns, elapsed_ms, "
            "lidar_to_top_m, clearance_height_m, valid, invalid_reason, quality_score, "
            "source_sequence, source_age_ms, is_repeated, repeat_index, rtk_timestamp_ns, "
+           "rtk_latitude_deg, rtk_longitude_deg, rtk_altitude_m, rtk_fix_type, rtk_valid, "
+           "rtk_satellite_count, rtk_hdop, rtk_pdop, rtk_speed_knots, rtk_track_degrees, "
            "gyro_x_rad_s, gyro_y_rad_s, gyro_z_rad_s, accel_x_m_s2, accel_y_m_s2, "
            "accel_z_m_s2, imu_sample_count, radar_temperature_c, minimum_point_x_m, "
            "minimum_point_y_m, minimum_point_z_m, vehicle_pitch_deg, vehicle_roll_deg, "
-           "vehicle_heading_deg, odin_position_x_m, odin_position_y_m, odin_position_z_m) "
+           "vehicle_heading_deg, odin_position_x_m, odin_position_y_m, odin_position_z_m, "
+           "odin_qx, odin_qy, odin_qz, odin_qw) "
            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
-           "?, ?, ?, ?, ?, ?, ?, ?, ?)",
+           "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
           -1, &statement, nullptr),
         database_, "准备50Hz样本写入失败");
       check_sqlite(sqlite3_bind_int64(statement, 1, static_cast<sqlite3_int64>(total_samples_)), database_, "绑定样本序号失败");
@@ -962,40 +1017,69 @@ private:
       check_sqlite(sqlite3_bind_int(statement, 12, repeated ? 1 : 0), database_, "绑定重复标志失败");
       check_sqlite(sqlite3_bind_int(statement, 13, static_cast<int>(repeat_index)), database_, "绑定重复序号失败");
       bind_nullable_int64(
-        statement, 14, latest_fix_.available, latest_fix_.timestamp_ns);
-      bind_nullable_double(statement, 15, gyro_x);
-      bind_nullable_double(statement, 16, gyro_y);
-      bind_nullable_double(statement, 17, gyro_z);
-      bind_nullable_double(statement, 18, accel_x);
-      bind_nullable_double(statement, 19, accel_y);
-      bind_nullable_double(statement, 20, accel_z);
+        statement, 14, rtk_fix_fresh, latest_fix_.timestamp_ns);
+      bind_nullable_double(statement, 15, rtk_fix_fresh ?
+        std::optional<double>(latest_fix_.latitude_deg) : std::nullopt);
+      bind_nullable_double(statement, 16, rtk_fix_fresh ?
+        std::optional<double>(latest_fix_.longitude_deg) : std::nullopt);
+      bind_nullable_double(statement, 17, rtk_fix_fresh ? latest_fix_.altitude_m : std::nullopt);
+      bind_nullable_text(statement, 18, rtk_fix_fresh ?
+        std::optional<std::string>(latest_fix_.fix_type) : std::nullopt);
+      if (rtk_fix_fresh) {
+        check_sqlite(sqlite3_bind_int(statement, 19, latest_fix_.valid ? 1 : 0), database_, "绑定RTK有效性失败");
+      } else {
+        sqlite3_bind_null(statement, 19);
+      }
+      if (rtk_status_fresh) {
+        check_sqlite(sqlite3_bind_int(statement, 20, latest_rtk_status_.satellite_count), database_, "绑定RTK卫星数失败");
+      } else {
+        sqlite3_bind_null(statement, 20);
+      }
+      bind_nullable_double(statement, 21, rtk_status_fresh ?
+        std::optional<double>(latest_rtk_status_.hdop) : std::nullopt);
+      bind_nullable_double(statement, 22, rtk_status_fresh ?
+        std::optional<double>(latest_rtk_status_.pdop) : std::nullopt);
+      bind_nullable_double(statement, 23, rtk_status_fresh ?
+        std::optional<double>(latest_rtk_status_.speed_knots) : std::nullopt);
+      bind_nullable_double(statement, 24, rtk_status_fresh ?
+        std::optional<double>(latest_rtk_status_.track_degrees) : std::nullopt);
+      bind_nullable_double(statement, 25, gyro_x);
+      bind_nullable_double(statement, 26, gyro_y);
+      bind_nullable_double(statement, 27, gyro_z);
+      bind_nullable_double(statement, 28, accel_x);
+      bind_nullable_double(statement, 29, accel_y);
+      bind_nullable_double(statement, 30, accel_z);
       check_sqlite(
-        sqlite3_bind_int64(statement, 21, static_cast<sqlite3_int64>(imu_sample_count)),
+        sqlite3_bind_int64(statement, 31, static_cast<sqlite3_int64>(imu_sample_count)),
         database_, "绑定IMU平均样本数失败");
       bind_nullable_double(
-        statement, 22, temperature_fresh ?
+        statement, 32, temperature_fresh ?
         std::optional<double>(latest_temperature_.celsius) : std::nullopt);
-      bind_nullable_double(statement, 23, minimum_point_x);
-      bind_nullable_double(statement, 24, minimum_point_y);
-      bind_nullable_double(statement, 25, minimum_point_z);
+      bind_nullable_double(statement, 33, minimum_point_x);
+      bind_nullable_double(statement, 34, minimum_point_y);
+      bind_nullable_double(statement, 35, minimum_point_z);
       bind_nullable_double(
-        statement, 26, vehicle_attitude_fresh ?
+        statement, 36, vehicle_attitude_fresh ?
         std::optional<double>(latest_vehicle_attitude_.pitch_deg) : std::nullopt);
       bind_nullable_double(
-        statement, 27, vehicle_attitude_fresh ?
+        statement, 37, vehicle_attitude_fresh ?
         std::optional<double>(latest_vehicle_attitude_.roll_deg) : std::nullopt);
       bind_nullable_double(
-        statement, 28, localization_heading_fresh ?
+        statement, 38, localization_heading_fresh ?
         std::optional<double>(latest_localization_heading_.heading_deg) : std::nullopt);
       bind_nullable_double(
-        statement, 29, odin_fresh ?
+        statement, 39, odin_fresh ?
         std::optional<double>(latest_odin_.position_x_m) : std::nullopt);
       bind_nullable_double(
-        statement, 30, odin_fresh ?
+        statement, 40, odin_fresh ?
         std::optional<double>(latest_odin_.position_y_m) : std::nullopt);
       bind_nullable_double(
-        statement, 31, odin_fresh ?
+        statement, 41, odin_fresh ?
         std::optional<double>(latest_odin_.position_z_m) : std::nullopt);
+      bind_nullable_double(statement, 42, odin_fresh ? std::optional<double>(latest_odin_.qx) : std::nullopt);
+      bind_nullable_double(statement, 43, odin_fresh ? std::optional<double>(latest_odin_.qy) : std::nullopt);
+      bind_nullable_double(statement, 44, odin_fresh ? std::optional<double>(latest_odin_.qz) : std::nullopt);
+      bind_nullable_double(statement, 45, odin_fresh ? std::optional<double>(latest_odin_.qw) : std::nullopt);
       check_sqlite(sqlite3_step(statement), database_, "写入50Hz样本失败");
       sqlite3_finalize(statement);
 
@@ -1066,6 +1150,16 @@ private:
         is_repeated INTEGER NOT NULL DEFAULT 0 CHECK (is_repeated IN (0, 1)),
         repeat_index INTEGER NOT NULL DEFAULT 0,
         rtk_timestamp_ns INTEGER,
+        rtk_latitude_deg REAL,
+        rtk_longitude_deg REAL,
+        rtk_altitude_m REAL,
+        rtk_fix_type TEXT,
+        rtk_valid INTEGER CHECK (rtk_valid IN (0, 1)),
+        rtk_satellite_count INTEGER,
+        rtk_hdop REAL,
+        rtk_pdop REAL,
+        rtk_speed_knots REAL,
+        rtk_track_degrees REAL,
         gyro_x_rad_s REAL,
         gyro_y_rad_s REAL,
         gyro_z_rad_s REAL,
@@ -1082,7 +1176,11 @@ private:
         vehicle_heading_deg REAL,
         odin_position_x_m REAL,
         odin_position_y_m REAL,
-        odin_position_z_m REAL
+        odin_position_z_m REAL,
+        odin_qx REAL,
+        odin_qy REAL,
+        odin_qz REAL,
+        odin_qw REAL
       );
       CREATE INDEX clearance_samples_timestamp_idx ON clearance_samples(source_timestamp_ns);
       CREATE TABLE clearance_source_frames (
@@ -1221,7 +1319,7 @@ private:
         "config_version, software_version, lidar_mount_height_m, clearance_threshold_m, "
         "clearance_upper_limit_m, "
         "entry_rtk_status, exit_rtk_status) "
-        "VALUES (1, 10, ?, 'recorded', ?, ?, ?, ?, NULL, 0, ?, ?, ?, ?, ?, ?, ?, "
+        "VALUES (1, 12, ?, 'recorded', ?, ?, ?, ?, NULL, 0, ?, ?, ?, ?, ?, ?, ?, "
         "'pending', 'not_requested')",
         -1, &statement, nullptr),
       database_, "准备任务元数据写入失败");
@@ -1857,10 +1955,12 @@ private:
   std::uint64_t last_written_source_sequence_{0};
   std::uint64_t last_persisted_source_sequence_{0};
   std::uint32_t current_repeat_index_{0};
+  std::int64_t last_received_clearance_timestamp_ns_{0};
   std::string entry_rtk_status_{"not_requested"};
   std::string exit_rtk_status_{"not_requested"};
   std::optional<LatestClearance> latest_clearance_;
   LatestFix latest_fix_;
+  LatestRtkStatus latest_rtk_status_;
   ImuAccumulator imu_accumulator_;
   LatestOdin latest_odin_;
   LatestVehicleAttitude latest_vehicle_attitude_;

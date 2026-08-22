@@ -18,9 +18,9 @@ def test_motion_compensation_yaml_uses_formal_ten_millisecond_default() -> None:
     assert "processing_period_ms" not in parameters
     assert parameters["diagnostics_topic"] == "/diagnostics"
     assert parameters["max_cloud_wait_s"] == 0.05
-    assert parameters["pose_stream_timeout_s"] == 0.05
-    assert parameters["recovery_continuous_pose_s"] == 0.12
-    assert parameters["pending_cloud_limit"] == 2
+    assert parameters["pose_stream_timeout_s"] == 0.30
+    assert "recovery_continuous_pose_s" not in parameters
+    assert parameters["pending_cloud_limit"] == 1
     assert parameters["allowed_partial_tail_s"] == 0.0
 
 
@@ -73,3 +73,17 @@ def test_queue_wait_timestamp_is_taken_at_actual_pending_queue_insertion() -> No
 
     assert lock_position < push_position <= timestamp_position
     assert "const auto enqueued_at" not in callback
+
+
+def test_recovery_state_is_diagnostic_only_and_does_not_gate_clouds() -> None:
+    source = (
+        MOTION_ROOT / "src" / "enu_cloud_transform_node.cpp"
+    ).read_text(encoding="utf-8")
+    processing = source.split("void processPendingClouds", 1)[1].split(
+        "void publishDiagnostics", 1
+    )[0]
+
+    assert "motion_state_.load(std::memory_order_relaxed) != MotionState::kNormal" not in processing
+    assert 'enterPoseGap("POSE_STREAM_TIMEOUT", false)' in processing
+    assert '"last_pose_gap_start_ns"' in source
+    assert '"last_pose_gap_end_ns"' in source

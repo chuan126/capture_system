@@ -5,6 +5,7 @@
 #include <diagnostic_msgs/msg/diagnostic_array.hpp>
 #include <diagnostic_msgs/msg/diagnostic_status.hpp>
 #include <diagnostic_msgs/msg/key_value.hpp>
+#include <interfaces/msg/debug_frame_context.hpp>
 #include <rcl_interfaces/msg/integer_range.hpp>
 #include <rcl_interfaces/msg/parameter_descriptor.hpp>
 #include <nav_msgs/msg/odometry.hpp>
@@ -104,7 +105,7 @@ public:
       "output_cloud_topic", "/capture/lidar/points_compensated_enu");
     output_frame_id_ = declare_parameter<std::string>("output_frame_id", "lidar_local_enu");
 
-    const int pending_cloud_limit = declare_parameter<int>("pending_cloud_limit", 2);
+    const int pending_cloud_limit = declare_parameter<int>("pending_cloud_limit", 1);
     rcl_interfaces::msg::ParameterDescriptor poll_interval_descriptor;
     poll_interval_descriptor.description = "ENU pending点云处理轮询周期，单位ms；修改后需重启节点";
     poll_interval_descriptor.read_only = true;
@@ -118,9 +119,13 @@ public:
       poll_interval_descriptor);
     validateProcessingPollIntervalMs(processing_poll_interval_ms_);
     diagnostics_topic_ = declare_parameter<std::string>("diagnostics_topic", "/diagnostics");
-    if (pending_cloud_limit <= 0 || output_frame_id_.empty() || diagnostics_topic_.empty()) {
+    frame_context_topic_ = declare_parameter<std::string>(
+      "frame_context_topic", "/capture/debug/frame_context");
+    if (pending_cloud_limit <= 0 || output_frame_id_.empty() || diagnostics_topic_.empty() ||
+      frame_context_topic_.empty())
+    {
       throw std::invalid_argument(
-              "pending_cloud_limit必须为正数，output_frame_id和diagnostics_topic不能为空");
+              "pending_cloud_limit必须为正数，输出frame及诊断Topic不能为空");
     }
     pending_cloud_limit_ = static_cast<std::size_t>(pending_cloud_limit);
     allowed_partial_tail_ns_ = nonnegativeSecondsToNanoseconds(
@@ -128,9 +133,7 @@ public:
     max_cloud_wait_ns_ = secondsToNanoseconds(
       declare_parameter<double>("max_cloud_wait_s", 0.05));
     pose_stream_timeout_ns_ = secondsToNanoseconds(
-      declare_parameter<double>("pose_stream_timeout_s", 0.05));
-    recovery_continuous_pose_ns_ = secondsToNanoseconds(
-      declare_parameter<double>("recovery_continuous_pose_s", 0.12));
+      declare_parameter<double>("pose_stream_timeout_s", 0.30));
     odometry_time_offset_ns_ = signedSecondsToNanoseconds(
       declare_parameter<double>("odometry_time_offset_s", 0.0));
     cloud_time_offset_ns_ = signedSecondsToNanoseconds(
@@ -149,6 +152,8 @@ public:
       output_topic_, rclcpp::QoS(rclcpp::KeepLast(5)).reliable().durability_volatile());
     diagnostics_publisher_ = create_publisher<diagnostic_msgs::msg::DiagnosticArray>(
       diagnostics_topic_, rclcpp::QoS(rclcpp::KeepLast(5)).reliable().durability_volatile());
+    frame_context_publisher_ = create_publisher<interfaces::msg::DebugFrameContext>(
+      frame_context_topic_, rclcpp::QoS(rclcpp::KeepLast(50)).reliable().durability_volatile());
 
     odometry_callback_group_ = create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
     cloud_callback_group_ = create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
@@ -194,12 +199,11 @@ public:
 
     RCLCPP_INFO(
       get_logger(),
-      "ENU点云转换已启动：cloud=%s odom=%s output=%s frame=%s poll=%ldms wait=%.0fms "
-      "recovery=%.0fms；逐点旋转和平移补偿已启用",
+      "ENU点云转换已启动：cloud=%s odom=%s output=%s frame=%s poll=%ldms wait=%.0fms；"
+      "点云逐帧判定并支持平移异常时仅旋转降级",
       input_topic_.c_str(), odometry_topic_.c_str(), output_topic_.c_str(),
       output_frame_id_.c_str(), static_cast<long>(processing_poll_interval_ms_),
-      static_cast<double>(max_cloud_wait_ns_) / 1.0e6,
-      static_cast<double>(recovery_continuous_pose_ns_) / 1.0e6);
+      static_cast<double>(max_cloud_wait_ns_) / 1.0e6);
   }
 
 private:
@@ -209,6 +213,8 @@ private:
   {
     sensor_msgs::msg::PointCloud2::ConstSharedPtr message;
     EnuProcessingDiagnostics::Clock::time_point enqueued_at{};
+    std::uint64_t sequence{0U};
+    std::int64_t received_timestamp_ns{0};
   };
 
   static std::int64_t secondsToNanoseconds(const double seconds)
@@ -248,6 +254,19 @@ private:
     return adjusted_stamp_ns > 0;
   }
 
+  static std::uint8_t debugMode(const TransformMode mode) noexcept
+  {
+    switch (mode) {
+      case TransformMode::kFullSe3:
+        return interfaces::msg::DebugFrameContext::MODE_FULL_SE3;
+      case TransformMode::kRotationOnly:
+        return interfaces::msg::DebugFrameContext::MODE_ROTATION_ONLY;
+      case TransformMode::kReject:
+        return interfaces::msg::DebugFrameContext::MODE_REJECT;
+    }
+    return interfaces::msg::DebugFrameContext::MODE_REJECT;
+  }
+
   static const char * motionStateName(const MotionState state) noexcept
   {
     switch (state) {
@@ -283,7 +302,58 @@ private:
     return state_reason_;
   }
 
-  std::size_t clearPendingCloudsForPoseGap()
+  void publishFrameContext(
+    const PendingCloud & pending, const bool valid, const bool partial,
+    const std::string & invalid_reason, const std::int64_t cloud_start_ns = 0,
+    const std::int64_t cloud_end_ns = 0, const std::int64_t oldest_pose_ns = 0,
+    const std::int64_t newest_pose_ns = 0, const TransformStatistics * statistics = nullptr,
+    const EnuProcessingDiagnostics::Clock::time_point processing_started_at = {})
+  {
+    if (!pending.message) {
+      return;
+    }
+    interfaces::msg::DebugFrameContext context;
+    context.header = pending.message->header;
+    context.cloud_sequence = pending.sequence;
+    context.received_timestamp_ns = pending.received_timestamp_ns;
+    context.cloud_start_timestamp_ns = cloud_start_ns;
+    context.cloud_end_timestamp_ns = cloud_end_ns;
+    context.oldest_pose_timestamp_ns = oldest_pose_ns;
+    context.newest_pose_timestamp_ns = newest_pose_ns;
+    context.pose_head_gap_ns = oldest_pose_ns > 0 && cloud_start_ns > 0 ?
+      std::max<std::int64_t>(0, oldest_pose_ns - cloud_start_ns) : 0;
+    context.pose_tail_gap_ns = newest_pose_ns > 0 && cloud_end_ns > 0 ?
+      std::max<std::int64_t>(0, cloud_end_ns - newest_pose_ns) : 0;
+    const std::size_t raw_count = statistics ? statistics->input_point_count :
+      static_cast<std::size_t>(pending.message->width) * pending.message->height;
+    context.raw_point_count = static_cast<std::uint32_t>(std::min<std::size_t>(
+      raw_count, std::numeric_limits<std::uint32_t>::max()));
+    context.finite_point_count = statistics ? static_cast<std::uint32_t>(
+      std::min<std::size_t>(statistics->finite_nonzero_point_count,
+      std::numeric_limits<std::uint32_t>::max())) : 0U;
+    context.transformed_point_count = statistics ? static_cast<std::uint32_t>(
+      std::min<std::size_t>(statistics->transformed_point_count,
+      std::numeric_limits<std::uint32_t>::max())) : 0U;
+    context.valid = valid;
+    context.partial = partial;
+    context.invalid_reason = invalid_reason;
+    context.compensation_mode = statistics ? debugMode(statistics->mode) :
+      interfaces::msg::DebugFrameContext::MODE_REJECT;
+    context.valid_pose_ratio = statistics ? statistics->valid_pose_ratio : 0.0;
+    context.maximum_translation_m = statistics ? statistics->maximum_translation_m : 0.0;
+    context.queue_wait_ms = std::chrono::duration<double, std::milli>(
+      EnuProcessingDiagnostics::Clock::now() - pending.enqueued_at).count();
+    context.processing_time_ms = processing_started_at.time_since_epoch().count() > 0 ?
+      std::chrono::duration<double, std::milli>(
+      EnuProcessingDiagnostics::Clock::now() - processing_started_at).count() : 0.0;
+    context.dropped_pose_gap_total =
+      clouds_dropped_pose_gap_total_.load(std::memory_order_relaxed);
+    context.dropped_timeout_total =
+      clouds_dropped_timeout_total_.load(std::memory_order_relaxed);
+    frame_context_publisher_->publish(context);
+  }
+
+  std::size_t clearPendingCloudsForReset()
   {
     std::deque<PendingCloud> dropped;
     {
@@ -294,6 +364,7 @@ private:
     for (const auto & pending : dropped) {
       diagnostics_.recordCloudDropped();
       clouds_dropped_pose_gap_total_.fetch_add(1U, std::memory_order_relaxed);
+      publishFrameContext(pending, false, false, "POSE_STREAM_RESET");
       if (publish_empty_on_failure_ && pending.message) {
         publishEmptyCloud(*pending.message);
       }
@@ -307,49 +378,50 @@ private:
     const MotionState previous = motion_state_.exchange(
       MotionState::kPoseGap, std::memory_order_relaxed);
     setStateReason(reason);
-    last_pose_arrival_ns_.store(0, std::memory_order_relaxed);
-    if (previous == MotionState::kPoseGap) {
+    if (previous == MotionState::kPoseGap && !clear_poses) {
       return;
     }
-    pose_generation_.fetch_add(1U, std::memory_order_relaxed);
     if (clear_poses) {
+      last_pose_arrival_ns_.store(0, std::memory_order_relaxed);
+      last_pose_gap_start_ns_.store(0, std::memory_order_relaxed);
+      last_pose_gap_end_ns_.store(0, std::memory_order_relaxed);
+      pose_generation_.fetch_add(1U, std::memory_order_relaxed);
       transformer_->clearPoses();
+      const std::size_t dropped_count = clearPendingCloudsForReset();
+      RCLCPP_WARN(
+        get_logger(), "运动补偿进入POSE_GAP：%s，显式重置位姿并清空%zu帧点云",
+        reason.c_str(), dropped_count);
+    } else {
+      RCLCPP_WARN_THROTTLE(
+        get_logger(), *get_clock(), 2000,
+        "运动补偿检测到位姿流超时：%s；不清空缓存，后续点云继续逐帧判定",
+        reason.c_str());
     }
     continuous_pose_duration_ns_.store(0, std::memory_order_relaxed);
     pose_gap_count_.fetch_add(1U, std::memory_order_relaxed);
-    const std::size_t dropped_count = clearPendingCloudsForPoseGap();
-    RCLCPP_WARN(
-      get_logger(), "运动补偿进入POSE_GAP：%s，已清空%zu帧待处理点云",
-      reason.c_str(), dropped_count);
   }
 
   void enterRecovering(const std::string & reason)
   {
-    pose_generation_.fetch_add(1U, std::memory_order_relaxed);
     motion_state_.store(MotionState::kRecovering, std::memory_order_relaxed);
     setStateReason(reason);
     recovery_count_.fetch_add(1U, std::memory_order_relaxed);
-    const std::size_t dropped_count = clearPendingCloudsForPoseGap();
     RCLCPP_WARN_THROTTLE(
       get_logger(), *get_clock(), 2000,
-      "运动补偿进入RECOVERING：%s，已清空%zu帧待处理点云",
-      reason.c_str(), dropped_count);
+      "运动补偿状态进入RECOVERING：%s；该状态仅用于诊断，不阻塞逐帧处理",
+      reason.c_str());
   }
 
-  void tryFinishRecovery()
+  void updateContinuousPoseDuration()
   {
     const std::int64_t continuous_ns = transformer_->continuousPoseDurationNs();
     continuous_pose_duration_ns_.store(continuous_ns, std::memory_order_relaxed);
-    if (motion_state_.load(std::memory_order_relaxed) != MotionState::kRecovering ||
-      continuous_ns < recovery_continuous_pose_ns_)
-    {
-      return;
-    }
+  }
+
+  void markFramePublished(const TransformStatistics & statistics)
+  {
     motion_state_.store(MotionState::kNormal, std::memory_order_relaxed);
-    setStateReason("POSE_STREAM_STABLE");
-    RCLCPP_INFO(
-      get_logger(), "高频里程计已连续覆盖%.1fms，运动补偿恢复NORMAL",
-      static_cast<double>(continuous_ns) / 1.0e6);
+    setStateReason(transformModeName(statistics.mode));
   }
 
   void handleDeviceStateChange(const std::string & reason)
@@ -406,17 +478,21 @@ private:
 
     last_pose_arrival_ns_.store(steadyNowNanoseconds(), std::memory_order_relaxed);
     if (add_result == PoseBuffer::AddResult::kEpochReset) {
+      pose_generation_.fetch_add(1U, std::memory_order_relaxed);
+      clearPendingCloudsForReset();
       enterRecovering("TIMESTAMP_EPOCH_RESET");
-    } else if (add_result == PoseBuffer::AddResult::kGapReset) {
+    } else if (add_result == PoseBuffer::AddResult::kGapDetected) {
       const std::int64_t gap_ns = previous_pose_stamp_ns > 0 ?
         sample.stamp_ns - previous_pose_stamp_ns : 0;
+      last_pose_gap_start_ns_.store(previous_pose_stamp_ns, std::memory_order_relaxed);
+      last_pose_gap_end_ns_.store(sample.stamp_ns, std::memory_order_relaxed);
       updateMaximum(max_pose_gap_ns_, gap_ns);
       pose_gap_count_.fetch_add(1U, std::memory_order_relaxed);
       enterRecovering("POSE_TIMESTAMP_GAP");
     } else if (motion_state_.load(std::memory_order_relaxed) == MotionState::kPoseGap) {
       enterRecovering("POSE_STREAM_RESUMED");
     }
-    tryFinishRecovery();
+    updateContinuousPoseDuration();
   }
 
   void cloudCallback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr message)
@@ -425,17 +501,19 @@ private:
     PendingCloud dropped;
     {
       std::lock_guard<std::mutex> lock(pending_clouds_mutex_);
-      if (pending_clouds_.size() >= pending_cloud_limit_) {
+      if (!pending_clouds_.empty()) {
         dropped = pending_clouds_.front();
-        pending_clouds_.pop_front();
+        pending_clouds_.clear();
         diagnostics_.recordCloudDropped();
       }
       // queue_wait从点云真正进入pending队列开始计时，不包含等待队列互斥锁的时间。
-      pending_clouds_.push_back(
-        PendingCloud{message, EnuProcessingDiagnostics::Clock::now()});
+      pending_clouds_.push_back(PendingCloud{
+        message, EnuProcessingDiagnostics::Clock::now(),
+        cloud_sequence_.fetch_add(1U, std::memory_order_relaxed) + 1U, now().nanoseconds()});
       diagnostics_.observePendingCloudCount(pending_clouds_.size());
     }
     if (dropped.message) {
+      publishFrameContext(dropped, false, false, "PENDING_QUEUE_REPLACED");
       RCLCPP_WARN_THROTTLE(
         get_logger(), *get_clock(), 5000,
         "ENU点云等待队列已满，丢弃最旧点云但不发布空点云");
@@ -492,8 +570,7 @@ private:
     if (last_pose_arrival_ns > 0 && now_ns - last_pose_arrival_ns > pose_stream_timeout_ns_ &&
       motion_state_.load(std::memory_order_relaxed) != MotionState::kPoseGap)
     {
-      enterPoseGap("POSE_STREAM_TIMEOUT", true);
-      return;
+      enterPoseGap("POSE_STREAM_TIMEOUT", false);
     }
 
     PendingCloud pending;
@@ -502,32 +579,38 @@ private:
     }
     const auto message = pending.message;
     const auto processing_started_at = EnuProcessingDiagnostics::Clock::now();
-    const auto drop_for_pose_gap = [this, &message]() {
+    std::int64_t cloud_stamp_ns = 0;
+    std::int64_t last_point_stamp_ns = 0;
+    std::int64_t oldest_pose_stamp_ns = 0;
+    std::int64_t newest_pose_stamp_ns = 0;
+    const auto drop_for_pose_gap = [this, &message, &pending, &processing_started_at,
+      &cloud_stamp_ns, &last_point_stamp_ns, &oldest_pose_stamp_ns,
+      &newest_pose_stamp_ns](const std::string & reason) {
         diagnostics_.recordCloudDropped();
         clouds_dropped_pose_gap_total_.fetch_add(1U, std::memory_order_relaxed);
+        publishFrameContext(
+          pending, false, false, reason, cloud_stamp_ns, last_point_stamp_ns,
+          oldest_pose_stamp_ns, newest_pose_stamp_ns, nullptr, processing_started_at);
         if (publish_empty_on_failure_) {
           publishEmptyCloud(*message);
         }
       };
-    const auto drop_for_timeout = [this, &message]() {
+    const auto drop_for_timeout = [this, &message, &pending, &processing_started_at,
+      &cloud_stamp_ns, &last_point_stamp_ns, &oldest_pose_stamp_ns,
+      &newest_pose_stamp_ns](const std::string & reason) {
         diagnostics_.recordCloudDropped();
         clouds_dropped_timeout_total_.fetch_add(1U, std::memory_order_relaxed);
+        publishFrameContext(
+          pending, false, false, reason, cloud_stamp_ns, last_point_stamp_ns,
+          oldest_pose_stamp_ns, newest_pose_stamp_ns, nullptr, processing_started_at);
         if (publish_empty_on_failure_) {
           publishEmptyCloud(*message);
         }
       };
 
-    if (motion_state_.load(std::memory_order_relaxed) != MotionState::kNormal ||
-      !transformer_->initialized())
-    {
-      drop_for_pose_gap();
-      return;
-    }
     const std::uint64_t pose_generation = pose_generation_.load(std::memory_order_relaxed);
 
     std::vector<TimedRadarPoint> raw_points;
-    std::int64_t cloud_stamp_ns = 0;
-    std::int64_t last_point_stamp_ns = 0;
     if (!readPoints(*message, raw_points, cloud_stamp_ns, last_point_stamp_ns)) {
       RCLCPP_WARN_THROTTLE(
         get_logger(), *get_clock(), 5000,
@@ -536,24 +619,39 @@ private:
         publishEmptyCloud(*message);
       }
       diagnostics_.recordCloudDropped();
+      publishFrameContext(
+        pending, false, false, "INVALID_POINT_CLOUD_LAYOUT", 0, 0, 0, 0, nullptr,
+        processing_started_at);
       return;
     }
 
     cloud_start_stamp_ns_.store(cloud_stamp_ns, std::memory_order_relaxed);
     cloud_end_stamp_ns_.store(last_point_stamp_ns, std::memory_order_relaxed);
-    const std::int64_t oldest_pose_stamp_ns = transformer_->oldestPoseStampNs();
-    const std::int64_t newest_pose_stamp_ns = transformer_->newestPoseStampNs();
+    oldest_pose_stamp_ns = transformer_->oldestPoseStampNs();
+    newest_pose_stamp_ns = transformer_->newestPoseStampNs();
     newest_pose_stamp_ns_.store(newest_pose_stamp_ns, std::memory_order_relaxed);
     cloud_pose_lag_ns_.store(
       last_point_stamp_ns - newest_pose_stamp_ns, std::memory_order_relaxed);
 
-    if (oldest_pose_stamp_ns <= 0 || oldest_pose_stamp_ns > cloud_stamp_ns) {
+    if (oldest_pose_stamp_ns <= 0 || newest_pose_stamp_ns <= 0) {
+      const auto wait_duration = processing_started_at - pending.enqueued_at;
+      const std::int64_t wait_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        wait_duration).count();
+      if (wait_ns < max_cloud_wait_ns_ && requeueWaitingCloud(std::move(pending))) {
+        diagnostics_.recordPoseWait();
+        return;
+      }
+      drop_for_pose_gap("POSE_NOT_AVAILABLE");
+      return;
+    }
+
+    if (oldest_pose_stamp_ns > cloud_stamp_ns) {
       RCLCPP_WARN_THROTTLE(
         get_logger(), *get_clock(), 5000,
         "丢弃无法恢复的旧点云：cloud_start=%ld oldest_pose=%ld",
         static_cast<long>(cloud_stamp_ns), static_cast<long>(oldest_pose_stamp_ns));
       diagnostics_.recordInterpolationFailure();
-      drop_for_timeout();
+      drop_for_timeout("CLOUD_OLDER_THAN_POSE_CACHE");
       return;
     }
 
@@ -570,7 +668,7 @@ private:
         RCLCPP_WARN_THROTTLE(
           get_logger(), *get_clock(), 5000,
           "点云等待位姿时队列已被新帧占满，丢弃旧点云保持实时性");
-        drop_for_timeout();
+        drop_for_timeout("PENDING_QUEUE_REPLACED_WHILE_WAITING_POSE");
         return;
       }
       if (last_point_stamp_ns - newest_pose_stamp_ns > allowed_partial_tail_ns_) {
@@ -579,7 +677,7 @@ private:
           "点云等待位姿超过%.1fms，尾部仍缺少%.1fms姿态，丢弃本帧",
           static_cast<double>(max_cloud_wait_ns_) / 1.0e6,
           static_cast<double>(last_point_stamp_ns - newest_pose_stamp_ns) / 1.0e6);
-        drop_for_timeout();
+        drop_for_timeout("POSE_TAIL_TIMEOUT");
         return;
       }
     }
@@ -607,13 +705,14 @@ private:
         publishEmptyCloud(*message);
       }
       diagnostics_.recordCloudDropped();
+      publishFrameContext(
+        pending, false, false, invalid_reason, cloud_stamp_ns, last_point_stamp_ns,
+        oldest_pose_stamp_ns, newest_pose_stamp_ns, &statistics, processing_started_at);
       return;
     }
 
-    if (pose_generation != pose_generation_.load(std::memory_order_relaxed) ||
-      motion_state_.load(std::memory_order_relaxed) != MotionState::kNormal)
-    {
-      drop_for_pose_gap();
+    if (pose_generation != pose_generation_.load(std::memory_order_relaxed)) {
+      drop_for_pose_gap("POSE_GENERATION_CHANGED");
       return;
     }
     if (!fully_qualified) {
@@ -623,16 +722,27 @@ private:
         invalid_reason.c_str(), statistics.valid_pose_ratio,
         statistics.transformed_point_count, statistics.finite_nonzero_point_count);
     }
-    if (statistics.translation_fallback) {
+    if (statistics.mode == TransformMode::kRotationOnly) {
       RCLCPP_WARN_THROTTLE(
         get_logger(), *get_clock(), 5000,
-        "帧起始位置缺少可插值姿态，本帧退化为仅旋转补偿");
+        "本帧使用ROTATION_ONLY：ODIN平移不可用或超过门限，最大帧内位移=%.3fm",
+        statistics.maximum_translation_m);
     }
 
     publishCloud(*message, enu_points);
+    markFramePublished(statistics);
+    if (statistics.mode == TransformMode::kFullSe3) {
+      full_se3_frames_total_.fetch_add(1U, std::memory_order_relaxed);
+    } else if (statistics.mode == TransformMode::kRotationOnly) {
+      rotation_only_frames_total_.fetch_add(1U, std::memory_order_relaxed);
+    }
     diagnostics_.recordCloudProcessed();
     diagnostics_.observeProcessingTime(
       EnuProcessingDiagnostics::Clock::now() - processing_started_at);
+    publishFrameContext(
+      pending, fully_qualified, !fully_qualified, fully_qualified ? "" : invalid_reason,
+      cloud_stamp_ns, last_point_stamp_ns, oldest_pose_stamp_ns, newest_pose_stamp_ns,
+      &statistics, processing_started_at);
   }
 
   void publishDiagnostics()
@@ -684,6 +794,12 @@ private:
         milliseconds(
           static_cast<double>(max_pose_gap_ns_.load(std::memory_order_relaxed)) / 1.0e6)),
       diagnosticValue(
+        "last_pose_gap_start_ns",
+        std::to_string(last_pose_gap_start_ns_.load(std::memory_order_relaxed))),
+      diagnosticValue(
+        "last_pose_gap_end_ns",
+        std::to_string(last_pose_gap_end_ns_.load(std::memory_order_relaxed))),
+      diagnosticValue(
         "cloud_start_stamp_ns",
         std::to_string(cloud_start_stamp_ns_.load(std::memory_order_relaxed))),
       diagnosticValue(
@@ -719,6 +835,12 @@ private:
         "pose_gap_count", std::to_string(pose_gap_count_.load(std::memory_order_relaxed))),
       diagnosticValue(
         "recovery_count", std::to_string(recovery_count_.load(std::memory_order_relaxed))),
+      diagnosticValue(
+        "full_se3_frames_total",
+        std::to_string(full_se3_frames_total_.load(std::memory_order_relaxed))),
+      diagnosticValue(
+        "rotation_only_frames_total",
+        std::to_string(rotation_only_frames_total_.load(std::memory_order_relaxed))),
       diagnosticValue("pose_wait_count", std::to_string(snapshot.pose_wait_count)),
       diagnosticValue(
         "interpolation_failure_count", std::to_string(snapshot.interpolation_failure_count)),
@@ -780,14 +902,14 @@ private:
   std::string output_topic_;
   std::string output_frame_id_;
   std::string diagnostics_topic_;
+  std::string frame_context_topic_;
   std::string device_online_topic_;
   std::string device_offline_topic_;
-  std::size_t pending_cloud_limit_{2U};
+  std::size_t pending_cloud_limit_{1U};
   std::int64_t processing_poll_interval_ms_{kDefaultProcessingPollIntervalMs};
   std::int64_t allowed_partial_tail_ns_{0};
   std::int64_t max_cloud_wait_ns_{50000000LL};
-  std::int64_t pose_stream_timeout_ns_{50000000LL};
-  std::int64_t recovery_continuous_pose_ns_{120000000LL};
+  std::int64_t pose_stream_timeout_ns_{300000000LL};
   std::int64_t odometry_time_offset_ns_{0};
   std::int64_t cloud_time_offset_ns_{0};
   bool publish_partial_cloud_{false};
@@ -797,13 +919,18 @@ private:
   std::mutex pose_stream_mutex_;
   std::atomic<MotionState> motion_state_{MotionState::kPoseGap};
   std::atomic<std::uint64_t> pose_generation_{0U};
+  std::atomic<std::uint64_t> cloud_sequence_{0U};
   std::atomic<std::uint64_t> pose_gap_count_{0U};
   std::atomic<std::uint64_t> recovery_count_{0U};
+  std::atomic<std::uint64_t> full_se3_frames_total_{0U};
+  std::atomic<std::uint64_t> rotation_only_frames_total_{0U};
   std::atomic<std::uint64_t> clouds_dropped_pose_gap_total_{0U};
   std::atomic<std::uint64_t> clouds_dropped_timeout_total_{0U};
   std::atomic<std::int64_t> last_pose_arrival_ns_{0};
   std::atomic<std::int64_t> continuous_pose_duration_ns_{0};
   std::atomic<std::int64_t> max_pose_gap_ns_{0};
+  std::atomic<std::int64_t> last_pose_gap_start_ns_{0};
+  std::atomic<std::int64_t> last_pose_gap_end_ns_{0};
   std::atomic<std::int64_t> cloud_start_stamp_ns_{0};
   std::atomic<std::int64_t> cloud_end_stamp_ns_{0};
   std::atomic<std::int64_t> newest_pose_stamp_ns_{0};
@@ -823,6 +950,7 @@ private:
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr device_offline_subscription_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr output_publisher_;
   rclcpp::Publisher<diagnostic_msgs::msg::DiagnosticArray>::SharedPtr diagnostics_publisher_;
+  rclcpp::Publisher<interfaces::msg::DebugFrameContext>::SharedPtr frame_context_publisher_;
   rclcpp::TimerBase::SharedPtr processing_timer_;
   rclcpp::TimerBase::SharedPtr diagnostics_timer_;
 };

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import csv
 import hashlib
 import json
 import os
@@ -8,7 +7,7 @@ import re
 import shutil
 import tempfile
 import uuid
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import Lock
@@ -23,6 +22,10 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
+from backend.measurements.clearance_anomaly import (
+    DEFAULT_CLEARANCE_ANOMALY_CONFIG,
+    ClearanceAnalysisResult,
+)
 from backend.measurements.repository import (
     MeasurementNotFoundError,
     MeasurementRepository,
@@ -55,6 +58,7 @@ class TaskExportAssessment:
     pdf_exportable: bool = False
     pdf_blocked_reason: str | None = None
     normal_height_statistics: NormalHeightStatisticsRecord | None = None
+    clearance_analysis: ClearanceAnalysisResult | None = None
 
 
 @dataclass(frozen=True)
@@ -73,6 +77,7 @@ _CHINA_TIMEZONE = timezone(timedelta(hours=8))
 _SAFE_FILE_COMPONENT = re.compile(r"[^0-9A-Za-z._-]+")
 _PDF_FONT_NAME = "CaptureSystemCJK"
 _PDF_FONT_LOCK = Lock()
+_TXT_FIELD_SEPARATOR = "    "
 _DEFAULT_PDF_FONT_CANDIDATES = (
     Path("/usr/share/fonts/truetype/arphic-gbsn00lp/gbsn00lp.ttf"),
     Path("/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"),
@@ -137,24 +142,39 @@ class ReportExportService:
         if summary.statistics.valid_samples <= 0 or summary.statistics.minimum_height_m is None:
             return TaskExportAssessment(task, False, "测量记录中没有有效净空样本", summary)
         try:
-            normal_statistics = self.measurement_repository.load_normal_height_statistics(task)
+            clearance_analysis = self.measurement_repository.load_clearance_analysis(task)
         except MeasurementStorageError as error:
             return TaskExportAssessment(
-                task, True, None, summary, False,
-                f"正常高度统计不可读取：{error}", None,
+                task, False, f"净空异常分析不可读取：{error}", summary
             )
-        if normal_statistics.minimum_height_m is None:
+        if clearance_analysis.effective_min_clearance_m is None:
             return TaskExportAssessment(
-                task, True, None, summary, False,
-                "测量区间内没有正常高度样本", normal_statistics,
+                task, False, "测量记录中没有可用于报告的有效净空样本", summary,
+                clearance_analysis=clearance_analysis,
             )
-        return TaskExportAssessment(task, True, None, summary, True, None, normal_statistics)
+        try:
+            normal_statistics = self.measurement_repository.load_normal_height_statistics(task)
+        except MeasurementStorageError as error:
+            normal_statistics = None
+        return TaskExportAssessment(
+            task,
+            True,
+            None,
+            summary,
+            True,
+            None,
+            normal_statistics,
+            clearance_analysis,
+        )
 
     def generate_txt(self, task: TaskRecord) -> GeneratedExport:
         assessment = self.assess_task(task)
         if not assessment.exportable or assessment.summary is None:
             raise ExportBlockedError(assessment.blocked_reason or "当前任务不能导出 TXT")
         summary = assessment.summary
+        analysis = assessment.clearance_analysis
+        if analysis is None:
+            raise ExportBlockedError("当前任务缺少净空异常分析结果")
         output_directory = self._task_export_directory(task)
         try:
             output_directory.mkdir(parents=True, exist_ok=True)
@@ -176,11 +196,16 @@ class ReportExportService:
                 delete=False,
             ) as temporary:
                 temporary_path = Path(temporary.name)
-                self._write_txt(temporary, task, summary, generated_at)
+                self._write_txt(temporary, task, summary, analysis, generated_at)
                 temporary.flush()
                 os.fsync(temporary.fileno())
             os.replace(temporary_path, destination)
-        except (OSError, csv.Error, MeasurementStorageError, ValueError) as error:
+            trace = analysis.to_trace_dict()
+            trace["config"] = asdict(DEFAULT_CLEARANCE_ANOMALY_CONFIG)
+            destination.with_name(f"{destination.stem}_异常分析.json").write_text(
+                json.dumps(trace, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+        except (OSError, MeasurementStorageError, ValueError) as error:
             if temporary_path is not None:
                 temporary_path.unlink(missing_ok=True)
             raise ExportStorageError(f"生成 TXT 失败：{error}") from error
@@ -220,16 +245,15 @@ class ReportExportService:
                 "sha256": report_sha256,
                 "task_ids": [assessment.task.task_id for assessment in eligible],
                 "task_display_ids": [assessment.task.display_id for assessment in eligible],
-                "normal_height_ranges": [
+                "clearance_analysis": [
                     {
                         "task_id": assessment.task.task_id,
-                        "clearance_threshold_m": assessment.normal_height_statistics.clearance_threshold_m,
-                        "clearance_upper_limit_m": assessment.normal_height_statistics.clearance_upper_limit_m,
-                        "minimum_height_m": assessment.normal_height_statistics.minimum_height_m,
+                        **assessment.clearance_analysis.to_trace_dict(),
                     }
                     for assessment in eligible
-                    if assessment.normal_height_statistics is not None
+                    if assessment.clearance_analysis is not None
                 ],
+                "clearance_anomaly_config": asdict(DEFAULT_CLEARANCE_ANOMALY_CONFIG),
             }
             (report_directory / "manifest.json").write_text(
                 json.dumps(manifest, ensure_ascii=False, indent=2),
@@ -296,29 +320,50 @@ class ReportExportService:
         file_object: TextIO,
         task: TaskRecord,
         summary: MeasurementSummaryRecord,
+        analysis: ClearanceAnalysisResult,
         generated_at: str,
     ) -> None:
-        writer = csv.writer(file_object, delimiter="\t", lineterminator="\r\n")
         entry_rtk = _format_rtk(summary.entry_rtk)
         exit_rtk = _format_rtk(summary.exit_rtk)
-        writer.writerow(["隧道净空检测 50 Hz 测量明细"])
-        writer.writerow([])
-        writer.writerow(
+        _write_txt_row(file_object, ["隧道净空检测 50 Hz 测量明细"])
+        _write_txt_row(file_object, [])
+        _write_txt_row(
+            file_object,
             [
                 "采样序号",
-                "记录时间（RTK时间）",
+                "源帧序号",
+                "源帧时间",
+                "记录时间",
+                "源帧年龄 ms",
+                "重复源帧",
+                "重复序号",
                 "隧道编号",
                 "检测车道",
+                "净空有效",
+                "无效原因",
                 "实时高度 m",
                 "最低高度 m",
+                "质量分数",
                 "隧道入口 RTK",
                 "隧道出口 RTK",
+                "RTK时间",
+                "RTK纬度 deg",
+                "RTK经度 deg",
+                "RTK高程 m",
+                "RTK解类型",
+                "RTK有效",
+                "RTK卫星数",
+                "RTK HDOP",
+                "RTK PDOP",
+                "RTK速度 knot",
+                "RTK航向 deg",
                 "陀螺X rad/s",
                 "陀螺Y rad/s",
                 "陀螺Z rad/s",
                 "加速度计X m/s2",
                 "加速度计Y m/s2",
                 "加速度计Z m/s2",
+                "IMU样本数",
                 "雷达温度 °C",
                 "最低点云X m",
                 "最低点云Y m",
@@ -329,31 +374,51 @@ class ReportExportService:
                 "里程计位置x m",
                 "里程计位置y m",
                 "里程计位置z m",
+                "里程计四元数x",
+                "里程计四元数y",
+                "里程计四元数z",
+                "里程计四元数w",
             ]
         )
-        minimum_height = _format_number(summary.statistics.minimum_height_m, 3)
+        minimum_height = _format_number(analysis.effective_min_clearance_m, 3)
         for sample in self.measurement_repository.iter_export_samples(task):
-            writer.writerow(
+            _write_txt_row(
+                file_object,
                 [
                     sample.sample_index,
-                    _format_timestamp_ms(sample.rtk_timestamp_ms)
-                    if sample.rtk_timestamp_ms is not None
-                    else (
-                        _format_timestamp_ms(sample.source_timestamp_ms)
-                        if summary.recording_schema_version < 7 else ""
-                    ),
+                    sample.source_sequence if sample.source_sequence is not None else "",
+                    _format_timestamp_ms(sample.source_timestamp_ms),
+                    _format_timestamp_ms(sample.recorded_timestamp_ms),
+                    _format_txt_number(sample.source_age_ms, 3),
+                    _format_optional_bool(sample.is_repeated),
+                    sample.repeat_index if sample.repeat_index is not None else "",
                     task.tunnel_code,
                     _lane_text(summary.lane, summary.travel_direction, summary.lane_side),
+                    "1" if sample.valid else "0",
+                    sample.invalid_reason or "",
                     _format_txt_number(sample.height_m if sample.valid else None, 3),
                     minimum_height,
+                    _format_txt_number(sample.quality_score, 6),
                     entry_rtk,
                     exit_rtk,
+                    _format_timestamp_ms(sample.rtk_timestamp_ms) if sample.rtk_timestamp_ms is not None else "",
+                    _format_txt_number(sample.rtk_latitude_deg, 9),
+                    _format_txt_number(sample.rtk_longitude_deg, 9),
+                    _format_txt_number(sample.rtk_altitude_m, 4),
+                    sample.rtk_fix_type or "",
+                    _format_optional_bool(sample.rtk_valid),
+                    sample.rtk_satellite_count if sample.rtk_satellite_count is not None else "",
+                    _format_txt_number(sample.rtk_hdop, 3),
+                    _format_txt_number(sample.rtk_pdop, 3),
+                    _format_txt_number(sample.rtk_speed_knots, 4),
+                    _format_txt_number(sample.rtk_track_degrees, 4),
                     _format_txt_number(sample.gyro_x_rad_s, 6),
                     _format_txt_number(sample.gyro_y_rad_s, 6),
                     _format_txt_number(sample.gyro_z_rad_s, 6),
                     _format_txt_number(sample.accel_x_m_s2, 6),
                     _format_txt_number(sample.accel_y_m_s2, 6),
                     _format_txt_number(sample.accel_z_m_s2, 6),
+                    sample.imu_sample_count if sample.imu_sample_count is not None else "",
                     _format_txt_number(sample.radar_temperature_c, 2),
                     _format_txt_number(sample.minimum_point_x_m, 4),
                     _format_txt_number(sample.minimum_point_y_m, 4),
@@ -364,6 +429,10 @@ class ReportExportService:
                     _format_txt_number(sample.odin_position_x_m, 4),
                     _format_txt_number(sample.odin_position_y_m, 4),
                     _format_txt_number(sample.odin_position_z_m, 4),
+                    _format_txt_number(sample.odin_qx, 8),
+                    _format_txt_number(sample.odin_qy, 8),
+                    _format_txt_number(sample.odin_qz, 8),
+                    _format_txt_number(sample.odin_qw, 8),
                 ]
             )
 
@@ -465,8 +534,8 @@ class ReportExportService:
             summary = assessment.summary
             if summary is None:
                 continue
-            normal_statistics = assessment.normal_height_statistics
-            if normal_statistics is None or normal_statistics.minimum_height_m is None:
+            analysis = assessment.clearance_analysis
+            if analysis is None or analysis.effective_min_clearance_m is None:
                 continue
             time_text = f"{_format_iso_text(summary.started_at)}<br/>{_format_iso_text(summary.ended_at)}"
             rows.append(
@@ -474,7 +543,7 @@ class ReportExportService:
                     Paragraph(assessment.task.display_id, body_style),
                     Paragraph(_escape_pdf_text(assessment.task.tunnel_code), body_style),
                     Paragraph(_lane_text(summary.lane, summary.travel_direction, summary.lane_side), body_style),
-                    Paragraph(_format_number(normal_statistics.minimum_height_m, 3), body_style),
+                    Paragraph(_format_number(analysis.effective_min_clearance_m, 3), body_style),
                     Paragraph(time_text, body_style),
                     Paragraph(_escape_pdf_text(_format_rtk(summary.entry_rtk)), body_style),
                     Paragraph(_escape_pdf_text(_format_rtk(summary.exit_rtk)), body_style),
@@ -507,7 +576,8 @@ class ReportExportService:
             [
                 Spacer(1, 5 * mm),
                 Paragraph(
-                    "说明　最低高度仅统计任务冻结高度下限阈值与高度上限阈值之间（含边界）的算法有效样本。"
+                    "说明　最低高度为排除高置信度偶发异常后的有效最低净空；待复核低值仍保守计入。"
+                    "周期性设施和具有空间连续性的单个结构不会因高度低而自动排除。"
                     "无有效 RTK 端点时对应字段标记为未记录。",
                     body_style,
                 ),
@@ -556,8 +626,13 @@ def _lane_text(lane: str, travel_direction: str = "unknown", lane_side: str | No
 def _format_rtk(endpoint: RtkEndpointRecord | None) -> str:
     if endpoint is None or not endpoint.valid:
         return "未记录"
-    altitude = f", {endpoint.altitude_m:.3f} m" if endpoint.altitude_m is not None else ""
-    return f"{endpoint.latitude_deg:.7f}, {endpoint.longitude_deg:.7f}{altitude}"
+    altitude = f" H{endpoint.altitude_m:.3f}m" if endpoint.altitude_m is not None else ""
+    return f"N{endpoint.latitude_deg:.7f} E{endpoint.longitude_deg:.7f}{altitude}"
+
+
+def _write_txt_row(file_object: TextIO, fields: Iterable[object]) -> None:
+    sanitized = [" ".join(str(field).split()) for field in fields]
+    file_object.write(_TXT_FIELD_SEPARATOR.join(sanitized) + "\r\n")
 
 
 def _format_number(value: float | None, digits: int) -> str:
@@ -567,6 +642,12 @@ def _format_number(value: float | None, digits: int) -> str:
 def _format_txt_number(value: float | None, digits: int) -> str:
     # TXT 的 0 只承担缺失占位语义，SQLite 中的 NULL 和有效标志保持不变。
     return "0" if value is None else f"{value:.{digits}f}"
+
+
+def _format_optional_bool(value: bool | None) -> str:
+    if value is None:
+        return ""
+    return "1" if value else "0"
 
 
 def _parse_datetime(value: str) -> datetime:

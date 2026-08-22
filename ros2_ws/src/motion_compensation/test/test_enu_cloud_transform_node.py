@@ -8,6 +8,7 @@ import pytest
 import rclpy
 from builtin_interfaces.msg import Time
 from diagnostic_msgs.msg import DiagnosticArray
+from interfaces.msg import DebugFrameContext
 from nav_msgs.msg import Odometry
 from rcl_interfaces.srv import DescribeParameters, GetParameters
 from rclpy.qos import QoSProfile, ReliabilityPolicy
@@ -57,10 +58,17 @@ class TestEnuCloudTransformNode(unittest.TestCase):
             Odometry, "/capture/odometry/high_rate", reliable
         )
         outputs = []
+        contexts = []
         self.node.create_subscription(
             PointCloud2,
             "/capture/lidar/points_compensated_enu",
             outputs.append,
+            reliable,
+        )
+        self.node.create_subscription(
+            DebugFrameContext,
+            "/capture/debug/frame_context",
+            contexts.append,
             reliable,
         )
 
@@ -74,7 +82,7 @@ class TestEnuCloudTransformNode(unittest.TestCase):
         self.assertGreater(odometry_publisher.get_subscription_count(), 0)
 
         base_stamp = self.node.get_clock().now().to_msg()
-        # 默认需要120 ms连续位姿覆盖后才从RECOVERING恢复NORMAL。
+        # 发布完整帧所需的位姿覆盖；RECOVERING状态本身不再阻塞点云。
         for delta_ns in range(0, 131_000_000, 10_000_000):
             odometry = Odometry()
             odometry.header.stamp = add_nanoseconds(base_stamp, delta_ns)
@@ -97,7 +105,7 @@ class TestEnuCloudTransformNode(unittest.TestCase):
         )
 
         deadline = time.monotonic() + 10.0
-        while time.monotonic() < deadline and not outputs:
+        while time.monotonic() < deadline and (not outputs or not contexts):
             cloud_publisher.publish(cloud)
             rclpy.spin_once(self.node, timeout_sec=0.1)
 
@@ -112,6 +120,15 @@ class TestEnuCloudTransformNode(unittest.TestCase):
         self.assertAlmostEqual(float(points[0][0]), 1.0, places=6)
         self.assertAlmostEqual(float(points[0][1]), 2.0, places=6)
         self.assertAlmostEqual(float(points[0][2]), 3.0, places=6)
+        self.assertTrue(contexts, "节点未发布帧级调试上下文")
+        context = contexts[-1]
+        self.assertGreater(context.cloud_sequence, 0)
+        self.assertTrue(context.valid)
+        self.assertFalse(context.partial)
+        self.assertEqual(context.compensation_mode, DebugFrameContext.MODE_FULL_SE3)
+        self.assertEqual(context.raw_point_count, 1)
+        self.assertEqual(context.transformed_point_count, 1)
+        self.assertEqual(context.invalid_reason, "")
 
     def test_default_poll_interval_and_diagnostics_fields(self):
         parameter_client = self.node.create_client(
@@ -187,6 +204,8 @@ class TestEnuCloudTransformNode(unittest.TestCase):
             "clouds_dropped_timeout_total",
             "pose_gap_count",
             "recovery_count",
+            "full_se3_frames_total",
+            "rotation_only_frames_total",
             "pose_wait_count",
             "interpolation_failure_count",
             "queue_wait_ms_last",

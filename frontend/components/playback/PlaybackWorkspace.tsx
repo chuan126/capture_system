@@ -384,7 +384,7 @@ export default function PlaybackWorkspace({
           <article className="panel playback-clearance-panel">
             <header className="playback-clearance-panel__head">
               <div>
-                <span>50 Hz 测量序列</span>
+                <span>10 Hz 测量序列</span>
                 <h2>{selectedTask ? `${selectedTask.displayId} 净空高度曲线` : "净空高度曲线"}</h2>
                 <p>首屏只读取任务最前面的固定样本段。已加载窗口保留在当前任务缓存中，回拖时直接复用；只有未加载或分辨率不足的区域才再次请求，降采样仍保留局部最低值、最高值和无效断点。</p>
                 <small>{curveDetail}</small>

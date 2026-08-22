@@ -6,7 +6,17 @@ from fastapi.testclient import TestClient
 from backend.main import create_app
 
 
-PDF_FONT = Path("/usr/share/fonts/truetype/arphic-gbsn00lp/gbsn00lp.ttf")
+PDF_FONT = next(
+    (
+        candidate
+        for candidate in (
+            Path("/usr/share/fonts/truetype/arphic-gbsn00lp/gbsn00lp.ttf"),
+            Path("C:/Windows/Fonts/simhei.ttf"),
+        )
+        if candidate.is_file()
+    ),
+    Path("/usr/share/fonts/truetype/arphic-gbsn00lp/gbsn00lp.ttf"),
+)
 
 
 def make_static_site(directory: Path) -> None:
@@ -124,7 +134,14 @@ def test_preview_and_txt_export_use_only_recorded_completed_task(tmp_path: Path)
     make_static_site(static_dir)
     data_root = tmp_path / "runtime"
 
-    with TestClient(create_app(static_dir, data_root=data_root, start_ros_bridge=False)) as client:
+    with TestClient(
+        create_app(
+            static_dir,
+            data_root=data_root,
+            pdf_font_path=PDF_FONT,
+            start_ros_bridge=False,
+        )
+    ) as client:
         task = client.post(
             "/api/v1/tasks",
             json={
@@ -151,7 +168,10 @@ def test_preview_and_txt_export_use_only_recorded_completed_task(tmp_path: Path)
     assert preview["tasks"][0]["exportable"] is True
     assert preview["tasks"][0]["pdf_exportable"] is True
     assert preview["tasks"][0]["minimum_height_m"] == 5.18
-    assert preview["tasks"][0]["normal_minimum_height_m"] == 5.20
+    assert preview["tasks"][0]["normal_minimum_height_m"] == 5.18
+    assert preview["tasks"][0]["raw_min_clearance_m"] == 5.18
+    assert preview["tasks"][0]["effective_min_clearance_m"] == 5.18
+    assert preview["tasks"][0]["outlier_count"] == 0
     assert preview["tasks"][0]["clearance_threshold_m"] == 5.19
     assert preview["tasks"][0]["clearance_upper_limit_m"] == 5.20
     assert generation_response.status_code == 200
@@ -165,14 +185,16 @@ def test_preview_and_txt_export_use_only_recorded_completed_task(tmp_path: Path)
     assert "记录时间" in text
     assert "G45-001" in text
     assert "5.180" in text
-    assert "39.9000000, 116.3900000" in text
-    header = text.splitlines()[2].split("\t")
-    assert len(header) == 24
+    assert "N39.9000000 E116.3900000 H48.200m" in text
+    assert "\t" not in text
+    assert "," not in text
+    header = text.splitlines()[2].split("    ")
+    assert len(header) == 48
     assert "陀螺X rad/s" in header
     assert "加速度计Z m/s2" in header
     assert "俯仰 deg" in header
     assert "里程计位置z m" in header
-    first_sample = dict(zip(header, text.splitlines()[3].split("\t"), strict=True))
+    first_sample = dict(zip(header, text.splitlines()[3].split("    "), strict=True))
     assert first_sample["雷达温度 °C"] == "0"
     assert first_sample["方位 deg"] == "0"
     assert first_sample["里程计位置z m"] == "0"
@@ -180,12 +202,19 @@ def test_preview_and_txt_export_use_only_recorded_completed_task(tmp_path: Path)
     assert "attachment" in download_response.headers["content-disposition"]
 
 
-def test_pdf_excludes_task_when_no_valid_sample_is_inside_frozen_height_range(tmp_path: Path) -> None:
+def test_pdf_uses_effective_minimum_even_outside_legacy_frozen_height_range(tmp_path: Path) -> None:
     static_dir = tmp_path / "site"
     make_static_site(static_dir)
     data_root = tmp_path / "runtime"
 
-    with TestClient(create_app(static_dir, data_root=data_root, start_ros_bridge=False)) as client:
+    with TestClient(
+        create_app(
+            static_dir,
+            data_root=data_root,
+            pdf_font_path=PDF_FONT,
+            start_ros_bridge=False,
+        )
+    ) as client:
         task = client.post(
             "/api/v1/tasks",
             json={
@@ -207,13 +236,13 @@ def test_pdf_excludes_task_when_no_valid_sample_is_inside_frozen_height_range(tm
         )
 
     preview = preview_response.json()
-    assert preview["exportable_task_count"] == 0
+    assert preview["exportable_task_count"] == 1
     assert preview["tasks"][0]["exportable"] is True
-    assert preview["tasks"][0]["pdf_exportable"] is False
-    assert preview["tasks"][0]["normal_minimum_height_m"] is None
-    assert preview["tasks"][0]["pdf_blocked_reason"] == "测量区间内没有正常高度样本"
+    assert preview["tasks"][0]["pdf_exportable"] is True
+    assert preview["tasks"][0]["effective_min_clearance_m"] == 5.18
+    assert preview["tasks"][0]["pdf_blocked_reason"] is None
     assert txt_response.status_code == 200
-    assert pdf_response.status_code == 409
+    assert pdf_response.status_code == 200
 
 
 def test_test_fixture_is_visible_but_blocked_from_formal_export(tmp_path: Path) -> None:
@@ -336,8 +365,9 @@ def test_report_exports_accept_nanosecond_iso_timestamps(tmp_path: Path) -> None
     assert txt_response.status_code == 200
     assert txt_download.status_code == 200
     txt = txt_download.content.decode("utf-8-sig")
-    assert "2026-08-08T16:16:54.074+08:00" in txt
-    assert "2026-08-08T16:16:54.134+08:00" in txt
+    # 明细时间来自每条源帧；纳秒精度metadata时间用于PDF任务时间范围。
+    assert "2026-08-06T09:00:00.000+08:00" in txt
+    assert "2026-08-06T09:00:00.060+08:00" in txt
     assert pdf_response.status_code == 200
 
 
@@ -394,3 +424,96 @@ def test_report_lane_text_uses_actual_direction_and_lane_side() -> None:
     assert _lane_text("left", "down", "left") == "下行左车道"
     assert _lane_text("right", "down", "right") == "下行右车道"
     assert _lane_text("left", "unknown", "left") == "左车道"
+
+
+def test_report_uses_effective_minimum_and_writes_outlier_trace(tmp_path: Path) -> None:
+    static_dir = tmp_path / "site"
+    make_static_site(static_dir)
+    data_root = tmp_path / "runtime"
+
+    with TestClient(create_app(static_dir, data_root=data_root, start_ros_bridge=False)) as client:
+        task = client.post(
+            "/api/v1/tasks",
+            json={"tunnel_code": "TRACE-001", "tunnel_name": "异常追溯测试隧道"},
+        ).json()
+        attach_measurements(data_root, task)
+        database_path = data_root / "tasks" / str(task["task_id"]) / "measurements.db"
+        with sqlite3.connect(database_path) as connection:
+            for definition in (
+                "source_sequence INTEGER",
+                "is_repeated INTEGER",
+                "minimum_point_x_m REAL",
+                "minimum_point_y_m REAL",
+                "minimum_point_z_m REAL",
+                "vehicle_heading_deg REAL",
+                "odin_position_x_m REAL",
+                "odin_position_y_m REAL",
+                "odin_position_z_m REAL",
+            ):
+                connection.execute(f"ALTER TABLE clearance_samples ADD COLUMN {definition}")
+            connection.execute(
+                "UPDATE recording_metadata SET schema_version = 11, nominal_sample_rate_hz = 10.0"
+            )
+            connection.execute("DELETE FROM clearance_samples")
+            base_ns = 1_785_978_000_000_000_000
+            rows = []
+            for index in range(61):
+                height = 3.858 if index == 30 else 7.0 + 0.01 * ((index % 3) - 1)
+                point = (25.0, 10.0, 1.608) if index == 30 else (0.0, 0.0, height - 2.25)
+                rows.append(
+                    (
+                        index,
+                        base_ns + index * 100_000_000,
+                        base_ns + index * 100_000_000 + 1_000_000,
+                        index * 100.0,
+                        height - 2.25,
+                        height,
+                        1,
+                        None,
+                        0.95,
+                        index + 1,
+                        0,
+                        point[0],
+                        point[1],
+                        point[2],
+                        90.0,
+                        float(index),
+                        0.0,
+                        0.0,
+                    )
+                )
+            connection.executemany(
+                """
+                INSERT INTO clearance_samples (
+                    sample_index, source_timestamp_ns, recorded_timestamp_ns, elapsed_ms,
+                    lidar_to_top_m, clearance_height_m, valid, invalid_reason, quality_score,
+                    source_sequence, is_repeated, minimum_point_x_m, minimum_point_y_m,
+                    minimum_point_z_m, vehicle_heading_deg, odin_position_x_m,
+                    odin_position_y_m, odin_position_z_m
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                rows,
+            )
+
+        preview = client.post(
+            "/api/v1/reports/clearance-summary/preview",
+            json={"task_ids": [task["task_id"]]},
+        ).json()["tasks"][0]
+        generated = client.post(f"/api/v1/tasks/{task['task_id']}/exports/txt").json()
+
+    assert preview["raw_min_clearance_m"] == 3.858
+    assert preview["effective_min_clearance_m"] == 6.99
+    assert preview["outlier_count"] == 1
+    assert generated["file_name"].endswith("_50Hz测量明细.txt")
+    trace_path = (
+        data_root
+        / "tasks"
+        / str(task["task_id"])
+        / "exports"
+        / generated["file_name"].replace(".txt", "_异常分析.json")
+    )
+    trace = __import__("json").loads(trace_path.read_text(encoding="utf-8"))
+    assert trace["raw_min_clearance_m"] == 3.858
+    assert trace["effective_min_clearance_m"] == 6.99
+    assert trace["events"][0]["status"] == "HIGH_CONFIDENCE_OUTLIER"
+    assert "ISOLATED_MEASUREMENT:+2" in trace["events"][0]["matched_rules"]

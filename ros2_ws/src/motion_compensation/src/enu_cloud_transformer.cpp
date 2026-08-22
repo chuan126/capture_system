@@ -130,6 +130,19 @@ EnuPoint nanPoint() noexcept
 
 }  // namespace
 
+const char * transformModeName(const TransformMode mode) noexcept
+{
+  switch (mode) {
+    case TransformMode::kReject:
+      return "REJECT";
+    case TransformMode::kFullSe3:
+      return "FULL_SE3";
+    case TransformMode::kRotationOnly:
+      return "ROTATION_ONLY";
+  }
+  return "UNKNOWN";
+}
+
 PoseBuffer::PoseBuffer(
   const std::int64_t cache_duration_ns, const std::int64_t max_interpolation_gap_ns,
   const std::int64_t timestamp_reset_threshold_ns)
@@ -155,13 +168,8 @@ PoseBuffer::AddResult PoseBuffer::add(const PoseSample & sample) noexcept
     }
     return AddResult::kRejected;
   }
-  if (!samples_.empty() &&
-    normalized.stamp_ns - samples_.back().stamp_ns > max_interpolation_gap_ns_)
-  {
-    samples_.clear();
-    samples_.push_back(normalized);
-    return AddResult::kGapReset;
-  }
+  const bool gap_detected = !samples_.empty() &&
+    normalized.stamp_ns - samples_.back().stamp_ns > max_interpolation_gap_ns_;
   if (!samples_.empty() && normalized.stamp_ns == samples_.back().stamp_ns) {
     samples_.back() = normalized;
   } else {
@@ -172,7 +180,7 @@ PoseBuffer::AddResult PoseBuffer::add(const PoseSample & sample) noexcept
   {
     samples_.pop_front();
   }
-  return AddResult::kAccepted;
+  return gap_detected ? AddResult::kGapDetected : AddResult::kAccepted;
 }
 
 bool PoseBuffer::interpolate(const std::int64_t stamp_ns, PoseSample & output) const noexcept
@@ -208,7 +216,18 @@ std::int64_t PoseBuffer::newestStampNs() const noexcept
 std::int64_t PoseBuffer::continuousDurationNs() const noexcept
 {
   std::lock_guard<std::mutex> lock(mutex_);
-  return samples_.size() < 2U ? 0 : samples_.back().stamp_ns - samples_.front().stamp_ns;
+  if (samples_.size() < 2U) {
+    return 0;
+  }
+  auto segment_start = std::prev(samples_.end());
+  while (segment_start != samples_.begin()) {
+    const auto previous = std::prev(segment_start);
+    if (segment_start->stamp_ns - previous->stamp_ns > max_interpolation_gap_ns_) {
+      break;
+    }
+    segment_start = previous;
+  }
+  return samples_.back().stamp_ns - segment_start->stamp_ns;
 }
 
 std::vector<PoseSample> PoseBuffer::snapshot() const
@@ -300,6 +319,41 @@ bool EnuCloudTransformer::transform(
     return false;
   }
 
+  std::vector<std::int64_t> point_stamps_ns;
+  point_stamps_ns.reserve(32U);
+  std::int64_t previous_point_stamp_ns = std::numeric_limits<std::int64_t>::min();
+  for (const TimedRadarPoint & point : input) {
+    if (!std::isfinite(point.x) || !std::isfinite(point.y) || !std::isfinite(point.z)) {
+      continue;
+    }
+    if (point.x == 0.0F && point.y == 0.0F && point.z == 0.0F) {
+      continue;
+    }
+    ++local_statistics.finite_nonzero_point_count;
+    if (!std::isfinite(point.offset_time_s) || point.offset_time_s < 0.0F) {
+      ++local_statistics.invalid_time_point_count;
+      continue;
+    }
+    const auto offset_ns = static_cast<std::int64_t>(
+      std::llround(static_cast<double>(point.offset_time_s) * 1.0e9));
+    if (offset_ns < 0 || cloud_stamp_ns > std::numeric_limits<std::int64_t>::max() - offset_ns) {
+      ++local_statistics.invalid_time_point_count;
+      continue;
+    }
+    const std::int64_t point_stamp_ns = cloud_stamp_ns + offset_ns;
+    if (point_stamp_ns != previous_point_stamp_ns) {
+      point_stamps_ns.push_back(point_stamp_ns);
+      previous_point_stamp_ns = point_stamp_ns;
+    }
+  }
+  if (local_statistics.finite_nonzero_point_count == 0U) {
+    invalid_reason = "NO_VALID_RAW_POINTS";
+    if (statistics != nullptr) {
+      *statistics = local_statistics;
+    }
+    return false;
+  }
+
   bool translation_active = use_odometry_translation_;
   PoseSample reference_pose;
   if (translation_active && !interpolateSamples(
@@ -315,7 +369,47 @@ bool EnuCloudTransformer::transform(
     translation_active = false;
     local_statistics.translation_fallback = true;
   }
+  if (translation_active) {
+    bool translation_outlier = false;
+    for (const std::int64_t point_stamp_ns : point_stamps_ns) {
+      PoseSample point_pose;
+      if (!interpolateSamples(
+          pose_samples, pose_buffer_.maxInterpolationGapNs(), point_stamp_ns, point_pose))
+      {
+        continue;
+      }
+      double squared_translation = 0.0;
+      for (std::size_t index = 0; index < 3U; ++index) {
+        const double delta = point_pose.position_m[index] - reference_pose.position_m[index];
+        squared_translation += delta * delta;
+      }
+      const double translation_m = std::sqrt(squared_translation);
+      if (!std::isfinite(translation_m)) {
+        translation_outlier = true;
+        break;
+      }
+      local_statistics.maximum_translation_m = std::max(
+        local_statistics.maximum_translation_m, translation_m);
+      if (translation_m > max_translation_per_scan_m_) {
+        translation_outlier = true;
+        break;
+      }
+    }
+    if (translation_outlier) {
+      if (!fallback_to_rotation_only_) {
+        invalid_reason = "ODOM_TRANSLATION_OUTLIER";
+        if (statistics != nullptr) {
+          *statistics = local_statistics;
+        }
+        return false;
+      }
+      translation_active = false;
+      local_statistics.translation_fallback = true;
+    }
+  }
   local_statistics.translation_applied = translation_active;
+  local_statistics.mode = translation_active ?
+    TransformMode::kFullSe3 : TransformMode::kRotationOnly;
 
   output.reserve(input.size());
   std::int64_t cached_point_stamp_ns = std::numeric_limits<std::int64_t>::min();
@@ -325,7 +419,6 @@ bool EnuCloudTransformer::transform(
 
   for (const TimedRadarPoint & point : input) {
     if (!std::isfinite(point.offset_time_s) || point.offset_time_s < 0.0F) {
-      ++local_statistics.invalid_time_point_count;
       output.push_back(nanPoint());
       continue;
     }
@@ -338,12 +431,9 @@ bool EnuCloudTransformer::transform(
       output.push_back(EnuPoint{});
       continue;
     }
-    ++local_statistics.finite_nonzero_point_count;
-
     const auto offset_ns = static_cast<std::int64_t>(
       std::llround(static_cast<double>(point.offset_time_s) * 1.0e9));
     if (offset_ns < 0 || cloud_stamp_ns > std::numeric_limits<std::int64_t>::max() - offset_ns) {
-      ++local_statistics.invalid_time_point_count;
       output.push_back(nanPoint());
       continue;
     }
@@ -372,13 +462,7 @@ bool EnuCloudTransformer::transform(
               point_pose.position_m[index] - reference_pose.position_m[index];
             squared_translation += cached_translation[index] * cached_translation[index];
           }
-          if (!std::isfinite(squared_translation) ||
-            std::sqrt(squared_translation) > max_translation_per_scan_m_)
-          {
-            cached_pose_valid = false;
-          } else {
-            cached_pose_valid = true;
-          }
+          cached_pose_valid = std::isfinite(squared_translation);
         } else {
           cached_pose_valid = true;
         }

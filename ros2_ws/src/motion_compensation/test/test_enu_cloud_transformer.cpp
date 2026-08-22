@@ -32,16 +32,20 @@ TEST(PoseBufferTest, InterpolatesPositionAndRejectsUncoveredTime)
   EXPECT_FALSE(buffer.interpolate(1020000000LL, output));
 }
 
-TEST(PoseBufferTest, RejectsOutOfOrderAndStartsNewContinuousSegmentAfterGap)
+TEST(PoseBufferTest, RetainsSamplesAcrossGapAndRejectsOnlyInterpolationThroughGap)
 {
   PoseBuffer buffer(2000000000LL, 5000000LL);
   ASSERT_EQ(buffer.add(pose(1000000000LL, 0.0)), PoseBuffer::AddResult::kAccepted);
   EXPECT_EQ(buffer.add(pose(999000000LL, 0.0)), PoseBuffer::AddResult::kRejected);
-  ASSERT_EQ(buffer.add(pose(1010000000LL, 1.0)), PoseBuffer::AddResult::kGapReset);
-  EXPECT_EQ(buffer.oldestStampNs(), 1010000000LL);
+  ASSERT_EQ(buffer.add(pose(1010000000LL, 1.0)), PoseBuffer::AddResult::kGapDetected);
+  EXPECT_EQ(buffer.oldestStampNs(), 1000000000LL);
   EXPECT_EQ(buffer.continuousDurationNs(), 0);
   PoseSample output;
   EXPECT_FALSE(buffer.interpolate(1005000000LL, output));
+  ASSERT_EQ(buffer.add(pose(1014000000LL, 1.4)), PoseBuffer::AddResult::kAccepted);
+  EXPECT_EQ(buffer.continuousDurationNs(), 4000000LL);
+  EXPECT_TRUE(buffer.interpolate(1012000000LL, output));
+  EXPECT_NEAR(output.position_m[0], 1.2, 1.0e-12);
 }
 
 TEST(PoseBufferTest, TracksContinuousDurationAndCanBeCleared)
@@ -152,6 +156,60 @@ TEST(EnuCloudTransformerTest, KeepsVendorZeroPointInvalidDuringMotion)
   EXPECT_FLOAT_EQ(output[0].north, 0.0F);
   EXPECT_FLOAT_EQ(output[0].up, 0.0F);
   EXPECT_FLOAT_EQ(output[1].east, 1.0F);
+}
+
+TEST(EnuCloudTransformerTest, RejectsFrameWithOnlyVendorZeroPoints)
+{
+  EnuCloudTransformer transformer(2000000000LL, 20000000LL, true);
+  ASSERT_EQ(transformer.addPose(pose(1000000000LL, 0.0)), PoseBuffer::AddResult::kAccepted);
+  ASSERT_EQ(transformer.addPose(pose(1010000000LL, 0.0)), PoseBuffer::AddResult::kAccepted);
+
+  const std::vector<TimedRadarPoint> input{{0.0F, 0.0F, 0.0F, 0.005F}};
+  std::vector<EnuPoint> output;
+  std::string reason;
+  TransformStatistics statistics;
+  EXPECT_FALSE(transformer.transform(1000000000LL, input, output, reason, &statistics));
+  EXPECT_EQ(reason, "NO_VALID_RAW_POINTS");
+  EXPECT_EQ(statistics.mode, TransformMode::kReject);
+}
+
+TEST(EnuCloudTransformerTest, FallsBackWholeFrameToRotationOnlyOnTranslationOutlier)
+{
+  EnuCloudTransformer transformer(
+    2000000000LL, 200000000LL, true, 0.75, 2.5, true);
+  ASSERT_EQ(transformer.addPose(pose(1000000000LL, 0.0)), PoseBuffer::AddResult::kAccepted);
+  ASSERT_EQ(transformer.addPose(pose(1100000000LL, 10.0)), PoseBuffer::AddResult::kAccepted);
+
+  const std::vector<TimedRadarPoint> input{
+    {1.0F, 0.0F, 0.0F, 0.010F},
+    {2.0F, 0.0F, 0.0F, 0.050F}};
+  std::vector<EnuPoint> output;
+  std::string reason;
+  TransformStatistics statistics;
+  ASSERT_TRUE(transformer.transform(1000000000LL, input, output, reason, &statistics)) << reason;
+  ASSERT_EQ(output.size(), 2U);
+  EXPECT_NEAR(output[0].east, 1.0, 1.0e-6);
+  EXPECT_NEAR(output[1].east, 2.0, 1.0e-6);
+  EXPECT_EQ(statistics.mode, TransformMode::kRotationOnly);
+  EXPECT_TRUE(statistics.translation_fallback);
+  EXPECT_FALSE(statistics.translation_applied);
+  EXPECT_GT(statistics.maximum_translation_m, 2.5);
+}
+
+TEST(EnuCloudTransformerTest, RejectsTranslationOutlierWhenFallbackDisabled)
+{
+  EnuCloudTransformer transformer(
+    2000000000LL, 200000000LL, true, 0.75, 2.5, false);
+  ASSERT_EQ(transformer.addPose(pose(1000000000LL, 0.0)), PoseBuffer::AddResult::kAccepted);
+  ASSERT_EQ(transformer.addPose(pose(1100000000LL, 10.0)), PoseBuffer::AddResult::kAccepted);
+
+  const std::vector<TimedRadarPoint> input{{1.0F, 0.0F, 0.0F, 0.050F}};
+  std::vector<EnuPoint> output;
+  std::string reason;
+  TransformStatistics statistics;
+  EXPECT_FALSE(transformer.transform(1000000000LL, input, output, reason, &statistics));
+  EXPECT_EQ(reason, "ODOM_TRANSLATION_OUTLIER");
+  EXPECT_EQ(statistics.mode, TransformMode::kReject);
 }
 
 

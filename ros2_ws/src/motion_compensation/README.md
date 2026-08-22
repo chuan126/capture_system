@@ -53,16 +53,21 @@ r_n,i = R_n<-b(t_i) r_l,i + p_n(t_i) - p_n(t_0)
 - 点云、里程计和处理任务使用独立回调组。
 - 里程计订阅使用Reliable QoS。
 - 点云计算不持有pending队列互斥锁，每个轮询最多处理一帧。
-- 待处理队列默认只保留2帧，满载时丢弃最旧帧，避免恢复后追赶历史数据。
-- 点云最多等待50 ms补齐位姿；超时后丢弃当前帧，不阻塞后续点云。
-- 位姿间隔超过15 ms时立即切断旧连续段，并重新积累120 ms连续位姿后恢复输出。
-- 雷达上线、离线、时间纪元切换和位姿接收超时都会清空旧位姿及待处理点云。
+- 待处理队列默认只保留最新1帧，新帧到达时直接丢弃过期帧，避免恢复后追赶历史数据。
+- 点云最多等待50 ms补齐本帧位姿；超时只丢弃当前帧，不清空位姿缓存，也不阻塞后续点云。
+- 普通正向位姿间隔超过15 ms时只记录缺口。缺口与本帧时间范围相交且覆盖率不足时只拒绝该帧，后续第一帧覆盖完整便立即恢复。
+- `NORMAL`、`POSE_GAP`和`RECOVERING`只表示诊断状态，不作为全局发布闸门。只有时间戳回退、明确离线或重连事件才清空旧纪元缓存。
+- 位姿流连续300 ms未到达时更新超时诊断，但仍保留缓存；50 ms只表示单帧等待期限。
 - 低于姿态覆盖率门限的帧丢弃，默认不发布空点云。
 - 支持点云和里程计时间偏移标定。
 
 运行模式继续由ODIN设备侧保持High Peak；本节点不调用传感器模式切换服务。
 
-60 km/h时约94 ms扫描内车辆位移约1.57 m。默认单帧最大平移门限为2.5 m，用于拒绝里程计短时跳变。
+每帧有三种独立处理模式：位置和四元数正常时使用 `FULL_SE3`；扫描内位置变化超过
+`max_translation_per_scan_m`、但四元数与时间覆盖仍有效时整帧降级为
+`ROTATION_ONLY`，避免ODIN位置发散污染点云；四元数无效、时间覆盖不足或没有有效原始点时
+使用`REJECT`并只丢弃当前帧。60 km/h时约94 ms扫描内车辆位移约1.57 m，默认单帧最大
+平移门限2.5 m。
 
 ## 处理轮询与运行诊断
 
@@ -81,6 +86,7 @@ r_n,i = R_n<-b(t_i) r_l,i + p_n(t_i) - p_n(t_0)
 
 - `motion_state`为`NORMAL`、`POSE_GAP`或`RECOVERING`，`state_reason`记录最近状态原因。
 - `continuous_pose_duration_ms`、`max_pose_gap_ms`和`pose_stream_age_ms`用于判断数据源连续性。
+- `last_pose_gap_start_ns`和`last_pose_gap_end_ns`记录最近一次普通正向位姿缺口的设备时间范围。
 - `cloud_start_stamp_ns`、`cloud_end_stamp_ns`、`newest_pose_stamp_ns`和
   `cloud_pose_lag_ms`用于定位点云与位姿的时间关系。
 - `clouds_dropped_pose_gap_total`和`clouds_dropped_timeout_total`区分恢复期丢帧与等待超时。
@@ -99,3 +105,9 @@ r_n,i = R_n<-b(t_i) r_l,i + p_n(t_i) - p_n(t_0)
   具备姿态覆盖并真正开始处理的本机等待时间；等待队列互斥锁的时间不计入该指标。
 - `processing_time_ms_last/mean/max`使用`steady_clock`，只统计正常输出帧从开始解析到
   完成输出构造及publish调用的本机处理时间。
+
+节点还为每个接收点云发布`/capture/debug/frame_context`。消息以`cloud_sequence`关联原始帧，
+保存点云首尾时间、位姿缓存首尾时间、头尾覆盖缺口、原始/有限/转换点数、`FULL_SE3`、
+`ROTATION_ONLY`或`REJECT`模式、无效原因、姿态覆盖率、最大帧内平移、排队和处理耗时。
+队列替换、位姿流重置和等待超时等未输出点云的帧同样发布上下文。`algorithm_debug`及
+`full_debug` MCAP配置已包含该Topic。

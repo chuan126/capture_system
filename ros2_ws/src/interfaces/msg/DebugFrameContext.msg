@@ -1,0 +1,27 @@
+std_msgs/Header header
+
+uint8 MODE_REJECT=0
+uint8 MODE_FULL_SE3=1
+uint8 MODE_ROTATION_ONLY=2
+
+uint64 cloud_sequence
+int64 received_timestamp_ns
+int64 cloud_start_timestamp_ns
+int64 cloud_end_timestamp_ns
+int64 oldest_pose_timestamp_ns
+int64 newest_pose_timestamp_ns
+int64 pose_head_gap_ns
+int64 pose_tail_gap_ns
+uint32 raw_point_count
+uint32 finite_point_count
+uint32 transformed_point_count
+bool valid
+bool partial
+string invalid_reason
+uint8 compensation_mode
+float64 valid_pose_ratio
+float64 maximum_translation_m
+float64 queue_wait_ms
+float64 processing_time_ms
+uint64 dropped_pose_gap_total
+uint64 dropped_timeout_total

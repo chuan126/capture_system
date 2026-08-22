@@ -66,7 +66,7 @@ Content-Type: application/json
 
 ## 5. 历史测量读取
 
-客户回放页使用轻量摘要和按窗口曲线接口，避免长任务一次传输和渲染全部 50 Hz 样本。
+客户回放页使用轻量摘要和按窗口曲线接口，避免长任务一次传输和渲染全部真实测量样本。
 
 ```http
 GET /api/v1/tasks/{task_id}/measurements/series-prefix?max_samples=2000
@@ -137,7 +137,7 @@ CAPTURE_DATA_ROOT/
 | 表 | 内容 |
 | --- | --- |
 | `recording_metadata` | 任务 ID、数据来源、实际行驶方向、左右车道、时间、完整性和版本；v5 新增 `travel_direction` 和 `lane_side`，同时保留兼容字段 `lane` |
-| `clearance_samples` | 50 Hz 最近源帧保持样本、有效性、质量和来源字段 |
+| `clearance_samples` | 50 Hz最近源帧保持样本、有效性、质量、来源、RTK/IMU/里程计快照 |
 | `clearance_source_frames` | 净空算法实际输出源帧及质量字段。v4 使用合格连通区域数、水平投影网格覆盖面积、中位残差和 P95 残差的明确字段名 |
 | `rtk_samples` | 任务期间 RTK 快照 |
 | `rtk_endpoints` | 最近 2 s 内有效 Fix 确认的入口和出口 RTK |
@@ -147,8 +147,7 @@ CAPTURE_DATA_ROOT/
 | `recording_counters` | 样本和写入错误计数 |
 
 `data_origin` 取值为 `recorded` 或 `test_fixture`。前端必须明确显示测试数据，不得将其作为正式
-测量结果。版本 2、3、4 和 5 的每条 50 Hz 样本包含 `source_sequence`、`source_age_ms`、`is_repeated` 和 `repeat_index`。版本 3 起 `lidar_to_top_m` 保留算法原始输出，`clearance_height_m` 保存 `lidar_to_top_m + 雷达安装高度`。版本 4 将源帧诊断字段整理为 `candidate_region_count`、`selected_grid_area_m2`、`selected_residual_median_m` 和 `selected_residual_p95_m`。版本 5 在元数据中新增实际行驶方向和左右车道，报告与回放优先使用这组实际执行值。没有源帧或源帧超时的记录保持无效和空高度。重复记录不能解释为 50 Hz 独立
-算法源帧。
+测量结果。周期样本包含 `source_sequence`、`source_age_ms`、`is_repeated` 和 `repeat_index`。版本 3 起 `lidar_to_top_m` 保留算法原始输出，`clearance_height_m` 保存 `lidar_to_top_m + 雷达安装高度`。版本 4 将源帧诊断字段整理为 `candidate_region_count`、`selected_grid_area_m2`、`selected_residual_median_m` 和 `selected_residual_p95_m`。版本 5 在元数据中新增实际行驶方向和左右车道。版本 11曾采用真实净空事件驱动记录；版本12恢复50 Hz最近源帧保持序列，并新增逐样本RTK纬经高、质量指标、速度航向和ODIN四元数。只有可靠源序号或设备时间戳重复时才拒绝通信层重复源帧，相同高度或最低点坐标不会被去重。
 
 ## 7. 当前限制
 

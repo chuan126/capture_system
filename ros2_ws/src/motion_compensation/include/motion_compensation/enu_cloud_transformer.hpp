@@ -35,6 +35,15 @@ struct EnuPoint
   float up{0.0F};
 };
 
+enum class TransformMode
+{
+  kReject,
+  kFullSe3,
+  kRotationOnly
+};
+
+const char * transformModeName(TransformMode mode) noexcept;
+
 struct TransformStatistics
 {
   std::size_t input_point_count{0U};
@@ -45,13 +54,15 @@ struct TransformStatistics
   std::size_t invalid_time_point_count{0U};
   bool translation_applied{false};
   bool translation_fallback{false};
+  TransformMode mode{TransformMode::kReject};
+  double maximum_translation_m{0.0};
   double valid_pose_ratio{0.0};
 };
 
 class PoseBuffer
 {
 public:
-  enum class AddResult {kAccepted, kRejected, kGapReset, kEpochReset};
+  enum class AddResult {kAccepted, kRejected, kGapDetected, kEpochReset};
 
   PoseBuffer(
     std::int64_t cache_duration_ns, std::int64_t max_interpolation_gap_ns,

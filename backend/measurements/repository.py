@@ -1,11 +1,24 @@
 from __future__ import annotations
 
+import json
 import math
+import os
 import sqlite3
+import tempfile
 from dataclasses import dataclass
+from dataclasses import asdict
 from pathlib import Path
+from threading import Lock
 from typing import Iterator, cast
 
+from backend.measurements.clearance_anomaly import (
+    CLEARANCE_ANALYSIS_VERSION,
+    DEFAULT_CLEARANCE_ANOMALY_CONFIG,
+    ClearanceAnalysisResult,
+    ClearanceAnomalyConfig,
+    ClearanceMeasurement,
+    analyze_clearance,
+)
 from backend.measurements.models import MeasurementDataOrigin, MeasurementLane, MeasurementTravelDirection
 from backend.measurements.query_coordinator import (
     MeasurementQueryCancelledError,
@@ -50,6 +63,16 @@ class MeasurementExportSampleRecord:
     is_repeated: bool | None
     repeat_index: int | None
     rtk_timestamp_ms: int | None
+    rtk_latitude_deg: float | None
+    rtk_longitude_deg: float | None
+    rtk_altitude_m: float | None
+    rtk_fix_type: str | None
+    rtk_valid: bool | None
+    rtk_satellite_count: int | None
+    rtk_hdop: float | None
+    rtk_pdop: float | None
+    rtk_speed_knots: float | None
+    rtk_track_degrees: float | None
     gyro_x_rad_s: float | None
     gyro_y_rad_s: float | None
     gyro_z_rad_s: float | None
@@ -67,6 +90,10 @@ class MeasurementExportSampleRecord:
     odin_position_x_m: float | None
     odin_position_y_m: float | None
     odin_position_z_m: float | None
+    odin_qx: float | None
+    odin_qy: float | None
+    odin_qz: float | None
+    odin_qw: float | None
 
 
 @dataclass(frozen=True)
@@ -175,13 +202,15 @@ class MeasurementHistoryRecord:
     samples: list[ClearanceHistorySampleRecord]
 
 
-_SUPPORTED_SCHEMA_VERSIONS = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+_SUPPORTED_SCHEMA_VERSIONS = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}
 _MAX_HISTORY_SAMPLES = 500_000
 
 
 class MeasurementRepository:
     def __init__(self, tasks_directory: Path) -> None:
         self.tasks_directory = tasks_directory.resolve()
+        self._analysis_locks_guard = Lock()
+        self._analysis_locks: dict[str, Lock] = {}
 
     def load_summary(
         self,
@@ -591,6 +620,16 @@ class MeasurementRepository:
                     {repeated_expr} AS is_repeated,
                     {repeat_index_expr} AS repeat_index,
                     {optional_column("rtk_timestamp_ns")} AS rtk_timestamp_ns,
+                    {optional_column("rtk_latitude_deg")} AS rtk_latitude_deg,
+                    {optional_column("rtk_longitude_deg")} AS rtk_longitude_deg,
+                    {optional_column("rtk_altitude_m")} AS rtk_altitude_m,
+                    {optional_column("rtk_fix_type")} AS rtk_fix_type,
+                    {optional_column("rtk_valid")} AS rtk_valid,
+                    {optional_column("rtk_satellite_count")} AS rtk_satellite_count,
+                    {optional_column("rtk_hdop")} AS rtk_hdop,
+                    {optional_column("rtk_pdop")} AS rtk_pdop,
+                    {optional_column("rtk_speed_knots")} AS rtk_speed_knots,
+                    {optional_column("rtk_track_degrees")} AS rtk_track_degrees,
                     {optional_column("gyro_x_rad_s")} AS gyro_x_rad_s,
                     {optional_column("gyro_y_rad_s")} AS gyro_y_rad_s,
                     {optional_column("gyro_z_rad_s")} AS gyro_z_rad_s,
@@ -607,7 +646,11 @@ class MeasurementRepository:
                     {optional_column("vehicle_heading_deg")} AS vehicle_heading_deg,
                     {optional_column("odin_position_x_m")} AS odin_position_x_m,
                     {optional_column("odin_position_y_m")} AS odin_position_y_m,
-                    {optional_column("odin_position_z_m")} AS odin_position_z_m
+                    {optional_column("odin_position_z_m")} AS odin_position_z_m,
+                    {optional_column("odin_qx")} AS odin_qx,
+                    {optional_column("odin_qy")} AS odin_qy,
+                    {optional_column("odin_qz")} AS odin_qz,
+                    {optional_column("odin_qw")} AS odin_qw
                 FROM clearance_samples
                 ORDER BY sample_index ASC
                 """
@@ -640,6 +683,22 @@ class MeasurementRepository:
                         int(row["rtk_timestamp_ns"]) // 1_000_000
                         if row["rtk_timestamp_ns"] is not None else None
                     ),
+                    rtk_latitude_deg=_optional_float(row["rtk_latitude_deg"]),
+                    rtk_longitude_deg=_optional_float(row["rtk_longitude_deg"]),
+                    rtk_altitude_m=_optional_float(row["rtk_altitude_m"]),
+                    rtk_fix_type=(
+                        str(row["rtk_fix_type"])
+                        if row["rtk_fix_type"] is not None else None
+                    ),
+                    rtk_valid=(bool(row["rtk_valid"]) if row["rtk_valid"] is not None else None),
+                    rtk_satellite_count=(
+                        int(row["rtk_satellite_count"])
+                        if row["rtk_satellite_count"] is not None else None
+                    ),
+                    rtk_hdop=_optional_float(row["rtk_hdop"]),
+                    rtk_pdop=_optional_float(row["rtk_pdop"]),
+                    rtk_speed_knots=_optional_float(row["rtk_speed_knots"]),
+                    rtk_track_degrees=_optional_float(row["rtk_track_degrees"]),
                     gyro_x_rad_s=_optional_float(row["gyro_x_rad_s"]),
                     gyro_y_rad_s=_optional_float(row["gyro_y_rad_s"]),
                     gyro_z_rad_s=_optional_float(row["gyro_z_rad_s"]),
@@ -660,6 +719,10 @@ class MeasurementRepository:
                     odin_position_x_m=_optional_float(row["odin_position_x_m"]),
                     odin_position_y_m=_optional_float(row["odin_position_y_m"]),
                     odin_position_z_m=_optional_float(row["odin_position_z_m"]),
+                    odin_qx=_optional_float(row["odin_qx"]),
+                    odin_qy=_optional_float(row["odin_qy"]),
+                    odin_qz=_optional_float(row["odin_qz"]),
+                    odin_qw=_optional_float(row["odin_qw"]),
                 )
         except MeasurementStorageError:
             raise
@@ -667,6 +730,115 @@ class MeasurementRepository:
             raise MeasurementStorageError(f"读取任务测量明细失败：{error}") from error
         finally:
             connection.close()
+
+    def load_clearance_analysis(
+        self,
+        task: TaskRecord,
+        config: ClearanceAnomalyConfig = DEFAULT_CLEARANCE_ANOMALY_CONFIG,
+    ) -> ClearanceAnalysisResult:
+        """Analyze report clearance without changing the immutable measurement database."""
+        database_path = self._resolve_recording_database(task)
+        lock = self._analysis_lock(task.task_id)
+        with lock:
+            cached = self._load_clearance_analysis_cache(database_path, config)
+            if cached is not None:
+                return cached
+            result = analyze_clearance(
+                (
+                    ClearanceMeasurement(
+                        sample_index=sample.sample_index,
+                        height_m=sample.height_m,
+                        valid=sample.valid,
+                        invalid_reason=sample.invalid_reason,
+                        source_sequence=sample.source_sequence,
+                        is_repeated=sample.is_repeated,
+                        minimum_point_x_m=sample.minimum_point_x_m,
+                        minimum_point_y_m=sample.minimum_point_y_m,
+                        minimum_point_z_m=sample.minimum_point_z_m,
+                        odin_position_x_m=sample.odin_position_x_m,
+                        odin_position_y_m=sample.odin_position_y_m,
+                        odin_position_z_m=sample.odin_position_z_m,
+                        vehicle_heading_deg=sample.vehicle_heading_deg,
+                    )
+                    for sample in self.iter_export_samples(task)
+                ),
+                config,
+            )
+            self._write_clearance_analysis_cache(database_path, config, result)
+            return result
+
+    def _analysis_lock(self, task_id: str) -> Lock:
+        with self._analysis_locks_guard:
+            return self._analysis_locks.setdefault(task_id, Lock())
+
+    @staticmethod
+    def _analysis_cache_path(database_path: Path) -> Path:
+        return database_path.parent / "analysis" / f"{CLEARANCE_ANALYSIS_VERSION}.json"
+
+    @staticmethod
+    def _analysis_cache_identity(
+        database_path: Path,
+        config: ClearanceAnomalyConfig,
+    ) -> dict[str, object]:
+        stat = database_path.stat()
+        return {
+            "database_size_bytes": stat.st_size,
+            "database_mtime_ns": stat.st_mtime_ns,
+            "config": asdict(config),
+        }
+
+    def _load_clearance_analysis_cache(
+        self,
+        database_path: Path,
+        config: ClearanceAnomalyConfig,
+    ) -> ClearanceAnalysisResult | None:
+        path = self._analysis_cache_path(database_path)
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(payload, dict):
+                return None
+            if payload.get("schema_version") != 1:
+                return None
+            if payload.get("identity") != self._analysis_cache_identity(database_path, config):
+                return None
+            result = payload.get("result")
+            if not isinstance(result, dict):
+                return None
+            return ClearanceAnalysisResult.from_trace_dict(result)
+        except (OSError, ValueError, KeyError, TypeError):
+            return None
+
+    def _write_clearance_analysis_cache(
+        self,
+        database_path: Path,
+        config: ClearanceAnomalyConfig,
+        result: ClearanceAnalysisResult,
+    ) -> None:
+        path = self._analysis_cache_path(database_path)
+        temporary_path: Path | None = None
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "schema_version": 1,
+                "identity": self._analysis_cache_identity(database_path, config),
+                "result": result.to_trace_dict(),
+            }
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=path.parent,
+                prefix=".clearance-analysis-",
+                suffix=".tmp",
+                delete=False,
+            ) as temporary:
+                temporary_path = Path(temporary.name)
+                json.dump(payload, temporary, ensure_ascii=False, indent=2)
+                temporary.flush()
+                os.fsync(temporary.fileno())
+            os.replace(temporary_path, path)
+        except OSError:
+            if temporary_path is not None:
+                temporary_path.unlink(missing_ok=True)
 
     def _open_readonly(self, database_path: Path) -> sqlite3.Connection:
         try:

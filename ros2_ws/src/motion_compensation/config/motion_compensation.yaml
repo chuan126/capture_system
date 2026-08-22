@@ -36,18 +36,15 @@ enu_cloud_transform_node:
     # 单帧最多等待50 ms补齐点云尾部位姿。超时立即丢弃该帧，避免队首阻塞后续点云。
     max_cloud_wait_s: 0.05
 
-    # 高频位姿连续50 ms未到达即判定数据流中断，并清空旧位姿和待处理点云。
-    pose_stream_timeout_s: 0.05
-
-    # 中断恢复后至少重新积累120 ms连续位姿，完整覆盖约94 ms扫描周期后才恢复发布。
-    recovery_continuous_pose_s: 0.12
+    # 高频位姿连续300 ms未到达时只更新诊断状态，不清空缓存；每帧仍按自己的时间覆盖判定。
+    pose_stream_timeout_s: 0.30
 
     # 设备时间偏移标定接口。默认不修正，单位为秒。
     odometry_time_offset_s: 0.0
     cloud_time_offset_s: 0.0
 
-    # 只缓存最多2帧并在满载时保留最新帧，防止恢复后继续处理过期点云。
-    pending_cloud_limit: 2
+    # 只保留最新1帧，防止恢复后继续处理过期点云。
+    pending_cloud_limit: 1
 
     # AIO-3588JQ实机A/B/C表明10 ms已获得绝大多数空轮询CPU收益；允许范围[1, 100] ms。
     # 本参数仅在节点启动时读取，修改后需要重启节点或capture-system.service。

@@ -229,7 +229,7 @@ if (( ! web_ready )); then
 fi
 
 # FastAPI先完成capture.db迁移，再启动直接访问同一数据库的设备端状态机。
-echo "正在启动设备端任务状态机和50 Hz记录器……"
+echo "正在启动设备端任务状态机和10 Hz真实源帧记录器……"
 setsid --wait ros2 launch bringup task_control.launch.py data_root:="${data_root}" &
 task_control_pid="$!"
 child_pids+=("${task_control_pid}")

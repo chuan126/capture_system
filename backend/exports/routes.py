@@ -7,10 +7,12 @@ from fastapi.responses import FileResponse
 
 from backend.exports.models import (
     ExportFileResponse,
+    ExportJobResponse,
     ReportPreviewResponse,
     ReportSelectionRequest,
     TaskExportPreviewResponse,
 )
+from backend.exports.jobs import ExportJobError, ExportJobManager, ExportJobRecord
 from backend.exports.service import (
     ExportBlockedError,
     ExportNotFoundError,
@@ -34,6 +36,10 @@ def _service(request: Request) -> ReportExportService:
     return request.app.state.report_export_service
 
 
+def _job_manager(request: Request) -> ExportJobManager:
+    return request.app.state.export_job_manager
+
+
 def _rtk_response(record: RtkEndpointRecord | None) -> RtkEndpointResponse | None:
     if record is None:
         return None
@@ -49,6 +55,7 @@ def _rtk_response(record: RtkEndpointRecord | None) -> RtkEndpointResponse | Non
 
 def _preview_response(assessment: TaskExportAssessment) -> TaskExportPreviewResponse:
     summary = assessment.summary
+    analysis = assessment.clearance_analysis
     return TaskExportPreviewResponse(
         task_id=assessment.task.task_id,
         display_id=assessment.task.display_id,
@@ -71,8 +78,7 @@ def _preview_response(assessment: TaskExportAssessment) -> TaskExportPreviewResp
         invalid_samples=summary.statistics.invalid_samples if summary else None,
         minimum_height_m=summary.statistics.minimum_height_m if summary else None,
         normal_minimum_height_m=(
-            assessment.normal_height_statistics.minimum_height_m
-            if assessment.normal_height_statistics else None
+            analysis.effective_min_clearance_m if analysis else None
         ),
         clearance_threshold_m=(
             assessment.normal_height_statistics.clearance_threshold_m
@@ -81,6 +87,16 @@ def _preview_response(assessment: TaskExportAssessment) -> TaskExportPreviewResp
         clearance_upper_limit_m=(
             assessment.normal_height_statistics.clearance_upper_limit_m
             if assessment.normal_height_statistics else None
+        ),
+        raw_min_clearance_m=analysis.raw_min_clearance_m if analysis else None,
+        effective_min_clearance_m=(
+            analysis.effective_min_clearance_m if analysis else None
+        ),
+        has_review_required=analysis.has_review_required if analysis else None,
+        review_required_count=len(analysis.review_required_events) if analysis else None,
+        outlier_count=len(analysis.outlier_events) if analysis else None,
+        protected_structure_count=(
+            len(analysis.protected_structure_events) if analysis else None
         ),
         entry_rtk=_rtk_response(summary.entry_rtk) if summary else None,
         exit_rtk=_rtk_response(summary.exit_rtk) if summary else None,
@@ -103,12 +119,100 @@ def _file_response(record: GeneratedExport, download_url: str) -> ExportFileResp
     )
 
 
+def _job_response(record: ExportJobRecord) -> ExportJobResponse:
+    return ExportJobResponse(
+        job_id=record.job_id,
+        export_format=record.export_format,
+        task_ids=list(record.task_ids),
+        state=record.state,
+        phase=record.phase,
+        progress=record.progress,
+        created_at=datetime.fromisoformat(record.created_at.replace("Z", "+00:00")),
+        updated_at=datetime.fromisoformat(record.updated_at.replace("Z", "+00:00")),
+        error=record.error,
+        file_name=record.file_name,
+        file_size_bytes=record.file_size_bytes,
+        generated_at=(
+            datetime.fromisoformat(record.generated_at.replace("Z", "+00:00"))
+            if record.generated_at else None
+        ),
+        download_url=(
+            f"/api/v1/export-jobs/{record.job_id}/download"
+            if record.state == "completed" else None
+        ),
+        report_id=record.report_id,
+        task_id=record.task_id,
+        included_task_count=record.included_task_count,
+    )
+
+
 def _export_http_error(error: Exception) -> HTTPException:
     if isinstance(error, (ExportNotFoundError, TaskNotFoundError)):
         return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error))
     if isinstance(error, ExportBlockedError):
         return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error))
     return HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error))
+
+
+@router.post(
+    "/tasks/{task_id}/export-jobs/txt",
+    response_model=ExportJobResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def create_task_txt_job(task_id: str, request: Request) -> ExportJobResponse:
+    try:
+        _task_repository(request).get_task(task_id)
+        return _job_response(_job_manager(request).submit("txt", [task_id]))
+    except TaskNotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务不存在") from error
+    except (TaskStorageError, ExportJobError) as error:
+        raise _export_http_error(error) from error
+
+
+@router.post(
+    "/reports/clearance-summary/export-jobs",
+    response_model=ExportJobResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def create_clearance_pdf_job(
+    payload: ReportSelectionRequest,
+    request: Request,
+) -> ExportJobResponse:
+    try:
+        for task_id in payload.task_ids:
+            _task_repository(request).get_task(task_id)
+        return _job_response(_job_manager(request).submit("pdf", payload.task_ids))
+    except TaskNotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务不存在") from error
+    except (TaskStorageError, ExportJobError) as error:
+        raise _export_http_error(error) from error
+
+
+@router.get("/export-jobs/{job_id}", response_model=ExportJobResponse)
+def get_export_job(job_id: str, request: Request) -> ExportJobResponse:
+    try:
+        return _job_response(_job_manager(request).get(job_id))
+    except ExportJobError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+
+
+@router.delete("/export-jobs/{job_id}", response_model=ExportJobResponse)
+def cancel_export_job(job_id: str, request: Request) -> ExportJobResponse:
+    try:
+        return _job_response(_job_manager(request).cancel(job_id))
+    except ExportJobError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+
+
+@router.get("/export-jobs/{job_id}/download")
+def download_export_job(job_id: str, request: Request) -> FileResponse:
+    try:
+        record = _job_manager(request).get(job_id)
+        path = _job_manager(request).resolve_download(job_id)
+        media_type = "application/pdf" if record.export_format == "pdf" else "text/plain; charset=utf-8"
+        return FileResponse(path, media_type=media_type, filename=path.name)
+    except ExportJobError as error:
+        raise _export_http_error(error) from error
 
 
 @router.post("/reports/clearance-summary/preview", response_model=ReportPreviewResponse)

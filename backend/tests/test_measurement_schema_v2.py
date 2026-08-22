@@ -188,8 +188,9 @@ def test_schema_v2_history_and_txt_preserve_repeated_source_provenance(tmp_path:
 
     assert export_response.status_code == 200
     text = download_response.content.decode("utf-8-sig")
-    header = text.splitlines()[2].split("\t")
+    header = text.splitlines()[2].split("    ")
     assert len(header) == 24
+    assert "\t" not in text
     assert header[:8] == [
         "采样序号", "记录时间（RTK时间）", "隧道编号", "检测车道",
         "实时高度 m", "最低高度 m", "隧道入口 RTK", "隧道出口 RTK",

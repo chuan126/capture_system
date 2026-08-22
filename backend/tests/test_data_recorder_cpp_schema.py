@@ -45,6 +45,12 @@ def test_data_recorder_cpp_schema_executes_without_duplicate_columns() -> None:
     }.issubset(sample_columns)
     assert {
         "rtk_timestamp_ns",
+        "rtk_latitude_deg",
+        "rtk_longitude_deg",
+        "rtk_altitude_m",
+        "rtk_satellite_count",
+        "rtk_hdop",
+        "rtk_pdop",
         "gyro_x_rad_s",
         "gyro_y_rad_s",
         "gyro_z_rad_s",
@@ -62,6 +68,10 @@ def test_data_recorder_cpp_schema_executes_without_duplicate_columns() -> None:
         "odin_position_x_m",
         "odin_position_y_m",
         "odin_position_z_m",
+        "odin_qx",
+        "odin_qy",
+        "odin_qz",
+        "odin_qw",
     }.issubset(sample_columns)
     assert "imu_accumulator_ = ImuAccumulator{};" in source
     assert "message->vehicle_pitch_deg" in source
@@ -81,13 +91,17 @@ def test_data_recorder_stores_mount_adjusted_clearance_and_keeps_raw_algorithm_v
         / "data_recorder_node.cpp"
     ).read_text(encoding="utf-8")
 
-    assert "VALUES (1, 10, ?, 'recorded'" in source
+    assert "VALUES (1, 12, ?, 'recorded'" in source
     assert "clearance_height = *value + lidar_mount_height_m_" in source
     assert "bind_nullable_double(statement, 5, value);" in source
     assert "bind_nullable_double(statement, 6, clearance_height);" in source
     assert "request->lidar_mount_height_m < 0.0" in source
     assert "request->clearance_threshold_m < 0.0" in source
     assert "request->clearance_threshold_m > request->clearance_upper_limit_m" in source
+    assert "write_periodic_sample();" not in source
+    assert "write_periodic_sample" in source
+    assert "sample_timer_" in source
+    assert "latest.source_timestamp_ns == last_received_clearance_timestamp_ns_" in source
 
 
 def test_vehicle_attitude_and_direction_use_expected_sources_without_position_side_effects() -> None:
@@ -145,8 +159,9 @@ def test_vehicle_attitude_and_direction_use_expected_sources_without_position_si
         r"void on_odometry\(.*?\n  void on_radar_temperature", recorder, re.DOTALL
     )
     assert odometry_handler is not None
-    assert "orientation" not in odometry_handler.group(0)
     assert "latest_odin_.position_x_m = position.x" in odometry_handler.group(0)
+    assert "latest_odin_.qx = orientation.x" in odometry_handler.group(0)
+    assert "vehicleAttitudeFromOdinQuaternion" not in odometry_handler.group(0)
 
     for relative_directory in ("ros2_ws/src/motion_compensation", "ros2_ws/src/clearance_engine"):
         directory = project_root / relative_directory
