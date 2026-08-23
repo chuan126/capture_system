@@ -51,6 +51,8 @@ def test_normal_tunnel_variation_has_no_low_event() -> None:
     assert result.low_clearance_events == ()
     assert result.raw_min_clearance_m == 6.96
     assert result.effective_min_clearance_m == 6.96
+    assert result.recommended_min_clearance_m is None
+    assert result.confidence_level == "INSUFFICIENT"
 
 
 def test_isolated_very_low_measurement_is_high_confidence_outlier() -> None:
@@ -78,6 +80,70 @@ def test_two_meter_continuous_low_structure_is_preserved() -> None:
     assert event.length_m == 2.0
     assert event.point_trajectory_continuous is True
     assert event.status == ClearanceEventStatus.VALID_STRUCTURE
+
+
+def test_single_task_quality_evidence_produces_high_confidence_recommendation() -> None:
+    records = normal_tunnel()
+    low_heights = [5.38, 5.40, 5.39, 5.41, 5.40]
+    for offset, index in enumerate(range(28, 33)):
+        records[index] = replace(
+            measurement(
+                index,
+                float(index),
+                low_heights[offset],
+                point=fixed_structure_point(30.0, float(index), low_heights[offset]),
+            ),
+            source_age_ms=12.0,
+            valid_point_ratio=0.96,
+            candidate_region_count=2,
+            selected_inlier_count=260,
+            selected_grid_area_m2=0.42,
+            selected_tilt_deg=1.5,
+            selected_residual_p95_m=0.012,
+        )
+
+    result = analyze_clearance(records)
+
+    assert result.raw_min_clearance_m == 5.38
+    assert result.recommended_min_clearance_m is not None
+    assert 5.38 < result.recommended_min_clearance_m < 5.40
+    assert result.confidence_level == "HIGH"
+    assert result.confidence_score >= 80
+    assert "独立源帧5个" in result.confidence_reason
+    assert result.recommended_event_id == result.low_clearance_events[0].event_id
+    assert result.from_trace_dict(result.to_trace_dict()) == result
+
+
+def test_geometry_qualified_low_band_does_not_copy_untrusted_raw_minimum() -> None:
+    records = normal_tunnel(100)
+    records[5] = measurement(5, 5.0, 4.0, point=(8.0, 8.0, 1.75))
+    for index, record in enumerate(records):
+        if index == 5:
+            records[index] = replace(
+                record,
+                valid_point_ratio=0.01,
+                selected_inlier_count=20,
+                selected_grid_area_m2=0.02,
+                selected_tilt_deg=25.0,
+                selected_residual_p95_m=0.09,
+            )
+        else:
+            records[index] = replace(
+                record,
+                source_age_ms=10.0,
+                valid_point_ratio=0.50,
+                selected_inlier_count=220,
+                selected_grid_area_m2=0.35,
+                selected_tilt_deg=2.0,
+                selected_residual_p95_m=0.015,
+            )
+
+    result = analyze_clearance(records)
+
+    assert result.raw_min_clearance_m == 4.0
+    assert result.recommended_min_clearance_m is not None
+    assert result.recommended_min_clearance_m > 6.9
+    assert "采用任务内几何合格低值带" in result.confidence_reason
 
 
 def test_three_similar_equally_spaced_structures_are_periodically_protected() -> None:

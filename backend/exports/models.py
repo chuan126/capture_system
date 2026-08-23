@@ -37,6 +37,10 @@ class TaskExportPreviewResponse(BaseModel):
     clearance_upper_limit_m: float | None
     raw_min_clearance_m: float | None = None
     effective_min_clearance_m: float | None = None
+    recommended_min_clearance_m: float | None = None
+    confidence_score: int | None = Field(default=None, ge=0, le=100)
+    confidence_level: str | None = None
+    confidence_reason: str | None = None
     has_review_required: bool | None = None
     review_required_count: int | None = None
     outlier_count: int | None = None

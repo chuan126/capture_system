@@ -73,9 +73,31 @@ class ClearanceAnomalyConfig:
     review_score_threshold: int = 2
     high_confidence_score_threshold: int = 4
 
+    # 单任务建议最低净空和证据可信度。可信度是可解释的证据评分，不是统计概率。
+    recommended_quantile: float = 0.05
+    recommended_band_quantile: float = 0.10
+    recommended_minimum_event_samples: int = 5
+    confidence_minimum_source_frames: int = 3
+    confidence_full_source_frames: int = 10
+    confidence_minimum_area_m2: float = 0.08
+    confidence_full_area_m2: float = 0.30
+    confidence_minimum_inliers: int = 50
+    confidence_full_inliers: int = 200
+    confidence_good_residual_p95_m: float = 0.02
+    confidence_max_residual_p95_m: float = 0.05
+    confidence_good_tilt_deg: float = 5.0
+    confidence_max_tilt_deg: float = 15.0
+    confidence_good_source_age_ms: float = 50.0
+    confidence_max_source_age_ms: float = 200.0
+    confidence_minimum_valid_point_ratio: float = 0.05
+    confidence_full_valid_point_ratio: float = 0.50
+    confidence_high_threshold: int = 80
+    confidence_medium_threshold: int = 60
+    confidence_low_threshold: int = 40
+
 
 DEFAULT_CLEARANCE_ANOMALY_CONFIG = ClearanceAnomalyConfig()
-CLEARANCE_ANALYSIS_VERSION = "clearance-anomaly-distance-v2"
+CLEARANCE_ANALYSIS_VERSION = "clearance-confidence-single-task-v4"
 
 
 @dataclass(frozen=True)
@@ -93,6 +115,14 @@ class ClearanceMeasurement:
     odin_position_y_m: float | None = None
     odin_position_z_m: float | None = None
     vehicle_heading_deg: float | None = None
+    source_timestamp_ms: int | None = None
+    source_age_ms: float | None = None
+    valid_point_ratio: float | None = None
+    candidate_region_count: int | None = None
+    selected_inlier_count: int | None = None
+    selected_grid_area_m2: float | None = None
+    selected_tilt_deg: float | None = None
+    selected_residual_p95_m: float | None = None
 
 
 @dataclass
@@ -143,6 +173,9 @@ class ClearanceLowEvent:
     anomaly_score: int = 0
     matched_rules: list[str] = field(default_factory=list)
     status: ClearanceEventStatus = ClearanceEventStatus.REVIEW_REQUIRED
+    confidence_score: int = 0
+    confidence_level: str = "INSUFFICIENT"
+    confidence_reasons: list[str] = field(default_factory=list)
 
     def to_trace_dict(self) -> dict[str, object]:
         payload = asdict(self)
@@ -154,6 +187,11 @@ class ClearanceLowEvent:
 class ClearanceAnalysisResult:
     raw_min_clearance_m: float | None
     effective_min_clearance_m: float | None
+    recommended_min_clearance_m: float | None
+    confidence_score: int
+    confidence_level: str
+    confidence_reason: str
+    recommended_event_id: str | None
     valid_record_count: int
     invalid_record_count: int
     duplicate_source_record_count: int
@@ -196,6 +234,11 @@ class ClearanceAnalysisResult:
             "algorithm_version": CLEARANCE_ANALYSIS_VERSION,
             "raw_min_clearance_m": self.raw_min_clearance_m,
             "effective_min_clearance_m": self.effective_min_clearance_m,
+            "recommended_min_clearance_m": self.recommended_min_clearance_m,
+            "confidence_score": self.confidence_score,
+            "confidence_level": self.confidence_level,
+            "confidence_reason": self.confidence_reason,
+            "recommended_event_id": self.recommended_event_id,
             "valid_record_count": self.valid_record_count,
             "invalid_record_count": self.invalid_record_count,
             "duplicate_source_record_count": self.duplicate_source_record_count,
@@ -224,6 +267,16 @@ class ClearanceAnalysisResult:
             raw_min_clearance_m=_optional_cache_float(payload.get("raw_min_clearance_m")),
             effective_min_clearance_m=_optional_cache_float(
                 payload.get("effective_min_clearance_m")
+            ),
+            recommended_min_clearance_m=_optional_cache_float(
+                payload.get("recommended_min_clearance_m")
+            ),
+            confidence_score=int(payload["confidence_score"]),
+            confidence_level=str(payload["confidence_level"]),
+            confidence_reason=str(payload["confidence_reason"]),
+            recommended_event_id=(
+                str(payload["recommended_event_id"])
+                if payload.get("recommended_event_id") is not None else None
             ),
             valid_record_count=int(payload["valid_record_count"]),
             invalid_record_count=int(payload["invalid_record_count"]),
@@ -289,6 +342,39 @@ def _quantile(values: list[float], probability: float) -> float:
         return ordered[lower]
     fraction = position - lower
     return ordered[lower] + fraction * (ordered[upper] - ordered[lower])
+
+
+def _clamp01(value: float) -> float:
+    return max(0.0, min(1.0, value))
+
+
+def _increasing_score(value: float | None, minimum: float, full: float) -> float | None:
+    if value is None or not math.isfinite(value) or full <= minimum:
+        return None
+    return _clamp01((value - minimum) / (full - minimum))
+
+
+def _decreasing_score(value: float | None, good: float, maximum: float) -> float | None:
+    if value is None or not math.isfinite(value) or maximum <= good:
+        return None
+    return _clamp01((maximum - value) / (maximum - good))
+
+
+def _mean_available(values: Iterable[float | None], fallback: float = 0.35) -> tuple[float, int]:
+    available = [float(value) for value in values if value is not None and math.isfinite(value)]
+    if not available:
+        return fallback, 0
+    return sum(available) / len(available), len(available)
+
+
+def _confidence_level(score: int, config: ClearanceAnomalyConfig) -> str:
+    if score >= config.confidence_high_threshold:
+        return "HIGH"
+    if score >= config.confidence_medium_threshold:
+        return "MEDIUM"
+    if score >= config.confidence_low_threshold:
+        return "LOW"
+    return "INSUFFICIENT"
 
 
 def _validate_and_calculate_distance(
@@ -716,6 +802,144 @@ def _score_event(event: ClearanceLowEvent, config: ClearanceAnomalyConfig) -> No
         event.status = ClearanceEventStatus.VALID_STRUCTURE
 
 
+def _score_measurement_evidence(
+    members: list[AnalyzedClearanceMeasurement],
+    event: ClearanceLowEvent | None,
+    config: ClearanceAnomalyConfig,
+    *,
+    is_low_value_band: bool = False,
+) -> tuple[int, str, list[str]]:
+    records = [member.measurement for member in members]
+    distinct_sources = {
+        record.source_sequence if record.source_sequence is not None else record.sample_index
+        for record in records
+    }
+    areas = [float(record.selected_grid_area_m2) for record in records if _finite(record.selected_grid_area_m2)]
+    inliers = [float(record.selected_inlier_count) for record in records if record.selected_inlier_count is not None]
+    residuals = [float(record.selected_residual_p95_m) for record in records if _finite(record.selected_residual_p95_m)]
+    tilts = [abs(float(record.selected_tilt_deg)) for record in records if _finite(record.selected_tilt_deg)]
+    point_ratios = [float(record.valid_point_ratio) for record in records if _finite(record.valid_point_ratio)]
+    source_ages = [float(record.source_age_ms) for record in records if _finite(record.source_age_ms)]
+
+    quality, quality_fields = _mean_available(
+        (
+            _increasing_score(_median(areas) if areas else None, config.confidence_minimum_area_m2, config.confidence_full_area_m2),
+            _increasing_score(_median(inliers) if inliers else None, float(config.confidence_minimum_inliers), float(config.confidence_full_inliers)),
+            _decreasing_score(_median(residuals) if residuals else None, config.confidence_good_residual_p95_m, config.confidence_max_residual_p95_m),
+            _decreasing_score(_median(tilts) if tilts else None, config.confidence_good_tilt_deg, config.confidence_max_tilt_deg),
+            _increasing_score(
+                _median(point_ratios) if point_ratios else None,
+                config.confidence_minimum_valid_point_ratio,
+                config.confidence_full_valid_point_ratio,
+            ),
+        )
+    )
+    frame_score = _increasing_score(
+        float(len(distinct_sources)),
+        float(config.confidence_minimum_source_frames),
+        float(config.confidence_full_source_frames),
+    ) or 0.0
+    if event is not None:
+        length_score = _increasing_score(
+            event.length_m,
+            config.short_event_length_m,
+            config.structure_min_length_m,
+        ) or 0.0
+        stability_score = _decreasing_score(
+            event.height_mad_m,
+            config.structure_max_height_mad_m * 0.25,
+            config.structure_max_height_mad_m,
+        )
+        persistence, _ = _mean_available((frame_score, length_score, stability_score), 0.0)
+        continuity_score = (
+            1.0 if event.point_trajectory_continuous is True
+            else 0.0 if event.point_trajectory_continuous is False else 0.40
+        )
+        boundary_score = _decreasing_score(
+            event.boundary_point_jump_m,
+            config.point_boundary_jump_m * 0.25,
+            config.point_boundary_jump_m,
+        )
+        spatial, _ = _mean_available((continuity_score, boundary_score), 0.40)
+    else:
+        persistence = frame_score
+        spatial = 0.40
+
+    reliable_ratio = (
+        sum(1 for member in members if member.distance_reliable) / len(members)
+        if members else 0.0
+    )
+    age_score = _decreasing_score(
+        _median(source_ages) if source_ages else None,
+        config.confidence_good_source_age_ms,
+        config.confidence_max_source_age_ms,
+    )
+    integrity, _ = _mean_available((reliable_ratio, age_score), reliable_ratio)
+    score = round(100.0 * (0.35 * quality + 0.30 * persistence + 0.20 * spatial + 0.15 * integrity))
+
+    reasons = [
+        f"独立源帧{len(distinct_sources)}个",
+        f"几何质量字段{quality_fields}/5项",
+        f"可靠里程占比{reliable_ratio:.0%}",
+    ]
+    caps: list[int] = []
+    if len(distinct_sources) < config.confidence_minimum_source_frames:
+        caps.append(config.confidence_low_threshold - 1)
+        reasons.append("独立源帧不足")
+    if quality_fields < 3:
+        caps.append(config.confidence_medium_threshold - 1)
+        reasons.append("平面质量证据不足")
+    if event is None and not is_low_value_band:
+        caps.append(65)
+        reasons.append("最低值未形成独立低值事件")
+    elif is_low_value_band:
+        reasons.append("采用任务内几何合格低值带")
+    else:
+        if not event.analysis_sufficient:
+            caps.append(49)
+            reasons.append("局部距离证据不足")
+        if event.status == ClearanceEventStatus.REVIEW_REQUIRED:
+            caps.append(49)
+            reasons.append("低值事件需要人工复核")
+        elif event.status == ClearanceEventStatus.HIGH_CONFIDENCE_OUTLIER:
+            caps.append(25)
+            reasons.append("事件已判为高置信度偶发异常")
+        elif event.point_trajectory_continuous is True:
+            reasons.append("最低点空间轨迹连续")
+    if caps:
+        score = min(score, min(caps))
+    score = max(0, min(100, score))
+    return score, _confidence_level(score, config), reasons
+
+
+def _frame_has_credible_geometry(
+    item: AnalyzedClearanceMeasurement,
+    config: ClearanceAnomalyConfig,
+) -> bool:
+    """只让质量字段充分且没有越过硬边界的源帧进入稳健低值带。"""
+    record = item.measurement
+    checks: list[bool] = []
+    if _finite(record.valid_point_ratio):
+        checks.append(
+            float(record.valid_point_ratio)
+            >= config.confidence_minimum_valid_point_ratio
+        )
+    if record.selected_inlier_count is not None:
+        checks.append(record.selected_inlier_count >= config.confidence_minimum_inliers)
+    if _finite(record.selected_grid_area_m2):
+        checks.append(
+            float(record.selected_grid_area_m2) >= config.confidence_minimum_area_m2
+        )
+    if _finite(record.selected_tilt_deg):
+        checks.append(abs(float(record.selected_tilt_deg)) <= config.confidence_max_tilt_deg)
+    if _finite(record.selected_residual_p95_m):
+        checks.append(
+            float(record.selected_residual_p95_m)
+            <= config.confidence_max_residual_p95_m
+        )
+    return len(checks) >= 3 and all(checks)
+
+
 def analyze_clearance(
     records: Iterable[ClearanceMeasurement],
     config: ClearanceAnomalyConfig = DEFAULT_CLEARANCE_ANOMALY_CONFIG,
@@ -746,9 +970,152 @@ def analyze_clearance(
         ),
         default=None,
     )
+    recommended_minimum = None
+    confidence_score = 0
+    confidence_level = "INSUFFICIENT"
+    confidence_reason = "没有有效净空样本"
+    recommended_event_id = None
+    if effective_minimum is not None:
+        minimum_item = min(
+            (
+                item for item in valid
+                if item.measurement.sample_index not in excluded_indices
+            ),
+            key=lambda item: float(item.measurement.height_m),
+        )
+        minimum_event = next(
+            (
+                event for event in events
+                if minimum_item.measurement.sample_index in event.sample_indices
+                and event.status != ClearanceEventStatus.HIGH_CONFIDENCE_OUTLIER
+            ),
+            None,
+        )
+        eligible = [
+            item
+            for item in valid
+            if item.measurement.sample_index not in excluded_indices
+            and _frame_has_credible_geometry(item, config)
+        ]
+        candidates: list[
+            tuple[
+                float,
+                list[AnalyzedClearanceMeasurement],
+                ClearanceLowEvent | None,
+                bool,
+            ]
+        ] = []
+
+        # 普通隧道顶部未必相对局部基线下降0.5 m，不能要求它先被异常检测器
+        # 识别为“低值事件”。对几何合格源帧取任务内低侧5%分位，并使用最低
+        # 10%（至少5帧）作为置信度证据带，避免单帧毛刺直接成为建议值。
+        if len(eligible) >= config.recommended_minimum_event_samples:
+            ordered_eligible = sorted(
+                eligible, key=lambda item: float(item.measurement.height_m)
+            )
+            band_count = max(
+                config.recommended_minimum_event_samples,
+                math.ceil(len(ordered_eligible) * config.recommended_band_quantile),
+            )
+            band_members = ordered_eligible[:band_count]
+            candidates.append(
+                (
+                    _quantile(
+                        [float(item.measurement.height_m) for item in ordered_eligible],
+                        config.recommended_quantile,
+                    ),
+                    band_members,
+                    None,
+                    True,
+                )
+            )
+
+        # 短而真实的横梁可能占全任务不到5%，必须让通过连续性保护的低值事件
+        # 参与竞争，避免全局分位数把真实最低构筑物抬高。
+        for event in events:
+            if event.status not in {
+                ClearanceEventStatus.VALID_STRUCTURE,
+                ClearanceEventStatus.PROTECTED_PERIODIC_STRUCTURE,
+            }:
+                continue
+            member_indices = set(event.sample_indices)
+            event_members = [
+                item
+                for item in eligible
+                if item.measurement.sample_index in member_indices
+            ]
+            if len(event_members) < config.recommended_minimum_event_samples:
+                continue
+            candidates.append(
+                (
+                    _quantile(
+                        [float(item.measurement.height_m) for item in event_members],
+                        config.recommended_quantile,
+                    ),
+                    event_members,
+                    event,
+                    False,
+                )
+            )
+
+        if candidates:
+            (
+                recommended_minimum,
+                evidence_members,
+                relevant_event,
+                is_low_value_band,
+            ) = min(
+                candidates,
+                # 数值相同时优先采用有连续空间证据的真实事件，而不是全局低值带。
+                key=lambda candidate: (candidate[0], candidate[2] is None),
+            )
+            recommended_event_id = (
+                relevant_event.event_id if relevant_event is not None else None
+            )
+            confidence_score, confidence_level, reasons = _score_measurement_evidence(
+                evidence_members,
+                relevant_event,
+                config,
+                is_low_value_band=is_low_value_band,
+            )
+            if relevant_event is not None:
+                reasons.append(
+                    f"采用可信低值事件{config.recommended_quantile:.0%}分位"
+                )
+            else:
+                reasons.append(
+                    f"采用几何合格源帧{config.recommended_quantile:.0%}分位"
+                )
+        else:
+            if minimum_event is not None:
+                member_indices = set(minimum_event.sample_indices)
+                evidence_members = [
+                    item
+                    for item in valid
+                    if item.measurement.sample_index in member_indices
+                ]
+            else:
+                evidence_members = [minimum_item]
+            score, _, reasons = _score_measurement_evidence(
+                evidence_members, minimum_event, config
+            )
+            confidence_score = min(score, config.confidence_low_threshold - 1)
+            confidence_level = _confidence_level(confidence_score, config)
+            relevant_event = minimum_event
+            reasons.append("几何合格独立源帧不足，无法给出建议最低可信净空")
+        confidence_reason = "；".join(reasons)
+        if relevant_event is not None:
+            relevant_event.confidence_score = confidence_score
+            relevant_event.confidence_level = confidence_level
+            relevant_event.confidence_reasons = list(reasons)
     return ClearanceAnalysisResult(
         raw_min_clearance_m=raw_minimum,
         effective_min_clearance_m=effective_minimum,
+        recommended_min_clearance_m=recommended_minimum,
+        confidence_score=confidence_score,
+        confidence_level=confidence_level,
+        confidence_reason=confidence_reason,
+        recommended_event_id=recommended_event_id,
         valid_record_count=len(valid),
         invalid_record_count=len(analyzed) - len(valid),
         duplicate_source_record_count=duplicate_count,

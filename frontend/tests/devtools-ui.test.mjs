@@ -45,8 +45,8 @@ test("RTK and capture home share localization state labels and validity logic", 
 });
 
 test("complete test samples expose only save stop delete and full-chain offline replay", () => {
-  assert.match(workspace, /\/capture\/lidar\/points_raw/);
-  assert.match(workspace, /采样序号、RTK、IMU、里程计、补偿点云、净空结果与系统诊断/);
+  assert.match(workspace, /原始点云、400 Hz雷达状态、RTK、算法结果和诊断按频率\/职责拆分为独立MCAP/);
+  assert.match(workspace, /并保留消息时间戳/);
   assert.match(workspace, /startDevRecording\("raw-cloud", null\)/);
   for (const label of [">保存<", ">停止<", ">删除<", "离线算法调试", "开始检测", "停止检测"]) {
     assert.ok(workspace.includes(label), `missing ${label}`);
@@ -60,6 +60,7 @@ test("complete test samples expose only save stop delete and full-chain offline 
   assert.match(workspace, /stopDevOfflineReplay/);
   assert.match(workspace, /\/capture\/dev\/offline\/\*/);
   assert.match(workspace, /offlineActive \|\| recordingActive \|\| !selected\?\.replay_ready/);
+  assert.doesNotMatch(workspace, /records\.slice\(0,\s*8\)/);
 });
 
 test("dashboard exposes only nine core parameters", () => {

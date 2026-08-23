@@ -290,7 +290,13 @@ class OfflineReplayManager:
             temp_dir = Path(tempfile.mkdtemp(prefix="run-", dir=self.temp_root))
             with self._lock:
                 self._temp_dir = temp_dir
-            commands = self._build_commands(recording_path, temp_dir, overrides)
+            replay_inputs = record.get("replay_inputs")
+            commands = self._build_commands(
+                recording_path,
+                temp_dir,
+                overrides,
+                replay_inputs if isinstance(replay_inputs, dict) else None,
+            )
             try:
                 listener = self.listener_factory(self._on_result, self._on_diagnostics)
             except TypeError:
@@ -309,13 +315,18 @@ class OfflineReplayManager:
                 time.sleep(self.startup_delay_seconds)
             self._assert_nodes_alive()
 
-            player = self._spawn(commands["player"], temp_dir / "player.log")
+            player_names = [name for name in commands if name.startswith("player")]
+            players: list[subprocess.Popen[bytes]] = []
+            for name in player_names:
+                player = self._spawn(commands[name], temp_dir / f"{name}.log")
+                players.append(player)
+                with self._lock:
+                    self._processes[name] = player
             with self._lock:
-                self._processes["player"] = player
                 self._state = "running"
             monitor = threading.Thread(
-                target=self._monitor_player,
-                args=(generation, player),
+                target=self._monitor_players,
+                args=(generation, players),
                 name=f"dev-offline-monitor-{generation}",
                 daemon=True,
             )
@@ -454,6 +465,7 @@ class OfflineReplayManager:
         recording_path: Path,
         temp_dir: Path,
         overrides: dict[str, dict[str, object]],
+        replay_inputs: dict[str, object] | None = None,
     ) -> dict[str, list[str]]:
         source_configs = {
             "odometry": self.project_root / "ros2_ws/src/motion_compensation/config/odometry_timestamp_adapter.yaml",
@@ -489,7 +501,7 @@ class OfflineReplayManager:
             "output_topic": OFFLINE_CLEARANCE_TOPIC,
         })
 
-        commands = {
+        commands: dict[str, list[str]] = {
             "odometry": self._node_command(
                 "motion_compensation", "odometry_timestamp_adapter_node",
                 node_names["odometry"], param_files["odometry"], odom_overrides,
@@ -502,17 +514,33 @@ class OfflineReplayManager:
                 "clearance_engine", "clearance_engine_node",
                 node_names["clearance"], param_files["clearance"], clearance_overrides,
             ),
-            "player": [
-                "ros2", "bag", "play", "-s", "mcap", str(recording_path),
+        }
+        player_common = ["ros2", "bag", "play", "-s", "mcap"]
+        if replay_inputs and "pointcloud_10hz" in replay_inputs and "radar_state_400hz" in replay_inputs:
+            # 两个播放器都先等待1秒；先启动400 Hz状态播放器，使位姿缓存先于点云到达。
+            commands["player_odometry"] = [
+                *player_common, str(replay_inputs["radar_state_400hz"]),
                 "--disable-keyboard-controls", "-d", "1.0",
-                # 综合测试MCAP还包含在线算法结果和诊断。离线检测只允许回放两路
-                # 原始输入，避免保存的输出Topic重新注入当前运行系统。
+                "--topics", _SOURCE_RAW_ODOMETRY_TOPIC,
+                "--remap",
+                f"{_SOURCE_RAW_ODOMETRY_TOPIC}:={OFFLINE_RAW_ODOMETRY_TOPIC}",
+            ]
+            commands["player_cloud"] = [
+                *player_common, str(replay_inputs["pointcloud_10hz"]),
+                "--disable-keyboard-controls", "-d", "1.0",
+                "--topics", _SOURCE_RAW_CLOUD_TOPIC,
+                "--remap", f"{_SOURCE_RAW_CLOUD_TOPIC}:={OFFLINE_RAW_CLOUD_TOPIC}",
+            ]
+        else:
+            commands["player"] = [
+                *player_common, str(recording_path),
+                "--disable-keyboard-controls", "-d", "1.0",
+                # 旧版综合MCAP只回放两路原始输入，避免保存的输出Topic重新注入。
                 "--topics", _SOURCE_RAW_CLOUD_TOPIC, _SOURCE_RAW_ODOMETRY_TOPIC,
                 "--remap",
                 f"{_SOURCE_RAW_CLOUD_TOPIC}:={OFFLINE_RAW_CLOUD_TOPIC}",
                 f"{_SOURCE_RAW_ODOMETRY_TOPIC}:={OFFLINE_RAW_ODOMETRY_TOPIC}",
-            ],
-        }
+            ]
         return commands
 
     @staticmethod
@@ -559,7 +587,9 @@ class OfflineReplayManager:
             if return_code is not None:
                 raise OfflineReplayError(f"离线{name}节点启动失败：退出状态{return_code}")
 
-    def _monitor_player(self, generation: int, player: subprocess.Popen[bytes]) -> None:
+    def _monitor_players(
+        self, generation: int, players: list[subprocess.Popen[bytes]]
+    ) -> None:
         try:
             while True:
                 if self._stop_requested.is_set():
@@ -568,16 +598,23 @@ class OfflineReplayManager:
                 if failure is not None:
                     self._complete_generation(generation, failed=failure)
                     return
-                return_code = player.poll()
-                if return_code is not None:
-                    if return_code != 0:
+                return_codes = [player.poll() for player in players]
+                failed_index = next(
+                    (index for index, code in enumerate(return_codes) if code not in {None, 0}),
+                    None,
+                )
+                if failed_index is not None:
+                    name = "player" if len(players) == 1 else f"player_{failed_index + 1}"
+                    return_code = return_codes[failed_index]
+                    if return_code is not None:
                         self._complete_generation(
                             generation,
                             failed=self._failure_with_log(
-                                "player", f"离线rosbag播放失败：退出状态{return_code}"
+                                name, f"离线rosbag播放失败：退出状态{return_code}"
                             ),
                         )
                         return
+                if all(code == 0 for code in return_codes):
                     break
                 time.sleep(0.1)
 
@@ -595,6 +632,12 @@ class OfflineReplayManager:
             self._complete_generation(generation, failed=None)
         except Exception as error:
             self._complete_generation(generation, failed=f"离线进程监督失败：{error}")
+
+    def _monitor_player(
+        self, generation: int, player: subprocess.Popen[bytes]
+    ) -> None:
+        """兼容旧的单文件监督入口。"""
+        self._monitor_players(generation, [player])
 
     def _poll_algorithm_failure(self) -> str | None:
         with self._lock:
@@ -636,7 +679,10 @@ class OfflineReplayManager:
         with self._lock:
             if generation != self._generation:
                 return
-            named_processes = [(name, process) for name, process in self._processes.items() if name != "player"]
+            named_processes = [
+                (name, process) for name, process in self._processes.items()
+                if not name.startswith("player")
+            ]
             if failed is None:
                 exited = [(name, process.poll()) for name, process in named_processes if process.poll() is not None]
                 if exited:

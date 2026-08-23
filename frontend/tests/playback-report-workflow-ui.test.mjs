@@ -195,7 +195,9 @@ test("report removes task-name fields and aggregates only user-selected tasks", 
   assert.match(report, /任务编号/);
   assert.match(report, /隧道编号/);
   assert.match(report, /检测车道/);
-  assert.match(report, /最低高度/);
+  assert.match(report, /原始单帧最低/);
+  assert.match(report, /建议最低可信净空/);
+  assert.match(report, /可信度/);
   assert.match(report, /隧道入口 RTK/);
   assert.match(report, /隧道出口 RTK/);
   assert.match(report, /checkedTaskIds=\{checked\}/);
@@ -213,10 +215,12 @@ test("report enables formal exports only for eligible recorded selected data", (
   assert.match(report, /pdfState==="generating"\?cancel/);
   assert.match(report, /localStorage\.setItem\(jobKey\(kind\),created\.jobId\)/);
   assert.match(report, /pdfExportableTasks/);
-  assert.match(report, /normalMinimumHeightM/);
-  assert.match(report, /高置信度偶发异常可从最低值统计中排除/);
-  assert.match(report, /待复核低值仍保守计入/);
-  assert.match(report, /周期性设施和具有连续空间证据的单个结构受到保护/);
+  assert.match(report, /rawMinClearanceM/);
+  assert.match(report, /recommendedMinClearanceM/);
+  assert.match(report, /confidenceScore/);
+  assert.match(report, /建议值至少需要5个几何合格独立源帧/);
+  assert.match(report, /证据不足时显示“--”，不会复制原始最低值/);
+  assert.match(report, /真实连续结构和周期性设施受到保护/);
   assert.match(reportApi, /task_ids:taskIds/);
 });
 

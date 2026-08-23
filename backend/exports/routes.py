@@ -92,6 +92,12 @@ def _preview_response(assessment: TaskExportAssessment) -> TaskExportPreviewResp
         effective_min_clearance_m=(
             analysis.effective_min_clearance_m if analysis else None
         ),
+        recommended_min_clearance_m=(
+            analysis.recommended_min_clearance_m if analysis else None
+        ),
+        confidence_score=analysis.confidence_score if analysis else None,
+        confidence_level=analysis.confidence_level if analysis else None,
+        confidence_reason=analysis.confidence_reason if analysis else None,
         has_review_required=analysis.has_review_required if analysis else None,
         review_required_count=len(analysis.review_required_events) if analysis else None,
         outlier_count=len(analysis.outlier_events) if analysis else None,

@@ -147,11 +147,6 @@ class ReportExportService:
             return TaskExportAssessment(
                 task, False, f"净空异常分析不可读取：{error}", summary
             )
-        if clearance_analysis.effective_min_clearance_m is None:
-            return TaskExportAssessment(
-                task, False, "测量记录中没有可用于报告的有效净空样本", summary,
-                clearance_analysis=clearance_analysis,
-            )
         try:
             normal_statistics = self.measurement_repository.load_normal_height_statistics(task)
         except MeasurementStorageError as error:
@@ -380,6 +375,7 @@ class ReportExportService:
                 "里程计四元数w",
             ]
         )
+        # TXT保留既有“异常分析后有效最低值”语义；新的建议值和可信度只增加到PDF汇总。
         minimum_height = _format_number(analysis.effective_min_clearance_m, 3)
         for sample in self.measurement_repository.iter_export_samples(task):
             _write_txt_row(
@@ -522,7 +518,9 @@ class ReportExportService:
             "任务序号",
             "隧道编号",
             "检测车道",
-            "最低高度 m",
+            "原始单帧最低 m",
+            "建议最低可信净空 m",
+            "可信度",
             "记录时间",
             "隧道入口 RTK",
             "隧道出口 RTK",
@@ -535,7 +533,7 @@ class ReportExportService:
             if summary is None:
                 continue
             analysis = assessment.clearance_analysis
-            if analysis is None or analysis.effective_min_clearance_m is None:
+            if analysis is None:
                 continue
             time_text = f"{_format_iso_text(summary.started_at)}<br/>{_format_iso_text(summary.ended_at)}"
             rows.append(
@@ -543,7 +541,12 @@ class ReportExportService:
                     Paragraph(assessment.task.display_id, body_style),
                     Paragraph(_escape_pdf_text(assessment.task.tunnel_code), body_style),
                     Paragraph(_lane_text(summary.lane, summary.travel_direction, summary.lane_side), body_style),
-                    Paragraph(_format_number(analysis.effective_min_clearance_m, 3), body_style),
+                    Paragraph(_format_number(analysis.raw_min_clearance_m, 3), body_style),
+                    Paragraph(
+                        _format_number(analysis.recommended_min_clearance_m, 3) or "—",
+                        body_style,
+                    ),
+                    Paragraph(_format_confidence(analysis.confidence_score, analysis.confidence_level), body_style),
                     Paragraph(time_text, body_style),
                     Paragraph(_escape_pdf_text(_format_rtk(summary.entry_rtk)), body_style),
                     Paragraph(_escape_pdf_text(_format_rtk(summary.exit_rtk)), body_style),
@@ -552,7 +555,7 @@ class ReportExportService:
         table = Table(
             rows,
             repeatRows=1,
-            colWidths=[36 * mm, 31 * mm, 22 * mm, 25 * mm, 45 * mm, 44 * mm, 44 * mm],
+            colWidths=[29 * mm, 25 * mm, 19 * mm, 22 * mm, 27 * mm, 21 * mm, 38 * mm, 37 * mm, 37 * mm],
         )
         table.setStyle(
             TableStyle(
@@ -561,7 +564,7 @@ class ReportExportService:
                     ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E8EDF3")),
                     ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#202833")),
                     ("ALIGN", (0, 0), (0, -1), "CENTER"),
-                    ("ALIGN", (2, 1), (3, -1), "CENTER"),
+                    ("ALIGN", (2, 1), (5, -1), "CENTER"),
                     ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                     ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#8D98A6")),
                     ("LEFTPADDING", (0, 0), (-1, -1), 4),
@@ -576,7 +579,9 @@ class ReportExportService:
             [
                 Spacer(1, 5 * mm),
                 Paragraph(
-                    "说明　最低高度为排除高置信度偶发异常后的有效最低净空；待复核低值仍保守计入。"
+                    "说明　原始单帧最低值不做异常剔除；建议最低可信净空由单任务证据算法计算。"
+                    "少于5个几何合格独立源帧时建议值显示为—，不会复制原始最低值。"
+                    "可信度为0–100的证据评分，不是统计概率；待复核低值仍保守计入。"
                     "周期性设施和具有空间连续性的单个结构不会因高度低而自动排除。"
                     "无有效 RTK 端点时对应字段标记为未记录。",
                     body_style,
@@ -637,6 +642,16 @@ def _write_txt_row(file_object: TextIO, fields: Iterable[object]) -> None:
 
 def _format_number(value: float | None, digits: int) -> str:
     return "" if value is None else f"{value:.{digits}f}"
+
+
+def _format_confidence(score: int, level: str) -> str:
+    labels = {
+        "HIGH": "高",
+        "MEDIUM": "中",
+        "LOW": "低",
+        "INSUFFICIENT": "证据不足",
+    }
+    return f"{score}/100（{labels.get(level, level)}）"
 
 
 def _format_txt_number(value: float | None, digits: int) -> str:

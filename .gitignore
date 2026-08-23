@@ -67,6 +67,7 @@ pnpm-debug.log*
 !/data/**/.gitkeep
 !/runtime/**/
 !/runtime/**/.gitkeep
+!/runtime/README.md
 
 *.bag
 *.bag.active
@@ -131,5 +132,3 @@ Desktop.ini
 *.code-workspace
 .build-logs/
 .build-state/
-
-runtime/

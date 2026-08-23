@@ -90,6 +90,9 @@ export type DevRecording = {
   active: boolean;
   parameter_snapshot_complete: boolean | null;
   replay_ready: boolean;
+  layout: "combined_mcap" | "frequency_split_mcap";
+  replay_inputs: Record<string, string>;
+  file_count: number;
   duration_seconds: number | null;
 };
 

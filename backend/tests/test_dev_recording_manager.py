@@ -45,9 +45,13 @@ def prepare_runtime(monkeypatch, captured: dict[str, object]) -> None:
 
     def fake_popen(command, **kwargs):
         captured["command"] = command
+        captured.setdefault("commands", []).append(command)
         captured["kwargs"] = kwargs
         output_index = command.index("--output") + 1
-        Path(command[output_index]).mkdir(parents=True)
+        output = Path(command[output_index])
+        output.mkdir(parents=True)
+        (output / "data_0.mcap").write_bytes(b"mcap")
+        (output / "metadata.yaml").write_text("rosbag2_bagfile_information: {}\n", encoding="utf-8")
         return FakeProcess(command)
 
     monkeypatch.setattr("backend.devtools.recording.subprocess.Popen", fake_popen)
@@ -59,9 +63,12 @@ def test_raw_cloud_recording_uses_fixed_mcap_profile(monkeypatch, tmp_path: Path
     manager = RosbagRecordingManager(tmp_path, min_free_bytes=1)
     status = manager.start(RAW_CLOUD_PROFILE, None)
 
-    command = captured["command"]
-    assert command[:6] == ["ros2", "bag", "record", "--storage", "mcap", "--output"]
-    assert command[7:] == list(RAW_CLOUD_PROFILE.topics)
+    commands = captured["commands"]
+    assert len(commands) == len(RAW_CLOUD_PROFILE.groups)
+    for group, command in zip(RAW_CLOUD_PROFILE.groups, commands, strict=True):
+        assert command[:6] == ["ros2", "bag", "record", "--storage", "mcap", "--output"]
+        assert Path(command[6]).name == group.file_stem
+        assert command[7:] == list(group.topics)
     for topic in (
         "/capture/lidar/points_raw",
         "/capture/imu/data",
@@ -89,7 +96,15 @@ def test_raw_cloud_recording_uses_fixed_mcap_profile(monkeypatch, tmp_path: Path
     assert str(tmp_path / "dev-tests" / "raw-cloud") in str(status["path"])
     assert captured["kwargs"]["start_new_session"] is True
     assert captured["kwargs"]["stdin"] is not None
-    manager.stop()
+    stopped = manager.stop()
+    assert stopped["last_error"] is None
+    session_path = Path(str(status["path"]))
+    for group in RAW_CLOUD_PROFILE.groups:
+        assert (session_path / f"{group.file_stem}.mcap").is_file()
+        assert (session_path / f"{group.file_stem}.metadata.yaml").is_file()
+    manifest = json.loads((session_path / "capture_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["layout"] == "frequency_split_mcap"
+    assert manifest["finalized"] is True
 
 
 def test_raw_sensor_profile_records_existing_high_rate_sources_without_visual_or_temperature() -> None:
@@ -166,7 +181,7 @@ def test_dev_recording_reports_rosbag_startup_failure_without_blocking_plugin_pr
     monkeypatch.setattr("backend.devtools.recording.subprocess.Popen", lambda command, **kwargs: FailedProcess(command))
     manager = RosbagRecordingManager(tmp_path, min_free_bytes=1)
 
-    with pytest.raises(DevRecordingError, match="ros2 bag record启动失败"):
+    with pytest.raises(DevRecordingError, match="ros2 bag record.*启动失败"):
         manager.start(RAW_CLOUD_PROFILE, 5)
 
 
@@ -224,8 +239,6 @@ def test_raw_cloud_recording_can_be_deleted_after_stop(monkeypatch, tmp_path: Pa
     status = manager.start(RAW_CLOUD_PROFILE, 5)
     recording_id = str(status["recording_id"])
     path = Path(str(status["path"]))
-    (path / "data.mcap").write_bytes(b"mcap")
-
     with pytest.raises(DevRecordingError, match="正在录制的文件不能删除"):
         manager.delete(recording_id)
 
@@ -233,6 +246,8 @@ def test_raw_cloud_recording_can_be_deleted_after_stop(monkeypatch, tmp_path: Pa
     assert path.is_dir()
     record = manager.get_recording(recording_id)
     assert record["replay_ready"] is True
+    assert record["layout"] == "frequency_split_mcap"
+    assert record["file_count"] == len(RAW_CLOUD_PROFILE.groups)
     assert isinstance(record["duration_seconds"], float)
     assert record["duration_seconds"] >= 0.0
     manager.delete(recording_id)

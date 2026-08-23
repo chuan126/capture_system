@@ -171,6 +171,12 @@ def test_preview_and_txt_export_use_only_recorded_completed_task(tmp_path: Path)
     assert preview["tasks"][0]["normal_minimum_height_m"] == 5.18
     assert preview["tasks"][0]["raw_min_clearance_m"] == 5.18
     assert preview["tasks"][0]["effective_min_clearance_m"] == 5.18
+    assert preview["tasks"][0]["recommended_min_clearance_m"] is None
+    assert isinstance(preview["tasks"][0]["confidence_score"], int)
+    assert preview["tasks"][0]["confidence_level"] in {
+        "HIGH", "MEDIUM", "LOW", "INSUFFICIENT",
+    }
+    assert preview["tasks"][0]["confidence_reason"]
     assert preview["tasks"][0]["outlier_count"] == 0
     assert preview["tasks"][0]["clearance_threshold_m"] == 5.19
     assert preview["tasks"][0]["clearance_upper_limit_m"] == 5.20
@@ -503,6 +509,8 @@ def test_report_uses_effective_minimum_and_writes_outlier_trace(tmp_path: Path) 
 
     assert preview["raw_min_clearance_m"] == 3.858
     assert preview["effective_min_clearance_m"] == 6.99
+    assert preview["recommended_min_clearance_m"] is None
+    assert isinstance(preview["confidence_score"], int)
     assert preview["outlier_count"] == 1
     assert generated["file_name"].endswith("_50Hz测量明细.txt")
     trace_path = (
@@ -515,5 +523,7 @@ def test_report_uses_effective_minimum_and_writes_outlier_trace(tmp_path: Path) 
     trace = __import__("json").loads(trace_path.read_text(encoding="utf-8"))
     assert trace["raw_min_clearance_m"] == 3.858
     assert trace["effective_min_clearance_m"] == 6.99
+    assert trace["recommended_min_clearance_m"] is None
+    assert "confidence_score" in trace
     assert trace["events"][0]["status"] == "HIGH_CONFIDENCE_OUTLIER"
     assert "ISOLATED_MEASUREMENT:+2" in trace["events"][0]["matched_rules"]

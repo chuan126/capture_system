@@ -129,6 +129,36 @@ def test_offline_commands_reuse_formal_nodes_with_isolated_topics(tmp_path: Path
     assert (temp_dir / "clearance.yaml").read_text(encoding="utf-8").startswith("offline_clearance_engine_node:\n")
 
 
+def test_offline_commands_play_split_state_before_pointcloud(tmp_path: Path) -> None:
+    recording_manager, recording_path = make_record(tmp_path)
+    manager = OfflineReplayManager(
+        recording_manager, snapshot, project_root=PROJECT_ROOT,
+        startup_delay_seconds=0.0, drain_delay_seconds=0.0,
+    )
+    temp_dir = manager.temp_root / "split-command-test"
+    temp_dir.mkdir()
+    state_path = recording_path / "radar_state_400hz.mcap"
+    cloud_path = recording_path / "pointcloud_10hz.mcap"
+    commands = manager._build_commands(
+        recording_path,
+        temp_dir,
+        {},
+        {
+            "radar_state_400hz": str(state_path),
+            "pointcloud_10hz": str(cloud_path),
+        },
+    )
+
+    assert list(name for name in commands if name.startswith("player")) == [
+        "player_odometry",
+        "player_cloud",
+    ]
+    assert str(state_path) in commands["player_odometry"]
+    assert "/capture/odometry/high_rate_raw" in commands["player_odometry"]
+    assert str(cloud_path) in commands["player_cloud"]
+    assert "/capture/lidar/points_raw" in commands["player_cloud"]
+
+
 
 def test_offline_replay_rejects_while_any_dev_recording_is_active(monkeypatch, tmp_path: Path) -> None:
     recording_manager, _ = make_record(tmp_path)

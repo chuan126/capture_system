@@ -274,7 +274,7 @@ function RawCloudPanel({
   };
 
   return <section className="panel dev-dashboard-card dev-raw-cloud-card">
-    <div className="panel-head"><div><h2>保存完整测试数据</h2><p>同一 MCAP 保存原始点云 `/capture/lidar/points_raw`、采样序号、RTK、IMU、里程计、补偿点云、净空结果与系统诊断。</p></div><span className={`dev-inline-state ${activeRawCloud ? "dev-inline-state--ok" : blockedByOtherProfile ? "dev-inline-state--warn" : ""}`}>{busy ? "处理中" : activeRawCloud ? `保存中 ${status?.elapsed_seconds.toFixed(1)} s` : blockedByOtherProfile ? "其他开发录制占用" : "空闲"}</span></div>
+    <div className="panel-head"><div><h2>保存完整测试数据</h2><p>每次保存生成一个时间目录，原始点云、400 Hz雷达状态、RTK、算法结果和诊断按频率/职责拆分为独立MCAP，并保留消息时间戳。</p></div><span className={`dev-inline-state ${activeRawCloud ? "dev-inline-state--ok" : blockedByOtherProfile ? "dev-inline-state--warn" : ""}`}>{busy ? "处理中" : activeRawCloud ? `保存中 ${status?.elapsed_seconds.toFixed(1)} s` : blockedByOtherProfile ? "其他开发录制占用" : "空闲"}</span></div>
     <div className="dev-record-actions">
       <button className="button" disabled={busy || status?.active === true || offlineActive} onClick={() => void controller.start()}>保存</button>
       <button className="button button--danger-outline" disabled={busy || !activeRawCloud} onClick={() => void controller.stop()}>停止</button>
@@ -289,7 +289,7 @@ function RawCloudPanel({
     <div className="dev-card-subhead"><strong>综合测试样本</strong><span>{records.length} 个</span></div>
     <div className="dev-sample-list" role="listbox" aria-label="综合测试样本">
       {records.length === 0 && <div className="dev-sample-empty">暂无已保存样本</div>}
-      {records.slice(0, 8).map((record) => <button
+      {records.map((record) => <button
         type="button"
         role="option"
         aria-selected={record.recording_id === selectedId}
@@ -297,7 +297,7 @@ function RawCloudPanel({
         className={`dev-sample-row${record.recording_id === selectedId ? " is-selected" : ""}`}
         onClick={() => onSelect(record.recording_id)}
       >
-        <span><strong>{record.recording_id}</strong><small>{new Date(record.modified_at_ns / 1_000_000).toLocaleString("zh-CN")} · {bytesText(record.bytes)}</small></span>
+        <span><strong>{record.recording_id}</strong><small>{new Date(record.modified_at_ns / 1_000_000).toLocaleString("zh-CN")} · {bytesText(record.bytes)} · {record.layout === "frequency_split_mcap" ? `${record.file_count}个分组文件` : "旧版单MCAP"}</small></span>
         <span className={`dev-sample-ready${record.replay_ready ? " is-ready" : ""}`}>{record.replay_ready ? "可离线检测" : "旧样本缺辅助里程计"}</span>
       </button>)}
     </div>

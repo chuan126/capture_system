@@ -19,18 +19,70 @@ class DevRecordingError(RuntimeError):
 
 
 @dataclass(frozen=True, slots=True)
+class RecordingGroup:
+    key: str
+    file_stem: str
+    nominal_rate_hz: float | None
+    topics: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class RecordingProfile:
     name: str
     directory_prefix: str
     topics: tuple[str, ...]
     allow_continuous: bool = True
+    groups: tuple[RecordingGroup, ...] = ()
+
+
+RAW_CLOUD_GROUPS = (
+    RecordingGroup(
+        "pointcloud_10hz", "pointcloud_10hz", 10.0,
+        ("/capture/lidar/points_raw",),
+    ),
+    RecordingGroup(
+        "radar_state_400hz", "radar_state_400hz", 400.0,
+        (
+            "/capture/imu/data",
+            "/capture/odometry/high_rate_raw",
+            "/capture/odometry/high_rate",
+            "/capture/odometry/slam",
+        ),
+    ),
+    RecordingGroup(
+        "rtk_10hz", "rtk_10hz", 10.0,
+        ("/capture/rtk/fix", "/capture/rtk/status"),
+    ),
+    RecordingGroup(
+        "algorithm_10hz", "algorithm_10hz", 10.0,
+        (
+            "/capture/lidar/points_compensated_enu",
+            "/capture/debug/frame_context",
+            "/capture/clearance/result",
+            "/capture/localization/fix",
+            "/capture/localization/status",
+            "/capture/localization/odometry",
+        ),
+    ),
+    RecordingGroup(
+        "events_diagnostics", "events_diagnostics", None,
+        (
+            "/capture/lidar/device_online",
+            "/capture/lidar/device_offline",
+            "/capture/task/status",
+            "/capture/recording/status",
+            "/capture/system/diagnostics",
+            "/diagnostics",
+        ),
+    ),
+)
 
 
 RAW_CLOUD_PROFILE = RecordingProfile(
     name="raw_cloud",
     directory_prefix="raw-cloud",
     # 保留既有profile名和目录前缀，兼容已有样本及离线检测接口。测试页的一次保存
-    # 必须形成自包含数据集，所有原始传感器、处理结果和诊断消息写入同一个MCAP。
+    # 必须形成自包含数据集，不同频率链路分组写入同一会话目录下的独立MCAP。
     topics=(
         "/capture/lidar/points_raw",
         "/capture/imu/data",
@@ -52,6 +104,7 @@ RAW_CLOUD_PROFILE = RecordingProfile(
         "/capture/system/diagnostics",
         "/diagnostics",
     ),
+    groups=RAW_CLOUD_GROUPS,
 )
 
 DIAGNOSTIC_PROFILE = RecordingProfile(
@@ -150,6 +203,8 @@ class RosbagRecordingManager:
         self.parameter_snapshot_provider = parameter_snapshot_provider
         self._lock = threading.Lock()
         self._process: subprocess.Popen[bytes] | None = None
+        self._extra_processes: dict[str, subprocess.Popen[bytes]] = {}
+        self._group_outputs: dict[str, Path] = {}
         self._profile: RecordingProfile | None = None
         self._recording_id: str | None = None
         self._path: Path | None = None
@@ -189,42 +244,36 @@ class RosbagRecordingManager:
             profile_root.mkdir(parents=True, exist_ok=True)
             path = profile_root / recording_id
 
-            command: list[str] = [
-                "ros2",
-                "bag",
-                "record",
-                "--storage",
-                "mcap",
-                "--output",
-                str(path),
-                *profile.topics,
-            ]
+            processes: dict[str, subprocess.Popen[bytes]] = {}
+            group_outputs: dict[str, Path] = {}
             try:
-                process = subprocess.Popen(
-                    command,
-                    stdin=subprocess.DEVNULL,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    start_new_session=True,
-                )
-            except OSError as error:
-                raise DevRecordingError(f"无法启动ros2 bag record：{error}") from error
-
-            time.sleep(0.15)
-            for _ in range(20):
-                if process.poll() is not None:
-                    raise DevRecordingError(f"ros2 bag record启动失败：退出状态{process.returncode}")
-                if path.is_dir():
-                    break
-                time.sleep(0.05)
-            if not path.is_dir():
-                self._terminate_untracked_process(process)
-                raise DevRecordingError("ros2 bag record未创建录制目录")
+                if profile.groups:
+                    path.mkdir(parents=True, exist_ok=False)
+                    staging = path / ".recording"
+                    staging.mkdir()
+                    for group in profile.groups:
+                        output = staging / group.file_stem
+                        processes[group.key] = self._spawn_recorder(output, group.topics)
+                        group_outputs[group.key] = output
+                    primary_key = profile.groups[0].key
+                else:
+                    processes[profile.name] = self._spawn_recorder(path, profile.topics)
+                    group_outputs[profile.name] = path
+                    primary_key = profile.name
+                self._wait_for_recorder_outputs(processes, group_outputs)
+            except Exception:
+                for process in processes.values():
+                    self._terminate_untracked_process(process)
+                if profile.groups and path.is_dir():
+                    shutil.rmtree(path, ignore_errors=True)
+                raise
 
             started_at_ns = time.time_ns()
             # 先确认录制进程并发布活动状态，参数快照随后异步写入。
             # 参数读取绝不能阻塞录制按钮或持有录制管理器锁。
-            self._process = process
+            self._process = processes.pop(primary_key)
+            self._extra_processes = processes
+            self._group_outputs = group_outputs
             self._profile = profile
             self._recording_id = recording_id
             self._path = path
@@ -279,13 +328,32 @@ class RosbagRecordingManager:
                         snapshot_complete = False
                 manifest = self._read_manifest(path)
                 topics = manifest.get("topics") if isinstance(manifest, dict) else None
-                replay_ready = isinstance(topics, list) and all(
-                    topic in topics
-                    for topic in (
-                        "/capture/lidar/points_raw",
-                        "/capture/odometry/high_rate_raw",
+                replay_inputs: dict[str, str] = {}
+                files = manifest.get("files") if isinstance(manifest, dict) else None
+                if manifest.get("layout") == "frequency_split_mcap" and isinstance(files, list):
+                    for item in files:
+                        if not isinstance(item, dict):
+                            continue
+                        key = str(item.get("key") or "")
+                        file_name = str(item.get("file") or "")
+                        candidate = path / file_name
+                        if key and candidate.is_file():
+                            replay_inputs[key] = str(candidate)
+                    replay_ready = (
+                        manifest.get("finalized") is True
+                        and "pointcloud_10hz" in replay_inputs
+                        and "radar_state_400hz" in replay_inputs
                     )
-                )
+                else:
+                    replay_ready = isinstance(topics, list) and all(
+                        topic in topics
+                        for topic in (
+                            "/capture/lidar/points_raw",
+                            "/capture/odometry/high_rate_raw",
+                        )
+                    )
+                    if replay_ready:
+                        replay_inputs["combined"] = str(path)
                 duration_seconds = manifest.get("duration_seconds") if isinstance(manifest, dict) else None
                 records.append({
                     "recording_id": path.name,
@@ -296,6 +364,9 @@ class RosbagRecordingManager:
                     "active": path == self._path and self._process is not None,
                     "parameter_snapshot_complete": snapshot_complete,
                     "replay_ready": replay_ready,
+                    "layout": str(manifest.get("layout") or "combined_mcap"),
+                    "replay_inputs": replay_inputs,
+                    "file_count": len(replay_inputs),
                     "duration_seconds": float(duration_seconds) if isinstance(duration_seconds, (int, float)) else None,
                 })
         records.sort(key=lambda item: int(item["modified_at_ns"]), reverse=True)
@@ -361,8 +432,9 @@ class RosbagRecordingManager:
         started_at_ns: int,
         snapshot: dict[str, object] | None,
     ) -> None:
+        existing = RosbagRecordingManager._read_manifest(path)
         manifest = {
-            "schema_version": 1,
+            "schema_version": 2 if profile.groups else 1,
             "recording_id": recording_id,
             "profile": profile.name,
             "started_at_ns": started_at_ns,
@@ -371,7 +443,22 @@ class RosbagRecordingManager:
             "topic_downsampling": False,
             "parameter_snapshot_file": "parameter_snapshot.yaml" if snapshot is not None else None,
         }
-        existing = RosbagRecordingManager._read_manifest(path)
+        if profile.groups:
+            manifest["layout"] = "frequency_split_mcap"
+            manifest["files"] = [
+                {
+                    "key": group.key,
+                    "file": f"{group.file_stem}.mcap",
+                    "metadata_file": f"{group.file_stem}.metadata.yaml",
+                    "nominal_rate_hz": group.nominal_rate_hz,
+                    "topics": list(group.topics),
+                    "timestamp_semantics": (
+                        "MCAP记录时间保留ROS接收时间；含header的消息同时保留传感器时间戳"
+                    ),
+                }
+                for group in profile.groups
+            ]
+            manifest["finalized"] = bool(existing.get("finalized", False))
         if "stopped_at_ns" in existing:
             manifest["stopped_at_ns"] = existing["stopped_at_ns"]
         if "duration_seconds" in existing:
@@ -398,6 +485,42 @@ class RosbagRecordingManager:
         (path / "source_config_sha256.txt").write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
 
     @staticmethod
+    def _spawn_recorder(output: Path, topics: tuple[str, ...]) -> subprocess.Popen[bytes]:
+        command = [
+            "ros2", "bag", "record", "--storage", "mcap", "--output", str(output),
+            *topics,
+        ]
+        try:
+            return subprocess.Popen(
+                command,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        except OSError as error:
+            raise DevRecordingError(f"无法启动ros2 bag record：{error}") from error
+
+    @staticmethod
+    def _wait_for_recorder_outputs(
+        processes: dict[str, subprocess.Popen[bytes]], outputs: dict[str, Path]
+    ) -> None:
+        time.sleep(0.15)
+        for _ in range(20):
+            failed = next(
+                ((name, process.returncode) for name, process in processes.items() if process.poll() is not None),
+                None,
+            )
+            if failed is not None:
+                raise DevRecordingError(
+                    f"ros2 bag record分组{failed[0]}启动失败：退出状态{failed[1]}"
+                )
+            if all(output.is_dir() for output in outputs.values()):
+                return
+            time.sleep(0.05)
+        raise DevRecordingError("ros2 bag record未创建全部分组录制目录")
+
+    @staticmethod
     def _terminate_untracked_process(process: subprocess.Popen[bytes]) -> None:
         try:
             os.killpg(process.pid, signal.SIGINT)
@@ -418,13 +541,19 @@ class RosbagRecordingManager:
     def _reap_locked(self) -> None:
         if self._process is None:
             return
-        return_code = self._process.poll()
-        if return_code is None:
+        named_processes = {"primary": self._process, **self._extra_processes}
+        exited = [(name, process.poll()) for name, process in named_processes.items() if process.poll() is not None]
+        if not exited:
             return
-        if return_code != 0 and self._last_error is None:
-            self._last_error = f"ros2 bag异常退出：{return_code}"
+        if self._last_error is None:
+            name, return_code = exited[0]
+            self._last_error = f"ros2 bag分组{name}异常退出：{return_code}"
+        for process in named_processes.values():
+            if process.poll() is None:
+                self._terminate_untracked_process(process)
         self._mark_recording_stopped_locked()
         self._process = None
+        self._extra_processes.clear()
         self._cancel_timers_locked()
 
     def _mark_recording_stopped_locked(self) -> None:
@@ -432,6 +561,8 @@ class RosbagRecordingManager:
             return
         stopped_at_ns = time.time_ns()
         manifest = self._read_manifest(self._path)
+        if self._profile is not None and self._profile.groups:
+            manifest["finalized"] = self._finalize_group_files_locked()
         manifest.update({
             "stopped_at_ns": stopped_at_ns,
             "duration_seconds": max(0.0, (stopped_at_ns - self._started_at_ns) / 1e9),
@@ -445,24 +576,56 @@ class RosbagRecordingManager:
             if self._last_error is None:
                 self._last_error = f"录制停止元数据写入失败：{error}"
 
+    def _finalize_group_files_locked(self) -> bool:
+        if self._path is None or self._profile is None:
+            return False
+        complete = True
+        for group in self._profile.groups:
+            output = self._group_outputs.get(group.key)
+            if output is None or not output.is_dir():
+                complete = False
+                continue
+            mcap_files = sorted(output.glob("*.mcap"))
+            metadata = output / "metadata.yaml"
+            if len(mcap_files) != 1 or not metadata.is_file():
+                complete = False
+                continue
+            try:
+                os.replace(mcap_files[0], self._path / f"{group.file_stem}.mcap")
+                os.replace(metadata, self._path / f"{group.file_stem}.metadata.yaml")
+            except OSError as error:
+                complete = False
+                if self._last_error is None:
+                    self._last_error = f"分组文件整理失败：{group.key}: {error}"
+        staging = self._path / ".recording"
+        if complete and staging.is_dir():
+            shutil.rmtree(staging, ignore_errors=True)
+        if not complete and self._last_error is None:
+            self._last_error = "部分分组录制文件未完整生成，样本不可离线回放"
+        return complete
+
     def _stop_process_locked(self) -> None:
         assert self._process is not None
-        process = self._process
+        processes = [self._process, *self._extra_processes.values()]
         self._cancel_timers_locked()
-        try:
-            os.killpg(process.pid, signal.SIGINT)
-            process.wait(timeout=10.0)
-        except subprocess.TimeoutExpired:
+        for process in processes:
             try:
-                os.killpg(process.pid, signal.SIGTERM)
-                process.wait(timeout=3.0)
-            except Exception as error:
-                self._last_error = f"录制进程未正常退出：{error}"
-        except ProcessLookupError:
-            pass
-        finally:
-            self._mark_recording_stopped_locked()
-            self._process = None
+                os.killpg(process.pid, signal.SIGINT)
+            except ProcessLookupError:
+                pass
+        for process in processes:
+            try:
+                process.wait(timeout=10.0)
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(process.pid, signal.SIGTERM)
+                    process.wait(timeout=3.0)
+                except Exception as error:
+                    self._last_error = f"录制进程未正常退出：{error}"
+        self._mark_recording_stopped_locked()
+        self._process = None
+        self._extra_processes.clear()
+        self._group_outputs.clear()
 
     def _schedule_watchdog_locked(self) -> None:
         if self._process is None or self._watchdog_timer is not None:

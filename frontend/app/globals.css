@@ -2285,8 +2285,8 @@ table {
 .report-pdf-table { overflow-x: auto; border: 1px solid var(--line); border-radius: 9px; }
 .report-pdf-table__row {
   display: grid;
-  grid-template-columns: 82px 110px 96px 100px 150px minmax(180px, 1fr) minmax(180px, 1fr);
-  min-width: 1010px;
+  grid-template-columns: 82px 110px 90px 120px 140px 118px 150px minmax(180px, 1fr) minmax(180px, 1fr);
+  min-width: 1290px;
 }
 .report-pdf-table__row > span {
   min-width: 0;

@@ -136,6 +136,16 @@ class NormalHeightStatisticsRecord:
 
 
 @dataclass(frozen=True)
+class ClearanceSourceQualityRecord:
+    valid_point_ratio: float | None
+    candidate_region_count: int | None
+    selected_inlier_count: int | None
+    selected_grid_area_m2: float | None
+    selected_tilt_deg: float | None
+    selected_residual_p95_m: float | None
+
+
+@dataclass(frozen=True)
 class MeasurementSummaryRecord:
     task_id: str
     recording_schema_version: int
@@ -743,6 +753,7 @@ class MeasurementRepository:
             cached = self._load_clearance_analysis_cache(database_path, config)
             if cached is not None:
                 return cached
+            source_quality = self._load_clearance_source_quality(database_path)
             result = analyze_clearance(
                 (
                     ClearanceMeasurement(
@@ -759,6 +770,29 @@ class MeasurementRepository:
                         odin_position_y_m=sample.odin_position_y_m,
                         odin_position_z_m=sample.odin_position_z_m,
                         vehicle_heading_deg=sample.vehicle_heading_deg,
+                        source_timestamp_ms=sample.source_timestamp_ms,
+                        source_age_ms=sample.source_age_ms,
+                        valid_point_ratio=sample.quality_score,
+                        candidate_region_count=(
+                            source_quality[sample.source_sequence].candidate_region_count
+                            if sample.source_sequence in source_quality else None
+                        ),
+                        selected_inlier_count=(
+                            source_quality[sample.source_sequence].selected_inlier_count
+                            if sample.source_sequence in source_quality else None
+                        ),
+                        selected_grid_area_m2=(
+                            source_quality[sample.source_sequence].selected_grid_area_m2
+                            if sample.source_sequence in source_quality else None
+                        ),
+                        selected_tilt_deg=(
+                            source_quality[sample.source_sequence].selected_tilt_deg
+                            if sample.source_sequence in source_quality else None
+                        ),
+                        selected_residual_p95_m=(
+                            source_quality[sample.source_sequence].selected_residual_p95_m
+                            if sample.source_sequence in source_quality else None
+                        ),
                     )
                     for sample in self.iter_export_samples(task)
                 ),
@@ -766,6 +800,60 @@ class MeasurementRepository:
             )
             self._write_clearance_analysis_cache(database_path, config, result)
             return result
+
+    def _load_clearance_source_quality(
+        self, database_path: Path
+    ) -> dict[int, ClearanceSourceQualityRecord]:
+        connection = self._open_readonly(database_path)
+        try:
+            exists = connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='clearance_source_frames'"
+            ).fetchone()
+            if exists is None:
+                return {}
+            columns = {
+                str(row[1])
+                for row in connection.execute(
+                    "PRAGMA table_info(clearance_source_frames)"
+                ).fetchall()
+            }
+
+            def optional(name: str) -> str:
+                return name if name in columns else "NULL"
+
+            rows = connection.execute(
+                f"""
+                SELECT source_sequence,
+                       {optional('quality_score')} AS quality_score,
+                       {optional('candidate_region_count')} AS candidate_region_count,
+                       {optional('selected_inlier_count')} AS selected_inlier_count,
+                       {optional('selected_grid_area_m2')} AS selected_grid_area_m2,
+                       {optional('selected_tilt_deg')} AS selected_tilt_deg,
+                       {optional('selected_residual_p95_m')} AS selected_residual_p95_m
+                FROM clearance_source_frames
+                """
+            )
+            return {
+                int(row["source_sequence"]): ClearanceSourceQualityRecord(
+                    valid_point_ratio=_optional_float(row["quality_score"]),
+                    candidate_region_count=(
+                        int(row["candidate_region_count"])
+                        if row["candidate_region_count"] is not None else None
+                    ),
+                    selected_inlier_count=(
+                        int(row["selected_inlier_count"])
+                        if row["selected_inlier_count"] is not None else None
+                    ),
+                    selected_grid_area_m2=_optional_float(row["selected_grid_area_m2"]),
+                    selected_tilt_deg=_optional_float(row["selected_tilt_deg"]),
+                    selected_residual_p95_m=_optional_float(row["selected_residual_p95_m"]),
+                )
+                for row in rows
+            }
+        except sqlite3.Error as error:
+            raise MeasurementStorageError(f"读取净空源帧质量失败：{error}") from error
+        finally:
+            connection.close()
 
     def _analysis_lock(self, task_id: str) -> Lock:
         with self._analysis_locks_guard:
