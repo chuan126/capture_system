@@ -35,8 +35,7 @@ struct SurfaceDetectorConfig
   double min_downward_normal_z{0.05};
   std::size_t max_input_points{9999U};
   double min_confidence{0.55};
-  double plane_preference_tolerance_m{0.02};
-  double update_rate_hz{5.0};
+  double plane_preference_tolerance_m{0.0};
 };
 
 struct SurfaceDetectionResult

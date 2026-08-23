@@ -52,7 +52,7 @@ SurfaceDetectorConfig makeSurfaceConfig()
   config.min_downward_normal_z = 0.05;
   config.max_input_points = 9999U;
   config.min_confidence = 0.55;
-  config.plane_preference_tolerance_m = 0.02;
+  config.plane_preference_tolerance_m = 0.0;
   return config;
 }
 
@@ -61,10 +61,12 @@ void append(std::vector<SurfaceCandidate> & destination, const PlaneCandidate & 
   destination.push_back(makeSurfaceCandidate(plane));
 }
 
-TEST(SurfaceDetectorTest, ExistingPlaneRemainsSelected)
+TEST(SurfaceDetectorTest, FlatPlaneAndSurfaceKeepEquivalentClearance)
 {
   const auto points = makeGrid([](double, double) {return 2.0;});
-  ClearanceEstimator plane_estimator(ClearanceConfig{});
+  ClearanceConfig plane_config;
+  plane_config.region_grid_size_m = 0.05;
+  ClearanceEstimator plane_estimator(plane_config);
   const auto plane_result = plane_estimator.estimate(points);
   ASSERT_TRUE(plane_result.valid) << plane_result.invalid_reason;
 
@@ -82,7 +84,7 @@ TEST(SurfaceDetectorTest, ExistingPlaneRemainsSelected)
     surface_config.plane_preference_tolerance_m);
 
   ASSERT_TRUE(selection.valid);
-  EXPECT_EQ(selection.selected.type, SurfaceCandidateType::kPlane);
+  // 严格最低模式允许拟合数值略低的一方胜出，但平面场景的高度语义必须保持一致。
   EXPECT_NEAR(selection.selected.min_height_m, 2.0, 0.03);
 }
 
@@ -172,6 +174,24 @@ TEST(SurfaceDetectorTest, FusionSelectsLowerSurfaceBelowPlane)
   EXPECT_NEAR(selection.selected.min_height_m, 5.2, 0.03);
 }
 
+TEST(SurfaceDetectorTest, FusionSelectsStrictMinimumWithoutLegacyPlaneTolerance)
+{
+  SurfaceCandidate plane;
+  plane.type = SurfaceCandidateType::kPlane;
+  plane.min_height_m = 5.00;
+  plane.confidence = 1.0;
+  SurfaceCandidate surface;
+  surface.type = SurfaceCandidateType::kQuadraticSurface;
+  surface.min_height_m = 4.99;
+  surface.confidence = 0.90;
+
+  const auto selection = selectLowestConfidentCandidate({plane, surface}, 0.55, 0.0);
+
+  ASSERT_TRUE(selection.valid);
+  EXPECT_EQ(selection.selected.type, SurfaceCandidateType::kQuadraticSurface);
+  EXPECT_DOUBLE_EQ(selection.selected.min_height_m, 4.99);
+}
+
 TEST(SurfaceDetectorTest, IsolatedLowNoiseDoesNotBecomeMinimum)
 {
   auto points = makeGrid(
@@ -199,7 +219,10 @@ TEST(SurfaceDetectorTest, SyntheticFrameFitsTenHertzBudget)
   const auto points = makeGrid(
     [](double, double) {return 5.0;}, 0.9, 0.06);
   const auto start = std::chrono::steady_clock::now();
-  const auto plane_result = ClearanceEstimator(ClearanceConfig{}).estimate(points);
+  ClearanceConfig plane_config;
+  // 合成点间距为6 cm，使用同尺寸连通网格，避免测试数据自身产生空格断连。
+  plane_config.region_grid_size_m = 0.06;
+  const auto plane_result = ClearanceEstimator(plane_config).estimate(points);
   const auto after_plane = std::chrono::steady_clock::now();
   const auto surface_result = SurfaceDetector(makeSurfaceConfig()).detect(points);
   const auto finish = std::chrono::steady_clock::now();

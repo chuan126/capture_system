@@ -12,13 +12,17 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <cstdint>
 #include <functional>
+#include <future>
 #include <limits>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -37,6 +41,74 @@ bool hasFloat32Field(const sensor_msgs::msg::PointCloud2 & message, const std::s
   return false;
 }
 
+// 曲面分支使用单个常驻线程；点云回调始终等待本帧任务完成，因此队列最多只有一个任务，
+// 不会跨帧复用结果，也不会在算法耗时波动时积压旧点云。
+class SurfaceDetectionWorker
+{
+public:
+  explicit SurfaceDetectionWorker(const SurfaceDetector & detector)
+  : detector_(detector), thread_(&SurfaceDetectionWorker::run, this)
+  {
+  }
+
+  ~SurfaceDetectionWorker()
+  {
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      stopping_ = true;
+    }
+    condition_.notify_one();
+    if (thread_.joinable()) {
+      thread_.join();
+    }
+  }
+
+  SurfaceDetectionWorker(const SurfaceDetectionWorker &) = delete;
+  SurfaceDetectionWorker & operator=(const SurfaceDetectionWorker &) = delete;
+
+  std::future<SurfaceDetectionResult> submit(const std::vector<Point3f> & points)
+  {
+    Task next([this, &points]() {return detector_.detect(points);});
+    auto future = next.get_future();
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      if (stopping_ || task_.has_value()) {
+        throw std::runtime_error("曲面检测工作线程不可用或任务队列非空");
+      }
+      task_.emplace(std::move(next));
+    }
+    condition_.notify_one();
+    return future;
+  }
+
+private:
+  using Task = std::packaged_task<SurfaceDetectionResult()>;
+
+  void run()
+  {
+    while (true) {
+      std::optional<Task> current;
+      {
+        std::unique_lock<std::mutex> lock(mutex_);
+        condition_.wait(lock, [this]() {return stopping_ || task_.has_value();});
+        if (stopping_ && !task_.has_value()) {
+          return;
+        }
+        current.emplace(std::move(*task_));
+        task_.reset();
+      }
+      (*current)();
+    }
+  }
+
+  const SurfaceDetector & detector_;
+  std::mutex mutex_;
+  std::condition_variable condition_;
+  std::optional<Task> task_;
+  bool stopping_{false};
+  std::thread thread_;
+};
+
 }  // namespace
 
 class ClearanceEngineNode : public rclcpp::Node
@@ -44,7 +116,7 @@ class ClearanceEngineNode : public rclcpp::Node
 public:
   ClearanceEngineNode()
   : Node("clearance_engine_node"), plane_config_(loadConfig()), estimator_(plane_config_),
-    surface_detector_(loadSurfaceConfig(plane_config_))
+    surface_detector_(loadSurfaceConfig(plane_config_)), surface_worker_(surface_detector_)
   {
     const auto input_topic = declare_parameter<std::string>(
       "input_topic", "/capture/lidar/points_compensated_enu");
@@ -67,10 +139,9 @@ public:
 
     RCLCPP_INFO(
       get_logger(),
-      "净空平面/曲面检测已启动：input=%s output=%s；surface=%s update_rate=%.2f Hz。",
+      "净空平面/曲面逐帧并行检测已启动：input=%s output=%s；surface=%s。",
       input_topic.c_str(), output_topic.c_str(),
-      surface_detector_.config().enabled ? "enabled" : "disabled",
-      surface_detector_.config().update_rate_hz);
+      surface_detector_.config().enabled ? "enabled" : "disabled");
   }
 
 private:
@@ -170,8 +241,6 @@ private:
       "surface.min_confidence", config.min_confidence);
     config.plane_preference_tolerance_m = declare_parameter<double>(
       "surface.plane_preference_tolerance_m", config.plane_preference_tolerance_m);
-    config.update_rate_hz = declare_parameter<double>(
-      "surface.update_rate_hz", config.update_rate_hz);
     return config;
   }
 
@@ -296,6 +365,16 @@ private:
       return;
     }
 
+    const auto surface_config = surface_detector_.config();
+    std::optional<std::future<SurfaceDetectionResult>> surface_future;
+    if (surface_config.enabled) {
+      try {
+        surface_future.emplace(surface_worker_.submit(points));
+      } catch (const std::exception & error) {
+        RCLCPP_ERROR(get_logger(), "曲面检测任务提交失败：%s", error.what());
+      }
+    }
+
     ClearanceEstimate estimate;
     const auto plane_start = std::chrono::steady_clock::now();
     {
@@ -306,26 +385,20 @@ private:
       std::chrono::steady_clock::now() - plane_start).count();
 
     SurfaceDetectionResult surface_result;
-    const auto surface_config = surface_detector_.config();
-    const auto current_time = std::chrono::steady_clock::now();
-    const double surface_period_s = 1.0 / surface_config.update_rate_hz;
-    const bool surface_due = !surface_has_run_ ||
-      std::chrono::duration<double>(current_time - last_surface_run_).count() >= surface_period_s;
-    if (surface_config.enabled && !estimate.valid && !surface_due) {
-      RCLCPP_DEBUG(
-        get_logger(),
-        "平面无有效候选且曲面检测处于限频周期，本帧不发布无效结果，等待下一次曲面检测");
-      return;
-    }
-    // 平面失效时也严格遵守曲面更新频率，避免位姿/点云异常期间RegionGrowing每帧满载运行。
-    const bool run_surface = surface_config.enabled && surface_due;
-    if (run_surface) {
-      surface_result = surface_detector_.detect(points);
-      last_surface_run_ = std::chrono::steady_clock::now();
-      surface_has_run_ = true;
+    const bool run_surface = surface_future.has_value();
+    if (surface_future.has_value()) {
+      try {
+        surface_result = surface_future->get();
+      } catch (const std::exception & error) {
+        surface_result.invalid_reason = "SURFACE_PROCESSING_ERROR";
+        RCLCPP_ERROR(get_logger(), "曲面检测执行失败：%s", error.what());
+      } catch (...) {
+        surface_result.invalid_reason = "SURFACE_PROCESSING_ERROR";
+        RCLCPP_ERROR(get_logger(), "曲面检测执行失败：未知异常");
+      }
     } else {
       surface_result.invalid_reason = surface_config.enabled ?
-        "SURFACE_RATE_LIMITED" : "SURFACE_DISABLED";
+        "SURFACE_WORKER_UNAVAILABLE" : "SURFACE_DISABLED";
     }
 
     std::vector<SurfaceCandidate> candidates;
@@ -356,7 +429,9 @@ private:
     if (selection.valid) {
       output.invalid_reason = "NONE";
     } else if (!run_surface) {
-      output.invalid_reason = estimate.invalid_reason;
+      output.invalid_reason = surface_config.enabled ?
+        "PLANE:" + estimate.invalid_reason + "|SURFACE:" + surface_result.invalid_reason :
+        estimate.invalid_reason;
     } else if (surface_result.valid) {
       output.invalid_reason = "NO_CANDIDATE_ABOVE_CONFIDENCE";
     } else {
@@ -405,9 +480,8 @@ private:
   ClearanceConfig plane_config_;
   ClearanceEstimator estimator_;
   SurfaceDetector surface_detector_;
+  SurfaceDetectionWorker surface_worker_;
   std::mutex estimator_mutex_;
-  bool surface_has_run_{false};
-  std::chrono::steady_clock::time_point last_surface_run_{};
   rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr parameter_callback_;
   std::string expected_frame_id_;
   rclcpp::Publisher<interfaces::msg::ClearanceResult>::SharedPtr result_publisher_;

@@ -24,6 +24,7 @@ def generate_launch_description() -> LaunchDescription:
         / "clearance_engine_tunnel_4cm.yaml"
     )
     parameters_file = LaunchConfiguration("parameters_file")
+    clearance_cpu_affinity = LaunchConfiguration("clearance_cpu_affinity")
 
     return LaunchDescription(
         [
@@ -31,6 +32,11 @@ def generate_launch_description() -> LaunchDescription:
                 "parameters_file",
                 default_value=str(default_parameters),
                 description="平面与局部曲面净空算法参数文件绝对路径",
+            ),
+            DeclareLaunchArgument(
+                "clearance_cpu_affinity",
+                default_value="6,7",
+                description="净空平面/曲面并行线程使用的RK3588大核编号",
             ),
             Node(
                 package="motion_compensation",
@@ -52,6 +58,7 @@ def generate_launch_description() -> LaunchDescription:
                 name="clearance_engine_node",
                 output="screen",
                 parameters=[parameters_file],
+                prefix=["taskset -c ", clearance_cpu_affinity],
             ),
         ]
     )

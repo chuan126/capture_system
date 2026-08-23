@@ -19,6 +19,7 @@ find_package(rclcpp REQUIRED)
 find_package(rcl_interfaces REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(Threads REQUIRED)
 
 add_library(clearance_engine_core
   src/clearance_estimator.cpp
@@ -41,6 +42,7 @@ add_executable(clearance_engine_node
 )
 target_link_libraries(clearance_engine_node
   clearance_engine_core
+  Threads::Threads
 )
 ament_target_dependencies(clearance_engine_node
   interfaces

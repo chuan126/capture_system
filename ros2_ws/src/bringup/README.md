@@ -30,6 +30,10 @@ ros2 launch bringup clearance_preview.launch.py
 净空节点保留原有 RANSAC 平面分支，并按同一配置启动局部二次曲面分支；输出 Topic
 和 `ClearanceResult` 消息格式不变。
 
+净空节点默认通过 `taskset` 固定在 RK3588 的 CPU 6、7 两个大核，降低平面/曲面逐帧
+并行时的线程迁移尾延迟。现场如需覆盖，可使用
+`clearance_cpu_affinity:=4,5`；覆盖后必须重新记录 CPU、温度、单帧耗时和丢帧情况。
+
 ## 点云预览
 
 ```bash

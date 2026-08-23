@@ -13,7 +13,7 @@ namespace
 
 std::vector<Point3f> makePlane(
   const double center_height, const double slope_east = 0.0, const double slope_north = 0.0,
-  const double half_extent_m = 1.0, const double step_m = 0.05)
+  const double half_extent_m = 1.0, const double step_m = 0.03)
 {
   std::vector<Point3f> points;
   for (double east = -half_extent_m; east <= half_extent_m + 1e-9; east += step_m) {
@@ -57,7 +57,10 @@ TEST(ClearanceEstimatorTest, DetectsOffAxisFanBottomBelowTunnelRoof)
   }
   append(points, fan);
 
-  ClearanceEstimator estimator(ClearanceConfig{});
+  ClearanceConfig config;
+  // 屋顶合成点间距为8 cm，测试网格与其匹配，风机细点仍保持连通。
+  config.region_grid_size_m = 0.08;
+  ClearanceEstimator estimator(config);
   const auto result = estimator.estimate(points);
 
   ASSERT_TRUE(result.valid) << result.invalid_reason;

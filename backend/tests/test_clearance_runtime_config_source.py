@@ -28,7 +28,7 @@ def test_bringup_default_clearance_profile_is_the_documented_tunnel_profile() ->
     assert "clearance_engine_small_board_1cm.yaml" not in offline_source
     assert "clearance_engine_small_board_1cm.yaml" not in binding_source
     assert "ransac.voxel_size_m: 0.04" in config_source
-    assert "ransac.max_candidate_planes: 2500" in config_source
+    assert "ransac.max_candidate_planes: 200" in config_source
     assert "ransac.min_inliers_absolute: 50" in config_source
     assert "region.grid_size_m: 0.040" in config_source
     assert "region.min_span_cells: 8" in config_source

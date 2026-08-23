@@ -103,9 +103,9 @@ void validateConfig(const SurfaceDetectorConfig & config)
     throw std::invalid_argument("曲面候选质量参数不合法");
   }
   if (!(config.min_confidence >= 0.0 && config.min_confidence < 1.0) ||
-    !(config.plane_preference_tolerance_m >= 0.0) || !(config.update_rate_hz > 0.0))
+    !(config.plane_preference_tolerance_m >= 0.0))
   {
-    throw std::invalid_argument("曲面融合或更新频率参数不合法");
+    throw std::invalid_argument("曲面融合参数不合法");
   }
 }
 

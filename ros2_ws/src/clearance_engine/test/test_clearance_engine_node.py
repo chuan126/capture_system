@@ -70,5 +70,6 @@ class TestClearanceEngineNode(unittest.TestCase):
         self.assertTrue(results[-1].valid, results[-1].invalid_reason)
         self.assertAlmostEqual(results[-1].lidar_to_top_m, 2.0, delta=0.03)
         self.assertGreaterEqual(results[-1].ransac_plane_count, 1)
-        self.assertGreaterEqual(results[-1].surface_count, 0)
+        # 曲面分支逐帧执行；平面点云也应形成一个可信的局部曲面候选。
+        self.assertGreaterEqual(results[-1].surface_count, 1)
         self.assertGreaterEqual(results[-1].candidate_count, 1)
