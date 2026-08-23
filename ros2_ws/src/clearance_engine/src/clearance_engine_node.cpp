@@ -211,8 +211,10 @@ private:
           throw std::invalid_argument(name + "必须是正整数");
         }
         return static_cast<std::size_t>(value);
-      };
+    };
     config.enabled = declare_parameter<bool>("surface.enabled", config.enabled);
+    config.detect_lower_arch_only = declare_parameter<bool>(
+      "surface.detect_lower_arch_only", config.detect_lower_arch_only);
     config.voxel_size_m = declare_parameter<double>(
       "surface.voxel_size_m", config.voxel_size_m);
     config.normal_k_neighbors = declare_parameter<int>(
@@ -233,14 +235,33 @@ private:
       "surface.max_residual_p95_m", config.max_residual_p95_m);
     config.max_curvature = declare_parameter<double>(
       "surface.max_curvature", config.max_curvature);
-    config.min_downward_normal_z = declare_parameter<double>(
-      "surface.min_downward_normal_z", config.min_downward_normal_z);
+    config.max_tilt_deg = declare_parameter<double>(
+      "surface.max_tilt_deg", config.max_tilt_deg);
+    config.min_downward_normal_ratio = declare_parameter<double>(
+      "surface.min_downward_normal_ratio", config.min_downward_normal_ratio);
+    config.min_positive_curvature_per_m = declare_parameter<double>(
+      "surface.min_positive_curvature", config.min_positive_curvature_per_m);
+    config.max_negative_curvature_per_m = declare_parameter<double>(
+      "surface.max_negative_curvature", config.max_negative_curvature_per_m);
+    config.near_plane_curvature_threshold_per_m = declare_parameter<double>(
+      "surface.near_plane_curvature_threshold",
+      config.near_plane_curvature_threshold_per_m);
+    config.max_cell_vertical_span_m = declare_parameter<double>(
+      "surface.max_cell_vertical_span_m", config.max_cell_vertical_span_m);
+    config.max_bad_vertical_cell_ratio = declare_parameter<double>(
+      "surface.max_bad_vertical_cell_ratio", config.max_bad_vertical_cell_ratio);
+    config.min_minimum_boundary_distance_m = declare_parameter<double>(
+      "surface.min_minimum_boundary_distance_m",
+      config.min_minimum_boundary_distance_m);
+    config.min_roi_boundary_distance_m = declare_parameter<double>(
+      "surface.min_roi_boundary_distance_m", config.min_roi_boundary_distance_m);
     config.max_input_points = positiveIntegerParameter(
       "surface.max_input_points", static_cast<int>(config.max_input_points));
     config.min_confidence = declare_parameter<double>(
       "surface.min_confidence", config.min_confidence);
-    config.plane_preference_tolerance_m = declare_parameter<double>(
-      "surface.plane_preference_tolerance_m", config.plane_preference_tolerance_m);
+    config.plane_surface_conflict_threshold_m = declare_parameter<double>(
+      "surface.plane_surface_conflict_threshold_m",
+      config.plane_surface_conflict_threshold_m);
     return config;
   }
 
@@ -409,11 +430,12 @@ private:
     candidates.insert(
       candidates.end(), surface_result.candidates.begin(), surface_result.candidates.end());
     const CandidateSelection selection = selectLowestConfidentCandidate(
-      candidates, surface_config.min_confidence, surface_config.plane_preference_tolerance_m);
+      candidates, surface_config.min_confidence,
+      surface_config.plane_surface_conflict_threshold_m);
     const std::size_t accepted_surface_count = static_cast<std::size_t>(std::count_if(
         surface_result.candidates.begin(), surface_result.candidates.end(),
         [&surface_config](const SurfaceCandidate & candidate) {
-          return std::isfinite(candidate.confidence) &&
+          return candidate.valid && std::isfinite(candidate.confidence) &&
                  candidate.confidence > surface_config.min_confidence;
         }));
     const double elapsed_ms = std::chrono::duration<double, std::milli>(
@@ -461,18 +483,64 @@ private:
       output.minimum_position_north_m = nan;
       output.minimum_position_up_m = nan;
     }
-    RCLCPP_DEBUG(
-      get_logger(),
+    const auto & rejection = surface_result.rejection_statistics;
+    const SurfaceClusterDiagnostic * last_surface_diagnostic =
+      surface_result.cluster_diagnostics.empty() ? nullptr :
+      &surface_result.cluster_diagnostics.back();
+    const SurfaceCandidate * selected_surface = nullptr;
+    for (const SurfaceCandidate & candidate : surface_result.candidates) {
+      if (candidate.valid &&
+        (selected_surface == nullptr || candidate.min_height_m < selected_surface->min_height_m))
+      {
+        selected_surface = &candidate;
+      }
+    }
+    if (selection.plane_surface_conflict) {
+      RCLCPP_WARN_THROTTLE(
+        get_logger(), *get_clock(), 5000,
+        "PLANE_SURFACE_CONFLICT: plane=%.3f m lower_arch=%.3f m，"
+        "仍按最低可信候选输出%s",
+        selection.plane_min_height_m, selection.lower_arch_min_height_m,
+        surfaceCandidateTypeName(selection.selected.type));
+    }
+    RCLCPP_DEBUG_THROTTLE(
+      get_logger(), *get_clock(), 1000,
       "ROI points: %zu; Plane candidate count: %zu; Plane accepted: %s; "
       "Surface cluster count: %zu; Surface accepted: %zu; Final clearance height: %.3f; "
-      "Selected type: %s; Plane reason: %s; Surface reason: %s; "
+      "Selected type: %s; Plane state: %s; Plane reason: %s; Surface reason: %s; "
+      "Surface classes lower=%zu upper=%zu saddle=%zu near_plane=%zu vertical=%zu; "
+      "Surface rejects normal=%zu boundary=%zu roi_boundary=%zu quality=%zu; "
+      "Last cluster type=%s lambda=[%.4f, %.4f] 1/m reject=%s; "
+      "Best lower arch lambda=[%.4f, %.4f] 1/m normal_ratio=%.3f "
+      "interior=%s vertical_cell_ratio=%.3f conflict=%s; "
       "Plane time: %.3f ms; Surface time: %.3f ms; Total time: %.3f ms",
       estimate.valid_point_count, estimate.candidates.size(), estimate.valid ? "true" : "false",
       surface_result.cluster_count, accepted_surface_count,
       selection.valid ? selection.selected.min_height_m :
       std::numeric_limits<double>::quiet_NaN(),
       selection.valid ? surfaceCandidateTypeName(selection.selected.type) : "NONE",
+      estimate.valid ? "VALID_PLANE" : "NO_VALID_PLANE",
       estimate.invalid_reason.c_str(), surface_result.invalid_reason.c_str(),
+      rejection.lower_arch_count, rejection.upper_arch_count, rejection.saddle_count,
+      rejection.near_plane_count, rejection.vertical_surface_count,
+      rejection.normal_rejected_count, rejection.minimum_boundary_count,
+      rejection.roi_boundary_count, rejection.quality_rejected_count,
+      last_surface_diagnostic != nullptr ?
+      surfaceGeometryTypeName(last_surface_diagnostic->surface_type) : "NONE",
+      last_surface_diagnostic != nullptr ? last_surface_diagnostic->lambda_min_per_m :
+      std::numeric_limits<double>::quiet_NaN(),
+      last_surface_diagnostic != nullptr ? last_surface_diagnostic->lambda_max_per_m :
+      std::numeric_limits<double>::quiet_NaN(),
+      last_surface_diagnostic != nullptr ?
+      last_surface_diagnostic->reject_reason.c_str() : "NO_SURFACE_CLUSTER",
+      selected_surface != nullptr ? selected_surface->lambda_min_per_m :
+      std::numeric_limits<double>::quiet_NaN(),
+      selected_surface != nullptr ? selected_surface->lambda_max_per_m :
+      std::numeric_limits<double>::quiet_NaN(),
+      selected_surface != nullptr ? selected_surface->downward_normal_ratio : 0.0,
+      selected_surface != nullptr && selected_surface->minimum_is_interior ? "true" : "false",
+      selected_surface != nullptr ? selected_surface->vertical_bad_cell_ratio : 0.0,
+      selection.plane_surface_conflict ? "true" : "false",
       plane_time_ms, surface_result.processing_time_ms, elapsed_ms);
     result_publisher_->publish(output);
   }

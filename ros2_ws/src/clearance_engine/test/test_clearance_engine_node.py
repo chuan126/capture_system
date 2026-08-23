@@ -19,6 +19,8 @@ def generate_test_description():
         package="clearance_engine",
         executable="clearance_engine_node",
         output="screen",
+        # 合成点云按5 cm规则采样，测试网格与采样间距保持一致，避免测试数据人为断连。
+        parameters=[{"region.grid_size_m": 0.05}],
     )
     return launch.LaunchDescription(
         [node, launch_testing.actions.ReadyToTest()]
@@ -70,6 +72,6 @@ class TestClearanceEngineNode(unittest.TestCase):
         self.assertTrue(results[-1].valid, results[-1].invalid_reason)
         self.assertAlmostEqual(results[-1].lidar_to_top_m, 2.0, delta=0.03)
         self.assertGreaterEqual(results[-1].ransac_plane_count, 1)
-        # 曲面分支逐帧执行；平面点云也应形成一个可信的局部曲面候选。
-        self.assertGreaterEqual(results[-1].surface_count, 1)
+        # 曲面分支逐帧执行，但近水平面必须交给Plane，不能重复成为Surface候选。
+        self.assertEqual(results[-1].surface_count, 0)
         self.assertGreaterEqual(results[-1].candidate_count, 1)

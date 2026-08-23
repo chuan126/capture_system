@@ -26,6 +26,15 @@ namespace
 {
 
 constexpr double kPi = 3.14159265358979323846;
+constexpr double kGridBoundaryTolerance = 1.0e-6;
+
+std::int64_t gridCoordinate(const double coordinate, const double grid_size_m)
+{
+  // PointCloud2的float32坐标在负网格边界会产生微小负误差；直接floor会跳过一个网格，
+  // 进而把连续顶面拆成多个孤立区域。容差仅吸收浮点表示误差，不改变实际空间分区。
+  return static_cast<std::int64_t>(
+    std::floor(coordinate / grid_size_m + kGridBoundaryTolerance));
+}
 
 struct GridKey
 {
@@ -230,8 +239,8 @@ RegionAnalysis analyzeRegions(
     }
     const auto & point = cloud[static_cast<std::size_t>(raw_index)];
     const GridKey key{
-      static_cast<std::int64_t>(std::floor(point.x / config.region_grid_size_m)),
-      static_cast<std::int64_t>(std::floor(point.y / config.region_grid_size_m))};
+      gridCoordinate(point.x, config.region_grid_size_m),
+      gridCoordinate(point.y, config.region_grid_size_m)};
     cells[key].push_back(static_cast<std::size_t>(raw_index));
   }
 
