@@ -68,7 +68,7 @@ bash scripts/build/build.sh all --release --variant customer
 
 三种新 profile 支持 5、10、30 秒和手动停止的连续录制。同一时间只允许一个开发录制。磁盘可用空间低于 2 GiB 时后台自动停止。
 
-`raw_sensor`、`algorithm_debug`、`full_debug` 以及旧 `/recordings/diagnostic/start` 接口继续保留，供专项故障分析直接调用。日常单页测试界面只暴露兼容名为 `raw-cloud` 的“综合测试样本”入口。一次保存固定订阅以下消息，并把它们写入同一 MCAP，不再把点云和任务信息分散到不同目录：
+`raw_sensor`、`algorithm_debug`、`full_debug` 以及旧 `/recordings/diagnostic/start` 接口继续保留，供专项故障分析直接调用。日常单页测试界面只暴露兼容名为 `raw-cloud` 的“综合测试样本”入口。每次保存创建一个时间命名目录，并按采样频率和职责写入分组 MCAP：
 
 | 测试信息 | MCAP Topic与字段 |
 | --- | --- |
@@ -83,6 +83,8 @@ bash scripts/build/build.sh all --release --variant customer
 | 设备、任务和系统诊断 | `/capture/lidar/device_online`、`/capture/lidar/device_offline`、`/capture/task/status`、`/capture/recording/status`、`/capture/system/diagnostics`、`/diagnostics` |
 
 这些 Topic 没有在录制期间发布时，MCAP 不会伪造对应消息。采样序号来自运动补偿节点实际接收每帧点云时发布的 `cloud_sequence`，可结合相同帧时间戳关联原始点云；它不是人为补齐的 ROS 1 `Header.seq`。
+
+离线算法回放只从 `pointcloud_10hz.mcap` 注入原始点云、从 `radar_state_400hz.mcap` 注入原始高频里程计，不回灌保存的在线算法结果。编排器先读取首帧点云的结束时间并启动高频里程计播放器，监听到适配后位姿真实覆盖首帧后才启动点云播放器；两路以相同0.5×速率回放，并使用5秒离线位姿缓存吸收设备负载导致的调度差异。具体验收方法见[综合测试样本离线回放验收方案](../testing/综合测试样本离线回放验收方案.md)。
 
 数据目录分别位于：
 

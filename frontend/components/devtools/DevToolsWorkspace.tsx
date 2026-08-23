@@ -51,24 +51,27 @@ function StatusChip({ label, value, tone = "idle" }: { label: string; value: str
 function useRawCloudRecording() {
   const [status, setStatus] = useState<DevRecordingStatus | null>(null);
   const [records, setRecords] = useState<DevRecording[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const [pollError, setPollError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const refreshRecords = useCallback(async () => {
     try {
       const items = await listDevRecordings();
       setRecords(items.filter((record) => record.profile === "raw_cloud"));
+      setPollError(null);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "综合测试样本读取失败");
+      setPollError(reason instanceof Error ? reason.message : "综合测试样本读取失败");
     }
   }, []);
 
   const refreshStatus = useCallback(async () => {
     try {
       setStatus(await getDevRecordingStatus());
-      setError(null);
+      setPollError(null);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "录制状态读取失败");
+      setPollError(reason instanceof Error ? reason.message : "录制状态读取失败");
     }
   }, []);
 
@@ -82,11 +85,15 @@ function useRawCloudRecording() {
   const start = async () => {
     if (busy || status?.active) return;
     setBusy(true);
-    setError(null);
+    setActionError(null);
+    setMessage("正在启动完整测试数据保存…");
     try {
-      setStatus(await startDevRecording("raw-cloud", null));
+      const next = await startDevRecording("raw-cloud", null);
+      setStatus(next);
+      setMessage(next.active ? `已开始保存：${next.recording_id ?? "新样本"}` : "录制进程未进入活动状态");
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "综合测试数据保存启动失败");
+      setActionError(reason instanceof Error ? reason.message : "综合测试数据保存启动失败");
+      setMessage(null);
     } finally {
       setBusy(false);
     }
@@ -95,12 +102,16 @@ function useRawCloudRecording() {
   const stop = async () => {
     if (busy || !status?.active) return;
     setBusy(true);
-    setError(null);
+    setActionError(null);
+    setMessage("正在停止并整理分组文件…");
     try {
-      setStatus(await stopDevRecording());
+      const next = await stopDevRecording();
+      setStatus(next);
       await refreshRecords();
+      setMessage("保存完成，分组MCAP已写入综合测试样本");
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "停止保存失败");
+      setActionError(reason instanceof Error ? reason.message : "停止保存失败");
+      setMessage(null);
     } finally {
       setBusy(false);
     }
@@ -109,18 +120,30 @@ function useRawCloudRecording() {
   const remove = async (recordingId: string) => {
     if (busy) return;
     setBusy(true);
-    setError(null);
+    setActionError(null);
+    setMessage(null);
     try {
       await deleteDevRecording(recordingId);
       await refreshRecords();
+      setMessage(`已删除综合测试样本：${recordingId}`);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "删除综合测试样本失败");
+      setActionError(reason instanceof Error ? reason.message : "删除综合测试样本失败");
     } finally {
       setBusy(false);
     }
   };
 
-  return { status, records, error, busy, start, stop, remove, refreshRecords };
+  return {
+    status,
+    records,
+    error: actionError ?? pollError ?? status?.last_error ?? null,
+    message,
+    busy,
+    start,
+    stop,
+    remove,
+    refreshRecords,
+  };
 }
 
 function useOfflineReplay() {
@@ -260,7 +283,7 @@ function RawCloudPanel({
   selectedId: string | null;
   onSelect: (recordingId: string) => void;
 }) {
-  const { status, records, error, busy } = controller;
+  const { status, records, error, message, busy } = controller;
   const recordingActive = status?.active === true;
   const activeRawCloud = recordingActive && status.profile === "raw_cloud";
   const blockedByOtherProfile = recordingActive && status.profile !== "raw_cloud";
@@ -276,10 +299,12 @@ function RawCloudPanel({
   return <section className="panel dev-dashboard-card dev-raw-cloud-card">
     <div className="panel-head"><div><h2>保存完整测试数据</h2><p>每次保存生成一个时间目录，原始点云、400 Hz雷达状态、RTK、算法结果和诊断按频率/职责拆分为独立MCAP，并保留消息时间戳。</p></div><span className={`dev-inline-state ${activeRawCloud ? "dev-inline-state--ok" : blockedByOtherProfile ? "dev-inline-state--warn" : ""}`}>{busy ? "处理中" : activeRawCloud ? `保存中 ${status?.elapsed_seconds.toFixed(1)} s` : blockedByOtherProfile ? "其他开发录制占用" : "空闲"}</span></div>
     <div className="dev-record-actions">
-      <button className="button" disabled={busy || status?.active === true || offlineActive} onClick={() => void controller.start()}>保存</button>
-      <button className="button button--danger-outline" disabled={busy || !activeRawCloud} onClick={() => void controller.stop()}>停止</button>
-      <button className="button button--quiet" disabled={busy || !selected || activeRawCloud || offlineActive} onClick={() => void removeSelected()}>删除</button>
+      <button type="button" className="button" disabled={busy || status?.active === true || offlineActive} onClick={() => void controller.start()}>保存</button>
+      <button type="button" className="button button--danger-outline" disabled={busy || !activeRawCloud} onClick={() => void controller.stop()}>停止</button>
+      <button type="button" className="button button--quiet" disabled={busy || !selected || activeRawCloud || offlineActive} onClick={() => void removeSelected()}>删除</button>
     </div>
+    {message && <div className="dev-message dev-message--ok" role="status"><strong>{message}</strong></div>}
+    {error && <div className="dev-message dev-message--error" role="alert"><strong>{error}</strong></div>}
     <div className="dev-metric-grid dev-metric-grid--3">
       <Metric label="当前文件" value={activeRawCloud ? status?.recording_id ?? "--" : "--"} detail={activeRawCloud ? status?.path ?? "" : undefined} />
       <Metric label="已写入" value={activeRawCloud ? bytesText(status?.bytes) : "--"} />
@@ -301,7 +326,6 @@ function RawCloudPanel({
         <span className={`dev-sample-ready${record.replay_ready ? " is-ready" : ""}`}>{record.replay_ready ? "可离线检测" : "旧样本缺辅助里程计"}</span>
       </button>)}
     </div>
-    {error && <div className="dev-message dev-message--error"><strong>{error}</strong></div>}
   </section>;
 }
 

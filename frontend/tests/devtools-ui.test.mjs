@@ -58,6 +58,10 @@ test("complete test samples expose only save stop delete and full-chain offline 
   assert.match(workspace, /getDevOfflineReplayStatus/);
   assert.match(workspace, /startDevOfflineReplay/);
   assert.match(workspace, /stopDevOfflineReplay/);
+  assert.match(workspace, /正在启动完整测试数据保存/);
+  assert.match(workspace, /role="status"/);
+  assert.match(workspace, /role="alert"/);
+  assert.match(workspace, /actionError \?\? pollError \?\? status\?\.last_error/);
   assert.match(workspace, /\/capture\/dev\/offline\/\*/);
   assert.match(workspace, /offlineActive \|\| recordingActive \|\| !selected\?\.replay_ready/);
   assert.doesNotMatch(workspace, /records\.slice\(0,\s*8\)/);

@@ -155,8 +155,73 @@ def test_offline_commands_play_split_state_before_pointcloud(tmp_path: Path) -> 
     ]
     assert str(state_path) in commands["player_odometry"]
     assert "/capture/odometry/high_rate_raw" in commands["player_odometry"]
+    assert "-d" not in commands["player_odometry"]
+    assert commands["player_odometry"][commands["player_odometry"].index("--rate") + 1] == "0.5"
     assert str(cloud_path) in commands["player_cloud"]
     assert "/capture/lidar/points_raw" in commands["player_cloud"]
+    assert "-d" not in commands["player_cloud"]
+    assert commands["player_cloud"][commands["player_cloud"].index("--rate") + 1] == "0.5"
+    assert "pose_cache_duration_s:=5.0" in commands["motion"]
+
+
+def test_split_replay_prefills_pose_cache_before_starting_cloud(monkeypatch, tmp_path: Path) -> None:
+    recording_manager, _ = make_record(tmp_path)
+    manager = OfflineReplayManager(
+        recording_manager,
+        snapshot,
+        project_root=PROJECT_ROOT,
+        startup_delay_seconds=0.0,
+        pose_prefill_seconds=0.1,
+        drain_delay_seconds=0.0,
+    )
+    events: list[str] = []
+    clock = {"value": 10.0}
+
+    class RunningProcess:
+        pid = 999999
+
+        @staticmethod
+        def poll():
+            return None
+
+    def spawn(command: list[str], log_path: Path):
+        events.append(log_path.stem)
+        return RunningProcess()
+
+    def sleep(seconds: float) -> None:
+        events.append("prefill_wait")
+        clock["value"] += seconds
+
+    monkeypatch.setattr(manager, "_spawn", spawn)
+    monkeypatch.setattr("backend.devtools.offline_replay.time.monotonic", lambda: clock["value"])
+    monkeypatch.setattr("backend.devtools.offline_replay.time.sleep", sleep)
+    players = manager._start_players(
+        {"player_odometry": ["odom"], "player_cloud": ["cloud"]},
+        tmp_path,
+    )
+
+    assert len(players) == 2
+    assert events[0] == "player_odometry"
+    assert "prefill_wait" in events[1:-1]
+    assert events[-1] == "player_cloud"
+
+
+def test_pose_prefill_is_released_by_actual_odometry_timestamp(tmp_path: Path) -> None:
+    recording_manager, _ = make_record(tmp_path)
+    manager = OfflineReplayManager(recording_manager, snapshot, project_root=PROJECT_ROOT)
+    with manager._lock:
+        manager._pose_prefill_target_ns = 12_500_000_000
+
+    manager._on_odometry(
+        SimpleNamespace(header=SimpleNamespace(stamp=SimpleNamespace(sec=12, nanosec=499_999_999)))
+    )
+    assert manager.status()["pose_prefill_ready"] is False
+    manager._on_odometry(
+        SimpleNamespace(header=SimpleNamespace(stamp=SimpleNamespace(sec=12, nanosec=500_000_000)))
+    )
+    status = manager.status()
+    assert status["pose_prefill_ready"] is True
+    assert status["pose_prefill_latest_ns"] == 12_500_000_000
 
 
 
@@ -220,6 +285,24 @@ def test_offline_completion_without_clearance_result_is_failure(tmp_path: Path) 
     status = manager.status()
     assert status["state"] == "failed"
     assert "未收到净空结果" in str(status["last_error"])
+
+
+def test_offline_no_result_error_reports_motion_diagnostics(monkeypatch, tmp_path: Path) -> None:
+    recording_manager, _ = make_record(tmp_path)
+    manager = OfflineReplayManager(recording_manager, snapshot, project_root=PROJECT_ROOT)
+    monkeypatch.setattr(manager, "_cleanup_temp_locked", lambda: None)
+    with manager._lock:
+        manager._generation = 8
+        manager._state = "running"
+        manager._diagnostics = {
+            "clouds_received_total": 117,
+            "clouds_processed_total": 0,
+        }
+    manager._complete_generation(8, failed=None)
+
+    error = str(manager.status()["last_error"])
+    assert "运动补偿收到117帧" in error
+    assert "成功处理0帧" in error
 
 class _FakeProcess:
     def __init__(self, codes: list[int | None]) -> None:
