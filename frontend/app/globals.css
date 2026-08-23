@@ -1630,14 +1630,13 @@ th { color: #7f8b9e; background: #fafbfd; font-weight: 600; white-space: nowrap;
 .playback-layout {
   display: grid;
   grid-template-columns: 320px minmax(680px, 1fr) 360px;
-  align-items: stretch;
+  align-items: start;
   gap: 16px;
   min-height: 720px;
 }
 .playback-layout > .task-browser { min-height: 720px; }
-.playback-layout > .task-browser, .playback-clearance-main, .playback-inspector { height: 100%; }
 .playback-clearance-main { display: flex; min-width: 0; min-height: 0; }
-.playback-clearance-panel { display: flex; width: 100%; height: 100%; min-width: 0; min-height: 0; flex-direction: column; }
+.playback-clearance-panel { display: flex; width: 100%; min-width: 0; min-height: 0; flex-direction: column; }
 .playback-clearance-panel__head {
   display: flex;
   align-items: flex-start;

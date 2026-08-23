@@ -16,7 +16,7 @@ test("development navigation is controlled by generated build entry", () => {
 });
 
 test("development workspace is a single-page four-section dashboard", () => {
-  for (const label of ["RTK与融合定位", "净空算法", "保存原始点云", "核心配置"]) {
+  for (const label of ["RTK与融合定位", "净空算法", "保存完整测试数据", "核心配置"]) {
     assert.ok(workspace.includes(label), `missing ${label}`);
   }
   for (const obsolete of ["概览", "激光雷达数据状态", "运动补偿数据流", "任务控制链路", "原始传感器记录", "算法诊断记录", "完整开发记录"]) {
@@ -44,9 +44,9 @@ test("RTK and capture home share localization state labels and validity logic", 
   assert.match(workspace, /rtkSolutionLabel/);
 });
 
-test("raw cloud samples expose only save stop delete and full-chain offline replay", () => {
+test("complete test samples expose only save stop delete and full-chain offline replay", () => {
   assert.match(workspace, /\/capture\/lidar\/points_raw/);
-  assert.match(workspace, /原始高频里程计/);
+  assert.match(workspace, /采样序号、RTK、IMU、里程计、补偿点云、净空结果与系统诊断/);
   assert.match(workspace, /startDevRecording\("raw-cloud", null\)/);
   for (const label of [">保存<", ">停止<", ">删除<", "离线算法调试", "开始检测", "停止检测"]) {
     assert.ok(workspace.includes(label), `missing ${label}`);

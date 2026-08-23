@@ -1,6 +1,6 @@
 # 开发测试工作台
 
-核对日期：2026-08-20
+核对日期：2026-08-23
 
 ## 1. 适用范围
 
@@ -21,7 +21,7 @@ bash scripts/build/build.sh all --release --variant customer
 
 - 定位状态。复用采集首页 `/ws/v1/rtk`，同时显示 RTK 解状态、卫星数、HDOP、串口状态以及融合定位模式、经纬高、车辆方位、俯仰和横滚；
 - 净空算法。复用 `/ws/v1/clearance`，显示原始 `lidar_to_top_m`、本帧真实 RANSAC 平面模型数、区域内点、有效点比例、处理时间、网格覆盖面积和平面倾角；
-- 保存原始点云。页面只提供保存、停止、删除三种样本操作。样本主数据为 `/capture/lidar/points_raw`，同时在同一 MCAP 中保存 `/capture/odometry/high_rate_raw`，后者只用于离线重现完整运动补偿链；
+- 保存完整测试数据。页面只提供保存、停止、删除三种样本操作。一次操作把原始点云、RTK、IMU、里程计、算法结果和诊断信息写入同一个 MCAP；
 - 核心配置。主列表只读显示 9 项关键参数的正式 YAML 值和当前 ROS 运行值，运行值不一致时明确标记；可写参数需要打开详情后才能设置当前运行值。
 
 当前页面不调用 `/api/dev/overview`，因此打开测试页不会续租 `DevTelemetryBridge` 的原始点云、补偿点云和高频里程计订阅。后端 overview 接口继续保留供直接诊断使用。页面也不连接 `/ws/dev/raw-cloud-preview`；三维点云统一在采集首页查看。
@@ -68,14 +68,29 @@ bash scripts/build/build.sh all --release --variant customer
 
 三种新 profile 支持 5、10、30 秒和手动停止的连续录制。同一时间只允许一个开发录制。磁盘可用空间低于 2 GiB 时后台自动停止。
 
-`raw_sensor`、`algorithm_debug`、`full_debug` 以及旧 `/recordings/diagnostic/start` 接口继续保留，供专项故障分析直接调用。日常单页测试界面只暴露 `raw-cloud` 样本入口。该 profile 固定记录 `/capture/lidar/points_raw` 与 `/capture/odometry/high_rate_raw`，前端仍按一个“原始点云样本”管理，不把辅助里程计作为独立数据类型暴露。
+`raw_sensor`、`algorithm_debug`、`full_debug` 以及旧 `/recordings/diagnostic/start` 接口继续保留，供专项故障分析直接调用。日常单页测试界面只暴露兼容名为 `raw-cloud` 的“综合测试样本”入口。一次保存固定订阅以下消息，并把它们写入同一 MCAP，不再把点云和任务信息分散到不同目录：
+
+| 测试信息 | MCAP Topic与字段 |
+| --- | --- |
+| 原始逐点点云与逐点时间 | `/capture/lidar/points_raw`；`PointCloud2` 的完整字段（包括厂商提供的 `offset_time`）和 Header 时间 |
+| 采样序号与运动补偿质量 | `/capture/debug/frame_context`；`cloud_sequence`、点云起止时间、位姿覆盖、丢帧累计、队列及处理耗时 |
+| RTK时间、纬度、经度和高度 | `/capture/rtk/status` 的 UTC 字段，以及 `/capture/rtk/fix` 的 Header、经纬高和协方差 |
+| RTK定位质量 | `/capture/rtk/status`；解类型、卫星数、HDOP、PDOP、三轴误差、速度和航向 |
+| IMU | `/capture/imu/data`；三轴角速度、三轴线加速度、姿态四元数、协方差和时间戳 |
+| 里程计 | `/capture/odometry/high_rate_raw`、`/capture/odometry/high_rate`、`/capture/odometry/slam`；三轴位置、四元数、速度、角速度和协方差 |
+| 定位结果 | `/capture/localization/fix`、`/capture/localization/status`、`/capture/localization/odometry` |
+| 算法结果 | `/capture/lidar/points_compensated_enu`、`/capture/clearance/result` |
+| 设备、任务和系统诊断 | `/capture/lidar/device_online`、`/capture/lidar/device_offline`、`/capture/task/status`、`/capture/recording/status`、`/capture/system/diagnostics`、`/diagnostics` |
+
+这些 Topic 没有在录制期间发布时，MCAP 不会伪造对应消息。采样序号来自运动补偿节点实际接收每帧点云时发布的 `cloud_sequence`，可结合相同帧时间戳关联原始点云；它不是人为补齐的 ROS 1 `Header.seq`。
 
 数据目录分别位于：
 
 ```text
-CAPTURE_DATA_ROOT/dev-tests/raw-sensor/
-CAPTURE_DATA_ROOT/dev-tests/algorithm-debug/
-CAPTURE_DATA_ROOT/dev-tests/full-debug/
+CAPTURE_DATA_ROOT/dev-tests/raw-sensor/       # 原始传感器专项录制目录
+CAPTURE_DATA_ROOT/dev-tests/algorithm-debug/  # 算法诊断专项录制目录
+CAPTURE_DATA_ROOT/dev-tests/full-debug/       # 完整开发专项录制目录
+CAPTURE_DATA_ROOT/dev-tests/raw-cloud/        # 测试页综合测试样本目录
 ```
 
 开发数据不会进入正式任务数据库、历史回放和正式报告。
@@ -107,11 +122,11 @@ ros2_ws/src/clearance_engine/config/clearance_engine_tunnel_4cm.yaml
 每次开发录制启动后，在同一个 rosbag 输出目录保存：
 
 ```text
-capture_manifest.json
-parameter_snapshot.yaml
-source_config_sha256.txt
-metadata.yaml                 # rosbag2 自身生成
-*.mcap                        # rosbag2 MCAP 数据
+capture_manifest.json         # 录制清单和Topic列表
+parameter_snapshot.yaml       # 录制开始时的参数快照
+source_config_sha256.txt      # 来源配置文件校验值
+metadata.yaml                 # rosbag2自身元数据
+*.mcap                        # rosbag2 MCAP数据
 ```
 
 `capture_manifest.json` 记录 profile、固定 Topic 列表和 `topic_downsampling=false`。
@@ -142,7 +157,7 @@ MCAP points_raw + high_rate_raw
 → ClearanceResult
 ```
 
-三个离线节点仍分别运行 `motion_compensation` 和 `clearance_engine` 包中的正式 C++ 可执行程序，只通过节点名和 Topic 参数隔离。rosbag 以 1× 原记录时序播放。启动时复制装订参数中可读取的当前 ROS 运行值；读取失败的项保持对应正式 YAML 值，并在状态接口列出回退键。播放完成但没有收到任何离线净空结果时任务标记为失败，不返回伪成功。
+三个离线节点仍分别运行 `motion_compensation` 和 `clearance_engine` 包中的正式 C++ 可执行程序，只通过节点名和 Topic 参数隔离。rosbag 以 1× 原记录时序播放，并通过 Topic 白名单只播放原始点云和原始高频里程计；综合 MCAP 中保存的在线算法结果、定位和诊断不会被回灌。启动时复制装订参数中可读取的当前 ROS 运行值；读取失败的项保持对应正式 YAML 值，并在状态接口列出回退键。播放完成但没有收到任何离线净空结果时任务标记为失败，不返回伪成功。
 
 开发接口为 `/api/dev/offline/status`、`/api/dev/offline/start` 和 `/api/dev/offline/stop`。离线检测和正式任务开始双向互斥。离线检测不写正式任务数据库、测量数据库或报告。停止、失败和正常完成时使用 monotonic 结束时间冻结 elapsed/progress。监控线程每约 100 ms 检查时间适配、运动补偿、净空和 rosbag 进程，算法节点提前退出时立即终止其余离线进程；失败信息附带对应子进程日志末尾。离线监听同时订阅净空结果和 `/capture/dev/offline/diagnostics`。当前帧无效时保留最后一次有效雷达到顶距离用于诊断，同时 `latest_result_valid=false` 和 `invalid_reason` 明确表示该值不是当前帧有效结果。
 
@@ -156,7 +171,7 @@ MCAP points_raw + high_rate_raw
 
 核心配置区同时显示正式 YAML 配置值和最近一次真实 ROS 运行值。ROS 节点不可用时，运行值保持空值并显示真实错误，不能以 YAML 配置值替代运行值。
 
-开发录制启动不等待参数 Service。`ros2 bag record` 创建录制目录后立即进入活动状态，参数快照随后异步写入。测试页原始点云区只提供“保存、停止、删除”，并列出最近样本供选择。正在保存或正在被离线算法使用的样本不能删除。旧版本仅包含 `/capture/lidar/points_raw` 的样本会标记为缺少辅助里程计，不允许完整离线检测。
+开发录制启动不等待参数 Service。`ros2 bag record` 创建录制目录后立即进入活动状态，参数快照随后异步写入同一目录。测试页完整测试数据区只提供“保存、停止、删除”，并列出最近样本供选择。正在保存或正在被离线算法使用的样本不能删除。旧版本仅包含 `/capture/lidar/points_raw` 的样本会标记为缺少辅助里程计，不允许完整离线检测。
 
 ## 9. 开发数据目录
 

@@ -243,15 +243,15 @@ class OfflineReplayManager:
                 raise OfflineReplayError("已有离线算法检测正在运行")
         recording_status = self.recording_manager.status()
         if recording_status.get("active"):
-            raise OfflineReplayError("原始点云正在保存，请先停止保存后再进行离线检测")
+            raise OfflineReplayError("综合测试数据正在保存，请先停止保存后再进行离线检测")
         try:
             record = self.recording_manager.get_recording(recording_id)
         except DevRecordingError as error:
             raise OfflineReplayError(str(error)) from error
         if record.get("profile") != "raw_cloud":
-            raise OfflineReplayError("离线检测只接受测试页保存的原始点云样本")
+            raise OfflineReplayError("离线检测只接受测试页保存的综合测试样本")
         if record.get("active"):
-            raise OfflineReplayError("正在保存的原始点云样本不能离线检测")
+            raise OfflineReplayError("正在保存的综合测试样本不能离线检测")
         if not record.get("replay_ready"):
             raise OfflineReplayError(
                 "该样本缺少原始高频里程计，无法完整重放运动补偿链；请使用当前版本重新保存样本"
@@ -504,7 +504,11 @@ class OfflineReplayManager:
             ),
             "player": [
                 "ros2", "bag", "play", "-s", "mcap", str(recording_path),
-                "--disable-keyboard-controls", "-d", "1.0", "--remap",
+                "--disable-keyboard-controls", "-d", "1.0",
+                # 综合测试MCAP还包含在线算法结果和诊断。离线检测只允许回放两路
+                # 原始输入，避免保存的输出Topic重新注入当前运行系统。
+                "--topics", _SOURCE_RAW_CLOUD_TOPIC, _SOURCE_RAW_ODOMETRY_TOPIC,
+                "--remap",
                 f"{_SOURCE_RAW_CLOUD_TOPIC}:={OFFLINE_RAW_CLOUD_TOPIC}",
                 f"{_SOURCE_RAW_ODOMETRY_TOPIC}:={OFFLINE_RAW_ODOMETRY_TOPIC}",
             ],

@@ -29,11 +29,28 @@ class RecordingProfile:
 RAW_CLOUD_PROFILE = RecordingProfile(
     name="raw_cloud",
     directory_prefix="raw-cloud",
-    # 界面仍定义为“原始点云样本”。high_rate_raw只用于离线重放完整运动补偿链，
-    # 不作为独立用户数据类型暴露。
+    # 保留既有profile名和目录前缀，兼容已有样本及离线检测接口。测试页的一次保存
+    # 必须形成自包含数据集，所有原始传感器、处理结果和诊断消息写入同一个MCAP。
     topics=(
         "/capture/lidar/points_raw",
+        "/capture/imu/data",
         "/capture/odometry/high_rate_raw",
+        "/capture/odometry/high_rate",
+        "/capture/odometry/slam",
+        "/capture/rtk/fix",
+        "/capture/rtk/status",
+        "/capture/localization/fix",
+        "/capture/localization/status",
+        "/capture/localization/odometry",
+        "/capture/lidar/points_compensated_enu",
+        "/capture/debug/frame_context",
+        "/capture/clearance/result",
+        "/capture/lidar/device_online",
+        "/capture/lidar/device_offline",
+        "/capture/task/status",
+        "/capture/recording/status",
+        "/capture/system/diagnostics",
+        "/diagnostics",
     ),
 )
 

@@ -231,9 +231,10 @@ test("task browser searches time identifiers and tunnel metadata and groups by d
   assert.doesNotMatch(taskBrowser, /formatTaskSequence|task\.taskName/);
 });
 
-test("playback main cards share one row height and y-axis title has normal chart orientation", () => {
-  assert.match(css, /\.playback-layout > \.task-browser, \.playback-clearance-main, \.playback-inspector \{ height: 100%; \}/);
-  assert.match(css, /\.playback-clearance-panel \{[^}]*height: 100%;/);
+test("playback main cards use independent heights and y-axis title has normal chart orientation", () => {
+  assert.match(css, /\.playback-layout\s*\{[^}]*align-items:\s*start;/);
+  assert.doesNotMatch(css, /\.playback-layout > \.task-browser, \.playback-clearance-main, \.playback-inspector \{ height: 100%; \}/);
+  assert.doesNotMatch(css, /\.playback-clearance-panel \{[^}]*height: 100%;/);
   assert.match(css, /\.interactive-clearance-chart__y-axis strong \{[^}]*writing-mode: horizontal-tb;[^}]*transform: rotate\(-90deg\);/);
   assert.doesNotMatch(css, /interactive-clearance-chart__y-axis strong[^}]*vertical-rl/);
 });

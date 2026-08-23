@@ -114,6 +114,12 @@ def test_offline_commands_reuse_formal_nodes_with_isolated_topics(tmp_path: Path
 
     player = commands["player"]
     assert str(recording_path) in player
+    topics_index = player.index("--topics")
+    remap_index = player.index("--remap")
+    assert player[topics_index + 1:remap_index] == [
+        "/capture/lidar/points_raw",
+        "/capture/odometry/high_rate_raw",
+    ]
     assert "--remap" in player
     assert f"/capture/lidar/points_raw:={OFFLINE_RAW_CLOUD_TOPIC}" in player
     assert f"/capture/odometry/high_rate_raw:={OFFLINE_RAW_ODOMETRY_TOPIC}" in player
