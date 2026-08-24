@@ -34,8 +34,8 @@ public:
   CloudVisualizationNode() : Node("cloud_visualization_node")
   {
     enabled_ = declare_parameter<bool>("enabled", true);
-    input_topic_ = declare_parameter<std::string>("input_topic", "/capture/lidar/points_compensated_enu");
-    expected_frame_id_ = declare_parameter<std::string>("expected_frame_id", "lidar_local_enu");
+    input_topic_ = declare_parameter<std::string>("input_topic", "/capture/lidar/points_raw");
+    expected_frame_id_ = declare_parameter<std::string>("expected_frame_id", "");
     output_topic_ = declare_parameter<std::string>("output_topic", "/capture/visualization/cloud_preview");
     diagnostics_topic_ = declare_parameter<std::string>("diagnostics_topic", "/capture/clearance/raw_diagnostics");
     preview_diagnostics_topic_ = declare_parameter<std::string>(
@@ -68,9 +68,9 @@ public:
 private:
   void validateParameters(const std::int64_t configured_max_points) const
   {
-    if (input_topic_.empty() || output_topic_.empty() || expected_frame_id_.empty() ||
+    if (input_topic_.empty() || output_topic_.empty() ||
       diagnostics_topic_.empty() || preview_diagnostics_topic_.empty()) {
-      throw std::invalid_argument("点云预览Topic和frame参数不能为空");
+      throw std::invalid_argument("点云预览Topic参数不能为空");
     }
     if (publish_rate_hz_ < 1.0 || publish_rate_hz_ > 10.0) {
       throw std::invalid_argument("参数publish_rate_hz必须位于[1.0, 10.0] Hz");
@@ -85,12 +85,21 @@ private:
 
   void onCloud(const sensor_msgs::msg::PointCloud2::ConstSharedPtr message)
   {
-    if (message->header.frame_id != expected_frame_id_) {
-      RCLCPP_ERROR_THROTTLE(get_logger(), *get_clock(), 5000,
-        "点云预览拒绝错误坐标帧：actual=%s expected=%s", message->header.frame_id.c_str(), expected_frame_id_.c_str());
+    if (message->header.frame_id.empty()) {
+      RCLCPP_ERROR_THROTTLE(get_logger(), *get_clock(), 5000, "点云预览拒绝空坐标帧");
       return;
     }
     std::lock_guard<std::mutex> lock(mutex_);
+    if (locked_frame_id_.empty()) {
+      locked_frame_id_ = expected_frame_id_.empty() ? message->header.frame_id : expected_frame_id_;
+      RCLCPP_INFO(get_logger(), "锁存原始点云坐标帧：%s", locked_frame_id_.c_str());
+    }
+    if (message->header.frame_id != locked_frame_id_) {
+      RCLCPP_ERROR_THROTTLE(get_logger(), *get_clock(), 5000,
+        "点云预览拒绝错误坐标帧：actual=%s expected=%s",
+        message->header.frame_id.c_str(), locked_frame_id_.c_str());
+      return;
+    }
     latest_cloud_ = message;
     ++received_sequence_;
   }
@@ -104,7 +113,7 @@ private:
       diagnostic_stamp_order_.push_back(stamp);
     }
     diagnostics_by_stamp_[stamp] = message;
-    // 诊断可能晚于补偿预览帧到达；若该帧曾全蓝发布，触发一次同帧重新着色。
+    // 诊断可能晚于原始预览帧到达；若该帧曾全蓝发布，触发一次同帧重新着色。
     if (latest_cloud_ && stampNs(latest_cloud_->header) == stamp) {
       ++received_sequence_;
     }
@@ -174,7 +183,7 @@ private:
   }
 
   bool enabled_{true};
-  std::string input_topic_, expected_frame_id_, output_topic_, diagnostics_topic_;
+  std::string input_topic_, expected_frame_id_, locked_frame_id_, output_topic_, diagnostics_topic_;
   std::string preview_diagnostics_topic_;
   double publish_rate_hz_{5.0};
   std::size_t max_points_{10000U};

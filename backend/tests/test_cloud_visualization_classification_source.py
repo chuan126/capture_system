@@ -10,7 +10,6 @@ CLOUD_NODE = (
     / "src"
     / "cloud_visualization_node.cpp"
 )
-TASK_CONFIG = PROJECT_ROOT / "ros2_ws/src/interfaces/msg/TaskClearanceConfig.msg"
 RAW_DIAGNOSTICS = PROJECT_ROOT / "ros2_ws/src/interfaces/msg/RawClearanceDiagnostics.msg"
 CLOUD_DIAGNOSTICS = PROJECT_ROOT / "ros2_ws/src/interfaces/msg/CloudPreviewDiagnostics.msg"
 TASK_STATUS = PROJECT_ROOT / "ros2_ws/src/interfaces/msg/TaskStatus.msg"
@@ -60,21 +59,13 @@ def test_red_requires_only_a_valid_detected_lowest_cluster() -> None:
     assert "clearance_upper_limit_m" not in source
 
 
-def test_frozen_threshold_message_is_retained_but_does_not_control_preview() -> None:
+def test_redundant_frozen_threshold_preview_message_is_removed() -> None:
     node_source = CLOUD_NODE.read_text(encoding="utf-8")
-    config_fields = TASK_CONFIG.read_text(encoding="utf-8")
     task_status_fields = TASK_STATUS.read_text(encoding="utf-8")
 
     assert '"/capture/task/clearance_config"' not in node_source
     assert "TaskClearanceConfig" not in node_source
-    for field in (
-        "bool active",
-        "bool parameters_valid",
-        "float64 lidar_mount_height_m",
-        "float64 clearance_threshold_m",
-        "float64 clearance_upper_limit_m",
-    ):
-        assert field in config_fields
+    assert not (PROJECT_ROOT / "ros2_ws/src/interfaces/msg/TaskClearanceConfig.msg").exists()
     assert "clearance_threshold_m" not in task_status_fields
     assert "clearance_upper_limit_m" not in task_status_fields
 

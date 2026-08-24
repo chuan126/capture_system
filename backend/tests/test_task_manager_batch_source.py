@@ -86,7 +86,7 @@ def test_task_manager_freezes_actual_direction_lane_and_height_range_on_start() 
     assert "recorder_request->clearance_upper_limit_m = request.clearance_upper_limit_m" in source
 
 
-def test_task_manager_publishes_frozen_clearance_parameters_separately() -> None:
+def test_task_manager_keeps_frozen_clearance_parameters_without_redundant_topic() -> None:
     source = (
         Path(__file__).parents[2]
         / "ros2_ws"
@@ -96,19 +96,8 @@ def test_task_manager_publishes_frozen_clearance_parameters_separately() -> None
         / "task_manager_node.cpp"
     ).read_text(encoding="utf-8")
 
-    assert '#include "interfaces/msg/task_clearance_config.hpp"' in source
-    assert '"/capture/task/clearance_config"' in source
-    assert "rclcpp::KeepLast(1)).reliable().transient_local()" in source
+    assert "TaskClearanceConfig" not in source
+    assert '"/capture/task/clearance_config"' not in source
     assert "task_parameters.lidar_mount_height_m" in source
     assert "task_parameters.clearance_threshold_m" in source
     assert "task_parameters.clearance_upper_limit_m" in source
-    assert "clearance_config.task_id = task.task_id" in source
-    assert "clearance_config.active = task.active" in source
-    assert "clearance_config.parameters_valid = task.clearance_parameters_valid" in source
-    assert "clearance_config.lidar_mount_height_m = task.lidar_mount_height_m" in source
-    assert "clearance_config.clearance_threshold_m = task.clearance_threshold_m" in source
-    assert "clearance_config.clearance_upper_limit_m = task.clearance_upper_limit_m" in source
-    assert "clearance_config_publisher_->publish(clearance_config)" in source
-    assert "inactive_config.active = false" in source
-    assert "inactive_config.parameters_valid = false" in source
-    assert "clearance_config_publisher_->publish(inactive_config)" in source

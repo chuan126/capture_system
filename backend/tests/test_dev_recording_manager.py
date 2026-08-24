@@ -73,13 +73,11 @@ def test_raw_cloud_recording_uses_fixed_mcap_profile(monkeypatch, tmp_path: Path
         "/capture/lidar/points_raw",
         "/capture/imu/data",
         "/capture/odometry/high_rate_raw",
-        "/capture/odometry/high_rate",
         "/capture/odometry/slam",
         "/capture/rtk/fix",
         "/capture/rtk/status",
-        "/capture/lidar/points_compensated_enu",
-        "/capture/debug/frame_context",
         "/capture/clearance/result",
+        "/capture/clearance/raw_diagnostics",
         "/capture/lidar/device_online",
         "/capture/lidar/device_offline",
         "/capture/task/status",
@@ -126,11 +124,12 @@ def test_raw_sensor_profile_records_existing_high_rate_sources_without_visual_or
     assert "temp" not in joined
 
 
-def test_algorithm_and_full_debug_profiles_keep_raw_and_processed_topics_separate() -> None:
-    assert "/capture/lidar/points_raw" not in ALGORITHM_DEBUG_PROFILE.topics
-    assert "/capture/lidar/points_compensated_enu" in ALGORITHM_DEBUG_PROFILE.topics
-    assert "/capture/debug/frame_context" in ALGORITHM_DEBUG_PROFILE.topics
-    assert "/capture/odometry/high_rate" in ALGORITHM_DEBUG_PROFILE.topics
+def test_algorithm_and_full_debug_profiles_use_only_raw_xyz_and_algorithm_outputs() -> None:
+    assert "/capture/lidar/points_raw" in ALGORITHM_DEBUG_PROFILE.topics
+    assert "/capture/lidar/points_compensated_enu" not in ALGORITHM_DEBUG_PROFILE.topics
+    assert "/capture/debug/frame_context" not in ALGORITHM_DEBUG_PROFILE.topics
+    assert "/capture/odometry/high_rate" not in ALGORITHM_DEBUG_PROFILE.topics
+    assert "/capture/clearance/raw_diagnostics" in ALGORITHM_DEBUG_PROFILE.topics
     assert "/capture/recording/status" in ALGORITHM_DEBUG_PROFILE.topics
     assert "/diagnostics" in ALGORITHM_DEBUG_PROFILE.topics
     assert set(RAW_SENSOR_PROFILE.topics).issubset(FULL_DEBUG_PROFILE.topics)
@@ -144,8 +143,8 @@ def test_recording_writes_parameter_snapshot_and_source_hashes(monkeypatch, tmp_
         "schema_version": 1,
         "complete": True,
         "binding_config": {"path": "bindings.yaml", "sha256": "abc"},
-        "source_configs": [{"path": "motion.yaml", "exists": True, "sha256": "def"}],
-        "parameters": [{"key": "motion.test", "available": True, "value": 1.0}],
+        "source_configs": [{"path": "clearance_engine.yaml", "exists": True, "sha256": "def"}],
+        "parameters": [{"key": "clearance.test", "available": True, "value": 1.0}],
     }
     manager = RosbagRecordingManager(tmp_path, min_free_bytes=1, parameter_snapshot_provider=lambda: snapshot)
     status = manager.start(RAW_SENSOR_PROFILE, 5)
@@ -168,7 +167,7 @@ def test_recording_writes_parameter_snapshot_and_source_hashes(monkeypatch, tmp_
     assert manifest["topics"] == list(RAW_SENSOR_PROFILE.topics)
     assert saved_snapshot == snapshot
     assert "abc  bindings.yaml" in hashes
-    assert "def  motion.yaml" in hashes
+    assert "def  clearance_engine.yaml" in hashes
     assert manager.status()["parameter_snapshot_complete"] is True
     manager.stop()
 

@@ -51,32 +51,18 @@ def snapshot() -> dict[str, object]:
         "complete": True,
         "parameters": [
             {
-                "key": "odometry.sample_rate_hz",
-                "node": "/odometry_timestamp_adapter_node",
-                "parameter": "sample_rate_hz",
-                "available": True,
-                "value": 400.0,
-            },
-            {
-                "key": "motion.processing_poll_interval_ms",
-                "node": "/enu_cloud_transform_node",
-                "parameter": "processing_poll_interval_ms",
-                "available": True,
-                "value": 10,
-            },
-            {
-                "key": "clearance.max_candidate_planes",
+                "key": "clearance.min_detection_x_m",
                 "node": "/clearance_engine_node",
-                "parameter": "ransac.max_candidate_planes",
+                "parameter": "raw_cluster.min_detection_x_m",
                 "available": True,
-                "value": 2500,
+                "value": 0.2,
             },
             {
-                "key": "clearance.distance_threshold_m",
+                "key": "clearance.detection_radius_m",
                 "node": "/clearance_engine_node",
-                "parameter": "ransac.distance_threshold_m",
+                "parameter": "raw_cluster.detection_radius_m",
                 "available": True,
-                "value": 0.04,
+                "value": 1.0,
             },
         ],
     }
@@ -97,7 +83,8 @@ def test_offline_commands_run_formal_raw_clearance_with_isolated_topic(tmp_path:
     assert commands["clearance"][:4] == ["ros2", "run", "clearance_engine", "clearance_engine_node"]
     assert f"input_topic:={OFFLINE_RAW_CLOUD_TOPIC}" in commands["clearance"]
     assert f"output_topic:={OFFLINE_CLEARANCE_TOPIC}" in commands["clearance"]
-    assert "ransac.max_candidate_planes:=2500" in commands["clearance"]
+    assert "raw_cluster.min_detection_x_m:=0.2" in commands["clearance"]
+    assert "raw_cluster.detection_radius_m:=1.0" in commands["clearance"]
 
     player = commands["player"]
     assert str(recording_path) in player

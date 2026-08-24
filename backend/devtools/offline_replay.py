@@ -448,7 +448,7 @@ class OfflineReplayManager:
         replay_inputs: dict[str, object] | None = None,
     ) -> dict[str, list[str]]:
         source_configs = {
-            "clearance": self.project_root / "ros2_ws/src/clearance_engine/config/clearance_engine_tunnel_4cm.yaml",
+            "clearance": self.project_root / "ros2_ws/src/clearance_engine/config/clearance_engine.yaml",
         }
         node_names = {"clearance": "offline_clearance_engine_node"}
         param_files: dict[str, Path] = {}

@@ -70,9 +70,6 @@ test("complete test samples expose only save stop delete and full-chain offline 
 test("dashboard exposes the raw-cluster core parameters", () => {
   const visible = JSON.parse(bindings).parameters.filter((item) => item.ui_visible).map((item) => item.key);
   assert.deepEqual(visible, [
-    "motion.processing_poll_interval_ms",
-    "motion.max_interpolation_gap_s",
-    "motion.minimum_valid_pose_ratio",
     "clearance.min_detection_x_m",
     "clearance.detection_radius_m",
     "clearance.support_height_band_m",
@@ -81,6 +78,7 @@ test("dashboard exposes the raw-cluster core parameters", () => {
     "clearance.min_occupied_cells",
     "clearance.min_spatial_span_m",
   ]);
+  assert.doesNotMatch(workspace, /运动补偿/);
   assert.match(workspace, /运行值不一致/);
   assert.match(workspace, /正式配置值/);
   assert.match(workspace, /当前运行值/);

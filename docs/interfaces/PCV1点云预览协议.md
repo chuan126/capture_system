@@ -17,7 +17,7 @@ FastAPI 将 `/capture/visualization/cloud_preview` 封装为同源 WebSocket
 | `point_stride` | 12 | 16 |
 | `point_format` | `xyz_float32_le` | `xyz_float32_class_uint8_le` |
 | `color_mode` | `single` | `classification` |
-| `coordinate_mode` | `local_enu` | `local_enu` |
+| `coordinate_mode` | `sensor` | `sensor` |
 
 `frame_id`、`max_points` 和 `sensor_clock=device_boot` 同时发送。流描述与二进制布局不一致时，
 前端必须拒绝该帧，不能猜测步长。
@@ -54,7 +54,7 @@ PCV1 每点是连续的 `x/y/z` FLOAT32 小端，共 12 字节。PCV2 每点 16 
 
 PCV2 上游必须是 little-endian、高度 1 的连续 PointCloud2，包含 XYZ FLOAT32 和偏移 12 的
 UINT8 `classification`，`point_step=16`。FastAPI 校验点步长与负载长度后只添加协议头，不
-改写分类。预览节点保留补偿点云的 `frame_id` 和源时间戳，最多 10,000 点、默认 5 Hz。
+改写分类。预览节点保留原始点云的 `frame_id` 和源时间戳，最多 10,000 点、默认 5 Hz。
 
 诊断或任务阈值缺失属于允许的旁路降级，应输出蓝色，而不是阻塞帧或反压净空算法。浏览器
 断开只停止预览租约，不影响 ROS 2 采集、计算和记录。

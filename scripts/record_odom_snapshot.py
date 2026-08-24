@@ -5,7 +5,7 @@
   python3 scripts/record_odom_snapshot.py
 
 选项:
-  --topic TOPIC   订阅的里程计话题（默认 /capture/odometry/high_rate）
+  --topic TOPIC   订阅的里程计话题（默认 /capture/odometry/high_rate_raw）
   --timeout SEC   等待超时秒数（默认 5.0）
   --no-save       只打印到终端，不写入文件
 """
@@ -86,7 +86,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="记录一次当前里程计坐标快照")
     parser.add_argument(
         "--topic",
-        default="/capture/odometry/high_rate",
+        default="/capture/odometry/high_rate_raw",
         help="里程计话题名（默认 %(default)s）",
     )
     parser.add_argument(

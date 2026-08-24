@@ -359,7 +359,7 @@ check_not_running() {
     die "检测到 capture-system.service 正在运行。请先执行 sudo bash scripts/operation/stop_capture_system.sh；该命令只停止当前实例，不会关闭下次开机自启"
   fi
 
-  process_pattern='run_lan_preview\.sh|run_ros_stack\.sh|task_manager_node|data_recorder_node|clearance_engine_node|odometry_timestamp_adapter_node|enu_cloud_transform_node|cloud_visualization_node|rtk_driver_node|system_monitor_node|odin_driver_|odin_hotplug_manager|odin_param_reader|web_.*_bridge'
+  process_pattern='run_lan_preview\.sh|run_ros_stack\.sh|task_manager_node|data_recorder_node|clearance_engine_node|cloud_visualization_node|rtk_driver_node|system_monitor_node|odin_driver_|odin_hotplug_manager|odin_param_reader|web_.*_bridge'
   local_processes="$(pgrep -af "${process_pattern}" 2>/dev/null || true)"
   if [[ -n "${local_processes}" ]]; then
     printf '%s\n' "${local_processes}" >&2
@@ -369,7 +369,7 @@ check_not_running() {
   # ros2 node list 会发现同一 DDS Domain 内的远端节点，不能据此判断本机正在运行。
   # 保留该检查作为诊断提示，避免另一台 RK3588 导致本机编译被误拦截。
   nodes="$(ros2 node list 2>/dev/null || true)"
-  if grep -Eq '^/(task_manager_node|data_recorder_node|clearance_engine_node|enu_cloud_transform_node|cloud_visualization_node|rtk_driver_node|system_monitor_node)$' <<<"$nodes"; then
+  if grep -Eq '^/(task_manager_node|data_recorder_node|clearance_engine_node|cloud_visualization_node|rtk_driver_node|system_monitor_node)$' <<<"$nodes"; then
     warn "ROS 图中发现 Capture System 节点，但本机未发现对应进程；可能来自同一 ROS_DOMAIN_ID 的远端设备，不阻止本机构建"
   fi
 }
@@ -609,7 +609,7 @@ build_web() {
 }
 
 verify_ros() {
-  local -a packages=(interfaces localization motion_compensation clearance_engine cloud_visualization sensor_adapter rtk_driver system_monitor task_manager data_recorder bringup)
+  local -a packages=(interfaces clearance_engine cloud_visualization sensor_adapter rtk_driver system_monitor task_manager data_recorder bringup)
   (
     source_ros; source_driver; source_workspace
     local p expected actual failed=0

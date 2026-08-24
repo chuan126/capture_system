@@ -7,7 +7,7 @@ clearance_engine_node:
     expected_frame_id: ""
 
     # 单位均为m。圆柱ROI按项目安装定义围绕雷达+X高度轴，仍需现场标定复核。
-    # 从雷达原点向上至少1米
+    # 从雷达原点沿+X方向至少0.2米；现场需按雷达近场盲区和车辆遮挡复核。
     raw_cluster.min_detection_x_m: 0.2
     # 从雷达原点向上最多10米
     raw_cluster.max_detection_x_m: 10.0
@@ -15,7 +15,7 @@ clearance_engine_node:
     raw_cluster.detection_radius_m: 1.0
     # 最低候选高度带厚度
     raw_cluster.support_height_band_m: 0.05
-    # 一个可信簇的最少点数
+    # 一个可信簇的最少点数。
     raw_cluster.min_support_points: 5
     # YZ平面的连通网格尺寸
     raw_cluster.spatial_grid_size_m: 0.10

@@ -15,7 +15,6 @@ interfaces/
 ├── msg/
 │   ├── ClearanceResult.msg                # 正式净空帧结果
 │   ├── RawClearanceDiagnostics.msg        # 原始ROI与最低簇诊断
-│   ├── TaskClearanceConfig.msg            # 活动任务冻结净空参数
 │   ├── CloudPreviewDiagnostics.msg         # 三色预览分类与转换耗时
 │   ├── LocalizationStatus.msg             # 旧融合定位MCAP与客户端兼容接口
 │   ├── RtkStatus.msg                      # RTK解析状态
@@ -47,8 +46,7 @@ QoS由`task_manager`设置为reliable、transient local，使FastAPI重连后可
 
 `RawClearanceDiagnostics` 按源帧发布原始 ROI/最低簇线性索引、计数和真实代表点本体系坐标，
 仅用于诊断及预览，允许 best-effort 丢帧。有效最低可信簇的红色分类直接来自该消息，不依赖
-任务阈值。`TaskClearanceConfig` 由任务管理器以 transient-local 发布活动任务冻结的安装高度和
-上下限；任务结束、失败或启动恢复时 `active=false`，当前不参与点云颜色判定。
+任务阈值；预览颜色不读取任务阈值，最低可信簇直接标红。
 `CloudPreviewDiagnostics` 只记录旁路分类与预览转换耗时，不进入正式计算和记录。
 
 详细Topic和Service见[ROS 2架构](../../../docs/architecture/ROS2架构.md)。

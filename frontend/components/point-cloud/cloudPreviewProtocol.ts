@@ -10,7 +10,7 @@ export type CloudStreamInfo = {
   point_stride: number;
   max_points: number;
   frame_id: string;
-  coordinate_mode: "local_enu" | "sensor";
+  coordinate_mode: "sensor";
   sensor_clock: "device_boot";
   color_mode: "single" | "classification";
 };
@@ -54,7 +54,7 @@ export function parseCloudPreviewText(
     if (
       (!pcv1Contract && !pcv2Contract)
       || stream.header_bytes !== PCV1_HEADER_BYTES
-      || !["local_enu", "sensor"].includes(String(stream.coordinate_mode))
+      || stream.coordinate_mode !== "sensor"
       || typeof stream.frame_id !== "string"
       || !stream.frame_id
       || typeof stream.max_points !== "number"

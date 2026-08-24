@@ -22,7 +22,6 @@ def generate_test_description():
         parameters=[{
             "publish_rate_hz": 10.0,
             "max_points": 500,
-            "expected_frame_id": "lidar_local_enu",
             "input_topic": "/capture/test/cloud_visualization/input",
             "output_topic": "/capture/test/cloud_visualization/output",
             "diagnostics_topic": "/capture/test/cloud_visualization/diagnostics",
@@ -65,7 +64,7 @@ class TestCloudVisualizationNode(unittest.TestCase):
 
     @staticmethod
     def header(stamp_ns: int) -> Header:
-        header = Header(frame_id="lidar_local_enu")
+        header = Header(frame_id="device0/odom")
         header.stamp.nanosec = stamp_ns
         return header
 
@@ -143,6 +142,19 @@ class TestCloudVisualizationNode(unittest.TestCase):
         )
         invalid = self.publish_cloud_once_and_wait(self.cloud(202))
         self.assertEqual(self.classifications(invalid), [0, 1, 1, 1, 0, 0])
+
+    def test_z_first_raw_frame_is_locked_and_later_frame_change_is_rejected(self):
+        valid = self.publish_cloud_once_and_wait(self.cloud(401))
+        self.assertEqual(valid.header.frame_id, "device0/odom")
+
+        changed = self.cloud(402)
+        changed.header.frame_id = "unexpected/frame"
+        previous_count = len(self.outputs)
+        self.publish_repeated(self.cloud_publisher, changed, 0.3)
+        deadline = time.monotonic() + 0.4
+        while time.monotonic() < deadline:
+            rclpy.spin_once(self.node, timeout_sec=0.05)
+        self.assertEqual(len(self.outputs), previous_count)
 
     def test_late_diagnostics_recolors_latest_frame(self):
         first = self.publish_cloud_once_and_wait(self.cloud(301))

@@ -133,7 +133,7 @@ def test_recorder_keeps_raw_sensor_snapshots_without_fusion_localization_depende
     assert "latest_odin_.qx = orientation.x" in odometry_handler.group(0)
     assert "vehicleAttitudeFromOdinQuaternion" not in odometry_handler.group(0)
 
-    for relative_directory in ("ros2_ws/src/motion_compensation", "ros2_ws/src/clearance_engine"):
+    for relative_directory in ("ros2_ws/src/clearance_engine",):
         directory = project_root / relative_directory
         source_text = "".join(
             path.read_text(encoding="utf-8", errors="ignore")

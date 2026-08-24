@@ -26,7 +26,7 @@ class CloudPreviewFrame:
     point_count: int
     frame_id: str
     binary: bytes
-    coordinate_mode: str = "local_enu"
+    coordinate_mode: str = "sensor"
     max_points: int = PCV1_MAX_POINTS
     protocol: str = "PCV1"
     version: int = PCV1_VERSION

@@ -357,13 +357,8 @@ function OfflineReplayPanel({
   </section>;
 }
 
-const MOTION_PARAMETER_KEYS = [
-  "motion.processing_poll_interval_ms",
-  "motion.max_interpolation_gap_s",
-  "motion.minimum_valid_pose_ratio",
-] as const;
-
 const CLEARANCE_PARAMETER_KEYS = [
+  "clearance.min_detection_x_m",
   "clearance.detection_radius_m",
   "clearance.support_height_band_m",
   "clearance.min_support_points",
@@ -466,13 +461,11 @@ function ConfigPanel() {
   }, []);
   useEffect(() => { void refresh(); }, [refresh]);
   const byKey = useMemo(() => new Map(parameters.map((parameter) => [parameter.key, parameter])), [parameters]);
-  const motion = MOTION_PARAMETER_KEYS.map((key) => byKey.get(key)).filter((item): item is DevParameter => Boolean(item));
   const clearance = CLEARANCE_PARAMETER_KEYS.map((key) => byKey.get(key)).filter((item): item is DevParameter => Boolean(item));
 
   return <section className="panel dev-dashboard-card dev-config-card">
     <div className="panel-head"><div><h2>核心配置</h2><p>主界面只读显示正式YAML值和ROS运行值。运行值与配置不一致时单独标记。</p></div><button className="button button--quiet" onClick={() => void refresh()}>重新读取</button></div>
     {error && <div className="dev-message dev-message--error"><strong>{error}</strong></div>}
-    <div className="dev-config-group"><h3>运动补偿</h3>{motion.map((parameter) => <ParameterRow key={parameter.key} parameter={parameter} onOpen={setSelected} />)}</div>
     <div className="dev-config-group"><h3>净空算法</h3>{clearance.map((parameter) => <ParameterRow key={parameter.key} parameter={parameter} onOpen={setSelected} />)}</div>
     {selected && <ParameterDialog parameter={selected} onClose={() => setSelected(null)} onApplied={refresh} />}
   </section>;

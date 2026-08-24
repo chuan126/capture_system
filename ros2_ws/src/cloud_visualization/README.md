@@ -2,20 +2,20 @@
 
 核对日期：2026-08-24
 
-该包生成浏览器点云预览 Topic，不创建 WebSocket，也不参与净空计算。预览继续使用补偿后的
-局部东北天点云；净空算法改用原始点云后，两条链路保持单向旁路关系。
+该包生成浏览器点云预览 Topic，不创建 WebSocket，也不参与净空计算。预览直接使用原始
+雷达本体系点云，保持 X-Y-Z 坐标，不进行旋转、平移或运动补偿。
 
 ## 输入输出
 
 ```text
-/capture/lidar/points_compensated_enu
+/capture/lidar/points_raw
 /capture/clearance/raw_diagnostics
 → cloud_visualization_node
 ├→ /capture/visualization/cloud_preview
 └→ /capture/visualization/diagnostics
 ```
 
-补偿节点保持原始点的数量、顺序和源时间戳，因此预览节点只在时间戳精确相等时使用诊断中的
+预览和净空节点订阅同一原始点云，因此预览节点只在时间戳精确相等且点数一致时使用诊断中的
 原始线性索引：全扫描有效点为蓝色，当前圆柱 ROI 为绿色，有效最低可信簇始终覆盖为红色。
 颜色不依赖任务状态、安装高度或高度阈值，优先级为红 > 绿 > 蓝。诊断缺失、错帧或点数不符
 时不复用旧标签，安全退化为蓝色；同帧诊断晚到时会重新发布该帧的正确分类。

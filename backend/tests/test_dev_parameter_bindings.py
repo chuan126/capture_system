@@ -39,8 +39,7 @@ def test_core_parameter_bindings_are_centralized_in_bringup_config() -> None:
     payload = json.loads(BINDINGS.read_text(encoding="utf-8"))
     assert payload["schema_version"] == 1
     keys = {item["key"] for item in payload["parameters"]}
-    assert "motion.odometry_time_offset_s" in keys
-    assert "odometry.sample_rate_hz" in keys
+    assert all(not key.startswith(("motion.", "odometry.")) for key in keys)
     assert "clearance.detection_radius_m" in keys
     assert "clearance.min_support_points" in keys
     assert "clearance.min_spatial_span_m" in keys
@@ -71,7 +70,7 @@ def test_parameter_snapshot_uses_cached_runtime_values_and_source_hashes() -> No
     snapshot = service.snapshot()
     assert snapshot["schema_version"] == 1
     assert snapshot["complete"] is True
-    assert len(snapshot["parameters"]) >= 10
+    assert len(snapshot["parameters"]) == 8
     assert snapshot["binding_config"]["sha256"]
     assert all(item["exists"] is True and item["sha256"] for item in snapshot["source_configs"])
     assert len(bridge.calls) == call_count, "录制参数快照不得再次同步访问ROS"
@@ -85,9 +84,6 @@ def test_dashboard_exposes_only_requested_core_parameters() -> None:
     parameters = service.list_parameters(ui_only=True)
     assert len(bridge.calls) == call_count, "参数页面不得在HTTP请求路径同步访问ROS"
     assert [item["key"] for item in parameters] == [
-        "motion.processing_poll_interval_ms",
-        "motion.max_interpolation_gap_s",
-        "motion.minimum_valid_pose_ratio",
         "clearance.min_detection_x_m",
         "clearance.detection_radius_m",
         "clearance.support_height_band_m",
@@ -96,7 +92,6 @@ def test_dashboard_exposes_only_requested_core_parameters() -> None:
         "clearance.min_occupied_cells",
         "clearance.min_spatial_span_m",
     ]
-    assert next(item for item in parameters if item["key"] == "motion.processing_poll_interval_ms")["writable"] is False
     radius = next(item for item in parameters if item["key"] == "clearance.detection_radius_m")
     assert radius["writable"] is True
     assert radius["configured_value"] == 1.0
@@ -109,22 +104,18 @@ def test_parameter_page_keeps_yaml_value_when_ros_bridge_is_unavailable() -> Non
     bridge.error = "ROS桥不可用"
     service = DevParameterService(bridge=bridge, bindings_path=BINDINGS)
     parameters = service.list_parameters(ui_only=True)
-    assert len(parameters) == 10
-    poll = next(item for item in parameters if item["key"] == "motion.processing_poll_interval_ms")
+    assert len(parameters) == 7
     radius = next(item for item in parameters if item["parameter"] == "raw_cluster.detection_radius_m")
-    assert poll["configured_value"] == 10
-    assert poll["available"] is False
     assert radius["configured_value"] == 1.0
     assert radius["available"] is False
     assert radius["value"] is None
 
 
-def test_one_node_failure_does_not_hide_other_nodes() -> None:
+def test_clearance_node_failure_marks_all_runtime_parameters_unavailable() -> None:
     bridge = FakeBridge(unavailable_node="/clearance_engine_node")
     service = DevParameterService(bridge=bridge, bindings_path=BINDINGS)
     service.refresh_now()
     parameters = service.list_parameters()
     clearance = [item for item in parameters if item["node"] == "/clearance_engine_node"]
-    other = [item for item in parameters if item["node"] != "/clearance_engine_node"]
     assert clearance and all(item["available"] is False for item in clearance)
-    assert any(item["available"] is True for item in other)
+    assert len(clearance) == 8

@@ -92,8 +92,7 @@ class DevTelemetryBridge:
         self.error: str | None = None
         self._states = {
             "raw_cloud": _TopicState("raw_cloud", "/capture/lidar/points_raw", "sensor_msgs/msg/PointCloud2"),
-            "odometry": _TopicState("odometry", "/capture/odometry/high_rate", "nav_msgs/msg/Odometry"),
-            "compensated_cloud": _TopicState("compensated_cloud", "/capture/lidar/points_compensated_enu", "sensor_msgs/msg/PointCloud2"),
+            "odometry": _TopicState("odometry", "/capture/odometry/high_rate_raw", "nav_msgs/msg/Odometry"),
             "clearance": _TopicState("clearance", "/capture/clearance/result", "interfaces/msg/ClearanceResult"),
             "rtk_fix": _TopicState("rtk_fix", "/capture/rtk/fix", "sensor_msgs/msg/NavSatFix"),
             "rtk_status": _TopicState("rtk_status", "/capture/rtk/status", "interfaces/msg/RtkStatus"),
@@ -210,17 +209,8 @@ class DevTelemetryBridge:
             )
             node.create_subscription(
                 Odometry,
-                "/capture/odometry/high_rate",
+                "/capture/odometry/high_rate_raw",
                 lambda msg: self._record("odometry", msg),
-                reliable,
-            )
-            node.create_subscription(
-                PointCloud2,
-                "/capture/lidar/points_compensated_enu",
-                lambda msg: self._record("compensated_cloud", msg, {
-                    "point_count": int(getattr(msg, "width", 0)) * int(getattr(msg, "height", 1)),
-                    "frame_id": str(getattr(getattr(msg, "header"), "frame_id")),
-                }),
                 reliable,
             )
             node.create_subscription(

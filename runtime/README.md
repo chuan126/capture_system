@@ -13,11 +13,11 @@ runtime/                                      # 设备运行数据根目录
         └── raw-cloud_YYYYMMDD_HHMMSS_xxxxxx/ # 单次完整测试数据目录
             ├── pointcloud_10hz.mcap          # 约10 Hz原始PointCloud2，保留点内offset_time
             ├── pointcloud_10hz.metadata.yaml # 原始点云MCAP起止时间和消息计数
-            ├── radar_state_400hz.mcap        # 雷达IMU、原始/适配后高频里程计及SLAM里程计
+            ├── radar_state_400hz.mcap        # 雷达IMU、原始高频里程计及SLAM里程计
             ├── radar_state_400hz.metadata.yaml # 400 Hz雷达状态MCAP元数据
             ├── rtk_10hz.mcap                 # RTK坐标、解类型及卫星质量状态
             ├── rtk_10hz.metadata.yaml        # RTK MCAP起止时间和消息计数
-            ├── algorithm_10hz.mcap           # 补偿点云、帧上下文、净空和融合定位结果
+            ├── algorithm_10hz.mcap           # 净空结果与同帧原始索引诊断
             ├── algorithm_10hz.metadata.yaml  # 算法结果MCAP起止时间和消息计数
             ├── events_diagnostics.mcap       # 设备事件、任务/记录状态和系统诊断
             ├── events_diagnostics.metadata.yaml # 事件诊断MCAP起止时间和消息计数
@@ -26,19 +26,19 @@ runtime/                                      # 设备运行数据根目录
             └── source_config_sha256.txt      # 参数绑定及算法配置文件SHA-256
 ```
 
-MCAP的每条记录都包含ROS记录时间；具有标准 `header` 的消息还保留传感器时间戳。原始点云中的 `offset_time` 保留单帧内逐点采集时刻，可用于逐点运动补偿。
+MCAP的每条记录都包含ROS记录时间；具有标准 `header` 的消息还保留传感器时间戳。原始点云中的 `offset_time` 保留单帧内逐点采集时刻，当前算法不使用它做运动补偿。
 
 各文件职责如下：
 
 | 文件 | 主要Topic | 用途 |
 |---|---|---|
-| `pointcloud_10hz.mcap` | `/capture/lidar/points_raw` | 原始点云算法重放和逐点运动补偿 |
-| `radar_state_400hz.mcap` | `/capture/imu/data`、`/capture/odometry/high_rate_raw`、`/capture/odometry/high_rate`、`/capture/odometry/slam` | 姿态、位置、四元数和时间适配分析 |
+| `pointcloud_10hz.mcap` | `/capture/lidar/points_raw` | 原始点云算法重放 |
+| `radar_state_400hz.mcap` | `/capture/imu/data`、`/capture/odometry/high_rate_raw`、`/capture/odometry/slam` | 姿态、位置和四元数独立分析 |
 | `rtk_10hz.mcap` | `/capture/rtk/fix`、`/capture/rtk/status` | 地理位置、解类型和RTK质量分析 |
-| `algorithm_10hz.mcap` | 补偿点云、帧上下文、净空结果、融合定位 | 对照在线结果和定位算法状态 |
+| `algorithm_10hz.mcap` | `/capture/clearance/result`、`/capture/clearance/raw_diagnostics` | 对照在线净空和分类索引 |
 | `events_diagnostics.mcap` | 设备上下线、任务状态、记录状态、诊断 | 故障和丢帧原因追溯 |
 
-离线净空回放使用 `pointcloud_10hz.mcap` 和 `radar_state_400hz.mcap`，先启动高频位姿流以预充位姿缓存，再按1×记录节奏回放点云；算法使用消息内保留的原始时间戳做位姿插值和逐点运动补偿。旧版单MCAP会话继续兼容读取和回放。
+离线净空回放只需要 `pointcloud_10hz.mcap`，按1×记录节奏把原始点云送入隔离的净空节点。旧版单MCAP会话继续兼容读取和回放。
 
 ## Git规则
 

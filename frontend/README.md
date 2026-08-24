@@ -23,7 +23,7 @@
 ### 1.2 点云和地图
 
 点云预览通过 `/ws/v1/cloud-preview` 接收 PCV2 分类帧（兼容PCV1），只提供三维交互视图。
-坐标语义固定为局部东北天，`x=East`、`y=North`、`z=Up`。页面不再提供沿 X 轴
+坐标语义固定为雷达原始 X-Y-Z，界面轴标签显示 `X`、`Y`、`Z`。页面不再提供沿 X 轴
 俯视或断面视图，也不显示旧的底部坐标状态栏。
 
 点云和高德地图均提供右上角放大按钮。放大时使用页面遮罩，并支持再次点击、点击
@@ -108,7 +108,7 @@ TXT 文件名使用任务时间编号，例如 `20260807_145601_T-001_50Hz测量
 
 主页面的综合测试样本只提供保存、停止和删除。样本可直接启动隔离的离线净空算法；播放器只放行原始点云，不等待或播放里程计，也不回灌 MCAP 内已有的在线结果。仅包含原始点云的旧样本同样可用。算法节点提前退出时编排器立即停止播放器并返回日志摘要。`raw_sensor`、`algorithm_debug`、`full_debug` 等高级录制接口继续保留用于专项旁路诊断。
 
-核心参数由 `ros2_ws/src/bringup/config/dev_parameter_bindings.yaml` 装订。当前六项净空参数为圆柱半径、高度带、最少支持点、YZ 网格、最少占用格和最小跨度。主列表同时显示正式 YAML 与 ROS 2 实际运行值；可写值只在详情中修改，且不写回 YAML。
+核心参数由 `ros2_ws/src/bringup/config/dev_parameter_bindings.yaml` 装订。当前八项净空参数统一来自唯一的 `clearance_engine.yaml`，包括 X 检测上下限、圆柱半径、高度带、最少支持点、YZ 网格、最少占用格和最小跨度。主列表同时显示正式 YAML 与 ROS 2 实际运行值；可写值只在详情中修改，且不写回 YAML。
 
 测试页不再包含三维点云预览。采集首页继续使用正式点云预览旁路；综合测试 MCAP 独立保存于 `CAPTURE_DATA_ROOT/dev-tests/raw-cloud/`，不会进入任务列表、历史回放或正式报告。
 
@@ -130,7 +130,7 @@ customer 构建完成后脚本会扫描静态输出，发现开发接口字符�
 
 | 地址 | 前端组件 | 内容 |
 | --- | --- | --- |
-| `/ws/v1/cloud-preview` | `PointCloudViewer` | PCV1 局部东北天点云 |
+| `/ws/v1/cloud-preview` | `PointCloudViewer` | PCV2 原始雷达X-Y-Z分类点云（兼容PCV1） |
 | `/ws/v1/clearance` | `useClearanceSocket` | 单帧净空结果 |
 | `/ws/v1/rtk` | `useRtkSocket` | RTK 状态和 fix |
 | `/ws/v1/system-status` | `useSystemStatusSocket` | 四类系统诊断 |

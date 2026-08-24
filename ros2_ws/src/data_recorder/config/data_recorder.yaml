@@ -5,7 +5,7 @@ data_recorder_node:
     rtk_fix_topic: "/capture/rtk/fix"
     rtk_status_topic: "/capture/rtk/status"
     imu_topic: "/capture/imu/data"
-    odometry_topic: "/capture/odometry/high_rate"
+    odometry_topic: "/capture/odometry/high_rate_raw"
     # 标准sensor_msgs/Temperature输入；当前厂商驱动未发布时导出列留空。
     radar_temperature_topic: "/capture/lidar/temperature"
     # 以50 Hz保存最近净空源帧保持序列；is_repeated和repeat_index明确标识重复来源。
@@ -17,4 +17,4 @@ data_recorder_node:
     transaction_batch_size: 100
     software_version: "0.2.0"
     algorithm_version: "clearance_engine-current"
-    config_version: "clearance_engine_tunnel_4cm.yaml"
+    config_version: "clearance_engine.yaml"

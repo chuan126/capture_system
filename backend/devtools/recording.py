@@ -45,7 +45,6 @@ RAW_CLOUD_GROUPS = (
         (
             "/capture/imu/data",
             "/capture/odometry/high_rate_raw",
-            "/capture/odometry/high_rate",
             "/capture/odometry/slam",
         ),
     ),
@@ -56,9 +55,8 @@ RAW_CLOUD_GROUPS = (
     RecordingGroup(
         "algorithm_10hz", "algorithm_10hz", 10.0,
         (
-            "/capture/lidar/points_compensated_enu",
-            "/capture/debug/frame_context",
             "/capture/clearance/result",
+            "/capture/clearance/raw_diagnostics",
         ),
     ),
     RecordingGroup(
@@ -84,13 +82,11 @@ RAW_CLOUD_PROFILE = RecordingProfile(
         "/capture/lidar/points_raw",
         "/capture/imu/data",
         "/capture/odometry/high_rate_raw",
-        "/capture/odometry/high_rate",
         "/capture/odometry/slam",
         "/capture/rtk/fix",
         "/capture/rtk/status",
-        "/capture/lidar/points_compensated_enu",
-        "/capture/debug/frame_context",
         "/capture/clearance/result",
+        "/capture/clearance/raw_diagnostics",
         "/capture/lidar/device_online",
         "/capture/lidar/device_offline",
         "/capture/task/status",
@@ -111,7 +107,7 @@ DIAGNOSTIC_PROFILE = RecordingProfile(
         "/capture/task/status",
         "/capture/system/diagnostics",
         "/diagnostics",
-        "/capture/odometry/high_rate",
+        "/capture/odometry/high_rate_raw",
     ),
     allow_continuous=False,
 )
@@ -133,10 +129,10 @@ ALGORITHM_DEBUG_PROFILE = RecordingProfile(
     name="algorithm_debug",
     directory_prefix="algorithm-debug",
     topics=(
-        "/capture/odometry/high_rate",
-        "/capture/lidar/points_compensated_enu",
-        "/capture/debug/frame_context",
+        "/capture/lidar/points_raw",
         "/capture/clearance/result",
+        "/capture/clearance/raw_diagnostics",
+        "/capture/visualization/cloud_preview",
         "/capture/rtk/fix",
         "/capture/rtk/status",
         "/capture/task/status",

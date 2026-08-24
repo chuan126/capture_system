@@ -2,162 +2,6 @@
   "schema_version": 1,
   "parameters": [
     {
-      "key": "motion.processing_poll_interval_ms",
-      "node": "/enu_cloud_transform_node",
-      "parameter": "processing_poll_interval_ms",
-      "label": "ENU处理轮询周期",
-      "unit": "ms",
-      "kind": "int",
-      "minimum": 1,
-      "maximum": 100,
-      "step": 1,
-      "writable": false,
-      "note": "仅在节点启动时读取，修改配置后需重启服务",
-      "source_config": "ros2_ws/src/motion_compensation/config/motion_compensation.yaml",
-      "ui_visible": true
-    },
-    {
-      "key": "motion.max_interpolation_gap_s",
-      "node": "/enu_cloud_transform_node",
-      "parameter": "max_interpolation_gap_s",
-      "label": "最大姿态插值间隔",
-      "unit": "s",
-      "kind": "float",
-      "minimum": 0.001,
-      "maximum": 0.2,
-      "writable": false,
-      "note": "当前节点未实现运行时更新，仅读取",
-      "source_config": "ros2_ws/src/motion_compensation/config/motion_compensation.yaml",
-      "ui_visible": true
-    },
-    {
-      "key": "motion.minimum_valid_pose_ratio",
-      "node": "/enu_cloud_transform_node",
-      "parameter": "minimum_valid_pose_ratio",
-      "label": "最低姿态覆盖率",
-      "unit": "",
-      "kind": "float",
-      "minimum": 0.0,
-      "maximum": 1.0,
-      "writable": false,
-      "note": "当前节点未实现运行时更新，仅读取",
-      "source_config": "ros2_ws/src/motion_compensation/config/motion_compensation.yaml",
-      "ui_visible": true
-    },
-    {
-      "key": "motion.max_translation_per_scan_m",
-      "node": "/enu_cloud_transform_node",
-      "parameter": "max_translation_per_scan_m",
-      "label": "单帧最大平移",
-      "unit": "m",
-      "kind": "float",
-      "minimum": 0.0,
-      "maximum": 20.0,
-      "writable": false,
-      "note": "当前节点未实现运行时更新，仅读取",
-      "source_config": "ros2_ws/src/motion_compensation/config/motion_compensation.yaml",
-      "ui_visible": false
-    },
-    {
-      "key": "motion.odometry_time_offset_s",
-      "node": "/enu_cloud_transform_node",
-      "parameter": "odometry_time_offset_s",
-      "label": "里程计时间偏移",
-      "unit": "s",
-      "kind": "float",
-      "minimum": -1.0,
-      "maximum": 1.0,
-      "writable": false,
-      "note": "当前节点未实现运行时更新，仅读取",
-      "source_config": "ros2_ws/src/motion_compensation/config/motion_compensation.yaml",
-      "ui_visible": false
-    },
-    {
-      "key": "motion.cloud_time_offset_s",
-      "node": "/enu_cloud_transform_node",
-      "parameter": "cloud_time_offset_s",
-      "label": "点云时间偏移",
-      "unit": "s",
-      "kind": "float",
-      "minimum": -1.0,
-      "maximum": 1.0,
-      "writable": false,
-      "note": "当前节点未实现运行时更新，仅读取",
-      "source_config": "ros2_ws/src/motion_compensation/config/motion_compensation.yaml",
-      "ui_visible": false
-    },
-    {
-      "key": "motion.max_cloud_wait_s",
-      "node": "/enu_cloud_transform_node",
-      "parameter": "max_cloud_wait_s",
-      "label": "点云位姿等待上限",
-      "unit": "s",
-      "kind": "float",
-      "minimum": 0.001,
-      "maximum": 0.5,
-      "writable": false,
-      "note": "超时丢弃当前点云，防止队首阻塞",
-      "source_config": "ros2_ws/src/motion_compensation/config/motion_compensation.yaml",
-      "ui_visible": false
-    },
-    {
-      "key": "motion.pose_stream_timeout_s",
-      "node": "/enu_cloud_transform_node",
-      "parameter": "pose_stream_timeout_s",
-      "label": "位姿流接收超时",
-      "unit": "s",
-      "kind": "float",
-      "minimum": 0.001,
-      "maximum": 1.0,
-      "writable": false,
-      "note": "超时只更新诊断；点云继续逐帧判断，不清空位姿缓存",
-      "source_config": "ros2_ws/src/motion_compensation/config/motion_compensation.yaml",
-      "ui_visible": false
-    },
-    {
-      "key": "motion.pending_cloud_limit",
-      "node": "/enu_cloud_transform_node",
-      "parameter": "pending_cloud_limit",
-      "label": "待处理点云上限",
-      "unit": "frame",
-      "kind": "int",
-      "minimum": 1,
-      "maximum": 20,
-      "step": 1,
-      "writable": false,
-      "note": "队列满时保留最新点云",
-      "source_config": "ros2_ws/src/motion_compensation/config/motion_compensation.yaml",
-      "ui_visible": false
-    },
-    {
-      "key": "odometry.sample_rate_hz",
-      "node": "/odometry_timestamp_adapter_node",
-      "parameter": "sample_rate_hz",
-      "label": "高频里程计标称频率",
-      "unit": "Hz",
-      "kind": "float",
-      "minimum": 1.0,
-      "maximum": 2000.0,
-      "writable": false,
-      "note": "时间适配基础参数，仅读取",
-      "source_config": "ros2_ws/src/motion_compensation/config/odometry_timestamp_adapter.yaml",
-      "ui_visible": false
-    },
-    {
-      "key": "odometry.flush_timeout_ms",
-      "node": "/odometry_timestamp_adapter_node",
-      "parameter": "flush_timeout_ms",
-      "label": "时间展开等待上限",
-      "unit": "ms",
-      "kind": "int",
-      "minimum": 1,
-      "maximum": 1000,
-      "writable": false,
-      "note": "时间适配基础参数，仅读取",
-      "source_config": "ros2_ws/src/motion_compensation/config/odometry_timestamp_adapter.yaml",
-      "ui_visible": false
-    },
-    {
       "key": "clearance.min_detection_x_m",
       "node": "/clearance_engine_node",
       "parameter": "raw_cluster.min_detection_x_m",
@@ -167,8 +11,8 @@
       "minimum": 0.0,
       "maximum": 20.0,
       "writable": true,
-      "note": "临时生效，重启恢复YAML值",
-      "source_config": "ros2_ws/src/clearance_engine/config/clearance_engine_tunnel_4cm.yaml",
+      "note": "临时生效，重启恢复唯一YAML配置值",
+      "source_config": "ros2_ws/src/clearance_engine/config/clearance_engine.yaml",
       "ui_visible": true
     },
     {
@@ -181,8 +25,8 @@
       "minimum": 0.1,
       "maximum": 30.0,
       "writable": true,
-      "note": "临时生效，重启恢复YAML值",
-      "source_config": "ros2_ws/src/clearance_engine/config/clearance_engine_tunnel_4cm.yaml",
+      "note": "临时生效，重启恢复唯一YAML配置值",
+      "source_config": "ros2_ws/src/clearance_engine/config/clearance_engine.yaml",
       "ui_visible": false
     },
     {
@@ -195,8 +39,8 @@
       "minimum": 0.1,
       "maximum": 5.0,
       "writable": true,
-      "note": "rho=sqrt(Y²+Z²)的固定物理半径；临时生效，重启后恢复YAML值",
-      "source_config": "ros2_ws/src/clearance_engine/config/clearance_engine_tunnel_4cm.yaml",
+      "note": "rho=sqrt(Y²+Z²)的固定物理半径；临时生效，重启恢复唯一YAML配置值",
+      "source_config": "ros2_ws/src/clearance_engine/config/clearance_engine.yaml",
       "ui_visible": true
     },
     {
@@ -210,7 +54,7 @@
       "maximum": 0.5,
       "writable": true,
       "note": "从低到高搜索可信X点簇的滑动高度带宽",
-      "source_config": "ros2_ws/src/clearance_engine/config/clearance_engine_tunnel_4cm.yaml",
+      "source_config": "ros2_ws/src/clearance_engine/config/clearance_engine.yaml",
       "ui_visible": true
     },
     {
@@ -223,8 +67,8 @@
       "minimum": 1,
       "maximum": 10000,
       "writable": true,
-      "note": "临时生效，重启恢复YAML值",
-      "source_config": "ros2_ws/src/clearance_engine/config/clearance_engine_tunnel_4cm.yaml",
+      "note": "临时生效，重启恢复唯一YAML配置值",
+      "source_config": "ros2_ws/src/clearance_engine/config/clearance_engine.yaml",
       "ui_visible": true
     },
     {
@@ -237,8 +81,8 @@
       "minimum": 0.005,
       "maximum": 1.0,
       "writable": true,
-      "note": "用于连通区域划分和网格覆盖面积计算；临时生效，重启恢复YAML值",
-      "source_config": "ros2_ws/src/clearance_engine/config/clearance_engine_tunnel_4cm.yaml",
+      "note": "用于Y-Z网格连通区域划分；临时生效，重启恢复唯一YAML配置值",
+      "source_config": "ros2_ws/src/clearance_engine/config/clearance_engine.yaml",
       "ui_visible": true
     },
     {
@@ -252,7 +96,7 @@
       "maximum": 10000,
       "writable": true,
       "note": "空间连通簇必须覆盖的Y-Z网格数量",
-      "source_config": "ros2_ws/src/clearance_engine/config/clearance_engine_tunnel_4cm.yaml",
+      "source_config": "ros2_ws/src/clearance_engine/config/clearance_engine.yaml",
       "ui_visible": true
     },
     {
@@ -265,8 +109,8 @@
       "minimum": 0.0,
       "maximum": 5.0,
       "writable": true,
-      "note": "临时生效，重启恢复YAML值",
-      "source_config": "ros2_ws/src/clearance_engine/config/clearance_engine_tunnel_4cm.yaml",
+      "note": "临时生效，重启恢复唯一YAML配置值",
+      "source_config": "ros2_ws/src/clearance_engine/config/clearance_engine.yaml",
       "ui_visible": true
     }
   ]

@@ -264,7 +264,7 @@ def test_clearing_preview_cache_requires_a_fresh_frame_after_restart() -> None:
             sequence=1,
             sensor_stamp_ns=1,
             point_count=1,
-            frame_id="lidar_local_enu",
+            frame_id="device0/odom",
             binary=b"old-frame",
         )
     )

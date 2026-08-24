@@ -3,11 +3,11 @@ cloud_visualization_node:
     # 首版只允许关闭预览，不影响雷达、核心计算或记录任务。
     enabled: true
 
-    # 仅预览旁路使用经过姿态补偿的局部东北天点云，XYZ分别表示东、北、天。
-    input_topic: /capture/lidar/points_compensated_enu
+    # 预览直接使用原始雷达本体系点云，不旋转、不平移、不做运动补偿。
+    input_topic: /capture/lidar/points_raw
 
-    # 拒绝误接原始雷达坐标，防止网页把未经转换的XYZ错误标成东北天。
-    expected_frame_id: lidar_local_enu
+    # 空值表示锁存第一帧非空frame_id；后续frame变化时拒绝，且不写死厂商设备前缀。
+    expected_frame_id: ""
 
     # 输出是限制点数后的轻量XYZ+classification点云Topic，颜色由浏览器映射。
     output_topic: /capture/visualization/cloud_preview

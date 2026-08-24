@@ -71,19 +71,19 @@ Web 服务以部署时确定的普通运行用户启动，不固定用户名。s
 - 浏览器断开不停止正式业务 ROS 2 节点；点云 FastAPI ROS bridge 按浏览器连接数启停；
 - `/ws/v1/cloud-preview` 没有客户端时不订阅 `/capture/visualization/cloud_preview`，使上游 `cloud_visualization` 能按订阅数停止预览计算；
 - development 的原始点云 bridge 只在 `/ws/dev/raw-cloud-preview` 存在客户端时订阅原始点云；
-- development telemetry 仅在显式调用 `/api/dev/overview` 时续租，停止调用约 3 s 后自动释放原始点云、补偿点云和高频里程计等诊断订阅；当前单页测试界面不再调用该接口。
+- development telemetry 仅在显式调用 `/api/dev/overview` 时续租，停止调用约 3 s 后自动释放原始点云和高频里程计等诊断订阅；当前单页测试界面不再调用该接口。
 - ROS桥启动失败时，静态页面和健康接口仍可用；
 - Uvicorn 固定单 worker，点云 WebSocket 关闭压缩。
 
 ### 点云
 
 正式点云 FastAPI bridge 不逐点解析 PointCloud2，不做过滤、限点或坐标转换。上游
-`cloud_visualization` 必须输出连续 `xyz float32`、最多 10,000 点、
-`frame_id=lidar_local_enu` 的受控消息。后端只添加 PCV1 帧头。该 ROS subscription
+`cloud_visualization` 必须输出连续 `xyz float32 + classification uint8`、最多 10,000 点、
+保留原始雷达 `frame_id` 的受控消息。后端严格校验布局并添加 PCV2 帧头，仍兼容旧PCV1。该 ROS subscription
 由 `/ws/v1/cloud-preview` 首个客户端建立，最后一个客户端断开后释放，并清除停用前缓存帧。
 `cloud_visualization` 只在网页预览旁路中剔除非有限点和明确的 `(0,0,0)` 占位点；有效点不超过
 10,000 时全部发送，超过后先做体素空间取样，再保持最多 10,000 个显示点。该处理不修改正式
-运动补偿点云或净空算法输入。
+原始点云或净空算法输入。
 development 的原始点云预览属于独立开发路径，仍在 Python 中抽取 XYZ，但只在对应
 WebSocket 实际存在客户端时运行。
 
@@ -140,25 +140,25 @@ PDF 报告由客户端显式提交任务 ID 集合，后端只汇总其中满足
 | `/api/dev/overview` | Linux 系统资源和真实 ROS 数据频率、数据年龄、累计消息数 |
 | `/api/dev/task-control` | 五个任务控制 Service 的独立可用性与活动任务状态 |
 | `/api/dev/rtk/snapshot` | 读取当前 RTK 快照，不写入正式任务 |
-| `/api/dev/parameters` | 读取单页测试界面所需的核心运动补偿与净空 ROS 参数 |
+| `/api/dev/parameters` | 读取单页测试界面所需的净空 ROS 参数 |
 | `/api/dev/parameters/{key}` | 设置允许动态更新的白名单参数当前 ROS 运行值 |
 | `/api/dev/recordings/status` | 开发录制状态 |
 | `/api/dev/recordings` | 开发录制文件列表 |
 | `/api/dev/recordings/raw-sensor/start` | 原频率保存当前原始点云、IMU、原始高频里程计、SLAM里程计和雷达上下线事件 |
-| `/api/dev/recordings/algorithm-debug/start` | 保存时间适配里程计、补偿点云、净空、RTK、任务、记录器和系统诊断 |
+| `/api/dev/recordings/algorithm-debug/start` | 保存原始点云、三色预览、净空、RTK、任务、记录器和系统诊断 |
 | `/api/dev/recordings/full-debug/start` | 同时保存原始传感器链和算法链 |
-| `/api/dev/recordings/raw-cloud/start` | 测试页原始点云样本入口，保存原始点云并同步保存离线运动补偿所需原始高频里程计 |
+| `/api/dev/recordings/raw-cloud/start` | 测试页原始点云样本入口，保存原始点云、独立传感器诊断和净空结果 |
 | `/api/dev/recordings/diagnostic/start` | 兼容旧开发入口，保存旧诊断 Topic 集合 |
 | `/api/dev/recordings/stop` | 停止当前开发录制 |
 | `/api/dev/recordings/{id}` | 删除指定开发录制；正在录制或离线检测使用中的样本拒绝删除 |
 | `/api/dev/offline/status` | 读取隔离离线算法检测状态、冻结进度、最后有效净空、ENU diagnostics 和结果统计 |
-| `/api/dev/offline/start` | 对选中原始点云样本启动完整离线时间适配、运动补偿和净空链 |
+| `/api/dev/offline/start` | 对选中原始点云样本启动隔离的原始点云净空链 |
 | `/api/dev/offline/stop` | 停止当前离线算法检测并冻结 elapsed/progress |
 | `/ws/dev/raw-cloud-preview` | 原始传感器坐标点云的限点、限频预览 |
 
-开发录制不经过浏览器预览。FastAPI 只允许固定录制配置，并启动 `ros2 bag record --storage mcap` 直接订阅 ROS Topic，不设置抽样或降频参数。当前 `raw_sensor` 只记录项目已经存在并默认启用或映射的原始点云、IMU、原始高频里程计、SLAM里程计和雷达上下线事件；本版不接入视觉数据和传感器内部温度。页面无法提交任意 Topic、输出路径或 Shell 命令。数据目录固定在 `CAPTURE_DATA_ROOT/dev-tests/`。连续录制期间后台持续检查剩余空间，低于 2 GiB 安全下限时自动停止。客户版后端不导入这些路由。正式采集任务处于活动状态时，开发录制、离线算法检测和运行参数修改返回 409。离线算法检测运行时正式任务开始接口也返回 409，避免额外计算影响正式测量。离线管理器以 monotonic 时钟冻结停止、失败和完成时的 elapsed/progress；运行期间实时监督时间适配、运动补偿、净空和 rosbag 子进程，任一算法节点提前退出时立即停止其余离线进程。子进程 stdout/stderr 写入本轮临时日志，失败状态在清理临时目录前截取日志末尾进入 `last_error`。
+开发录制不经过浏览器预览。FastAPI 只允许固定录制配置，并启动 `ros2 bag record --storage mcap` 直接订阅 ROS Topic，不设置抽样或降频参数。当前 `raw_sensor` 只记录项目已经存在并默认启用或映射的原始点云、IMU、原始高频里程计、SLAM里程计和雷达上下线事件；本版不接入视觉数据和传感器内部温度。页面无法提交任意 Topic、输出路径或 Shell 命令。数据目录固定在 `CAPTURE_DATA_ROOT/dev-tests/`。连续录制期间后台持续检查剩余空间，低于 2 GiB 安全下限时自动停止。客户版后端不导入这些路由。正式采集任务处于活动状态时，开发录制、离线算法检测和运行参数修改返回 409。离线算法检测运行时正式任务开始接口也返回 409，避免额外计算影响正式测量。离线管理器以 monotonic 时钟冻结停止、失败和完成时的 elapsed/progress；运行期间实时监督净空和 rosbag 子进程，任一进程提前退出时立即停止另一进程。子进程 stdout/stderr 写入本轮临时日志，失败状态在清理临时目录前截取日志末尾进入 `last_error`。
 
-核心参数清单由 `ros2_ws/src/bringup/config/dev_parameter_bindings.yaml` 统一装订，节点所属 YAML 仍是正式参数来源。装订表使用 `ui_visible` 区分单页测试界面显示项和仅用于实验快照的参数。当前接口返回 9 项主界面参数，包括 3 项运动补偿启动参数和 6 项净空核心参数，并分别返回正式 YAML 配置值和 ROS 2 节点实际运行值。单个运行值读取失败不会隐藏其他参数；节点不可用时配置值仍可见，但运行值明确为空。临时参数不会改写 YAML。每次开发录制都会在 MCAP 目录中保存 `parameter_snapshot.yaml`、`capture_manifest.json` 和 `source_config_sha256.txt`，参数快照仍覆盖完整装订表。
+核心参数清单由 `ros2_ws/src/bringup/config/dev_parameter_bindings.yaml` 统一装订，唯一的 `clearance_engine.yaml` 是正式默认值来源。当前接口返回 8 项净空参数，并分别返回正式 YAML 配置值和 ROS 2 节点实际运行值。单个运行值读取失败不会隐藏其他参数；节点不可用时配置值仍可见，但运行值明确为空。临时参数不会改写 YAML。每次开发录制都会在 MCAP 目录中保存 `parameter_snapshot.yaml`、`capture_manifest.json` 和 `source_config_sha256.txt`，参数快照仍覆盖完整装订表。
 
 ## 7. 运行
 

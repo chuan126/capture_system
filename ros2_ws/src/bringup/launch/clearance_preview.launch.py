@@ -8,20 +8,10 @@ from launch_ros.actions import Node
 
 
 def generate_launch_description() -> LaunchDescription:
-    motion_parameters = (
-        Path(get_package_share_directory("motion_compensation"))
-        / "config"
-        / "motion_compensation.yaml"
-    )
-    odometry_adapter_parameters = (
-        Path(get_package_share_directory("motion_compensation"))
-        / "config"
-        / "odometry_timestamp_adapter.yaml"
-    )
     default_parameters = (
         Path(get_package_share_directory("clearance_engine"))
         / "config"
-        / "clearance_engine_tunnel_4cm.yaml"
+        / "clearance_engine.yaml"
     )
     parameters_file = LaunchConfiguration("parameters_file")
     clearance_cpu_affinity = LaunchConfiguration("clearance_cpu_affinity")
@@ -37,20 +27,6 @@ def generate_launch_description() -> LaunchDescription:
                 "clearance_cpu_affinity",
                 default_value="6,7",
                 description="原始点簇净空节点使用的RK3588大核编号",
-            ),
-            Node(
-                package="motion_compensation",
-                executable="odometry_timestamp_adapter_node",
-                name="odometry_timestamp_adapter_node",
-                output="screen",
-                parameters=[str(odometry_adapter_parameters)],
-            ),
-            Node(
-                package="motion_compensation",
-                executable="enu_cloud_transform_node",
-                name="enu_cloud_transform_node",
-                output="screen",
-                parameters=[str(motion_parameters)],
             ),
             Node(
                 package="clearance_engine",

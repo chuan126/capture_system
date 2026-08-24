@@ -2,7 +2,7 @@
 
 核对日期：2026-08-06
 
-> 当前网页预览使用补偿后的局部东北天点云；SLAM 点云仅保留给 RViz2、辅助诊断和历史验证。
+> 当前网页预览使用原始雷达X-Y-Z点云；SLAM 点云仅保留给 RViz2、辅助诊断和历史验证。
 
 
 本包通过 ROS 2 原生 remapping，将 ODIN1 Lite 厂商 Topic 映射为系统稳定的
@@ -26,9 +26,8 @@
 | `odometry` | `/capture/odometry/slam` | `nav_msgs/Odometry` |
 
 `/capture/lidar/points_slam` 仅用于 RViz2 预览和辅助诊断。核心净空计算仍使用
-带逐点 `offset_time` 的 `/capture/lidar/points_raw`。厂商高频里程计先发布到
-`/capture/odometry/high_rate_raw`，再由业务侧时间适配节点发布
-`/capture/odometry/high_rate`。该处理不修改厂商驱动源码。
+带逐点 `offset_time` 的 `/capture/lidar/points_raw`。厂商高频里程计保持发布到
+`/capture/odometry/high_rate_raw`，仅用于记录与独立诊断，不参与净空或网页点云预览。
 
 `device_online`由厂商SDK在设备发现并成功初始化后发布，其发布器随设备实例创建；
 设备断开时实例和发布器一同销毁。`system_monitor`通过稳定的
@@ -68,9 +67,8 @@ ros2 launch sensor_adapter odin_driver.launch.py \
 `enable_slam_odom_sync` 是独立的厂商 SDK 行为参数，默认为 `false`。当前
 ODIN1 Lite 固件的两类帧号不能持续一一匹配，预览和业务启动
 入口不得开启该同步器，否则 SLAM 点云会等待里程计并产生队列满警告。
-当前正式净空直接使用 `/capture/lidar/points_raw`；逐点运动补偿后的
-`/capture/lidar/points_compensated_enu` 只供网页预览。开发入口关闭 SLAM 点云通道，IMU和
-里程计继续为预览及定位旁路开启，但其漂移不会进入净空计算。
+当前正式净空和网页预览都直接使用 `/capture/lidar/points_raw`。开发入口关闭 SLAM 点云通道；
+IMU和里程计保留原始采集，但不进入净空或预览点云处理。
 
 同时启动雷达驱动和 RViz2 预览：
 

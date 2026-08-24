@@ -87,7 +87,7 @@ test("PCV2 falls back unknown classifications to blue and validates length", () 
   assert.throws(() => parseCloudPreviewBinary(makeClassifiedFrame([0, 1]).slice(0, 55)));
 });
 
-test("accepts production ENU and development sensor stream descriptions", () => {
+test("accepts production and development raw sensor stream descriptions", () => {
   const stream = parseCloudPreviewText(JSON.stringify({
     type: "stream_info",
     protocol: "PCV1",
@@ -96,13 +96,13 @@ test("accepts production ENU and development sensor stream descriptions", () => 
     point_format: "xyz_float32_le",
     point_stride: 12,
     max_points: 10_000,
-    frame_id: "lidar_local_enu",
-    coordinate_mode: "local_enu",
+    frame_id: "device0/odom",
+    coordinate_mode: "sensor",
     sensor_clock: "device_boot",
     color_mode: "single",
   }));
   assert.equal(stream.type, "stream_info");
-  assert.equal(stream.frame_id, "lidar_local_enu");
+  assert.equal(stream.frame_id, "device0/odom");
 
   const sensorStream = parseCloudPreviewText(JSON.stringify({
     ...stream,
@@ -145,7 +145,11 @@ test("viewer only renders device classifications and exposes matching legend", (
   assert.match(viewerSource, /#FF4D4F/);
   assert.match(viewerSource, /仅预览/);
   assert.match(viewerSource, /计算范围/);
-  assert.match(viewerSource, /阈值异常簇/);
+  assert.match(viewerSource, /最低可信簇/);
+  assert.match(viewerSource, /makeAxisLabel\("X"/);
+  assert.match(viewerSource, /makeAxisLabel\("Y"/);
+  assert.match(viewerSource, /makeAxisLabel\("Z"/);
+  assert.doesNotMatch(viewerSource, /东 E|北 N|天 U|axisMode|lidar-local-enu/);
   assert.doesNotMatch(
     viewerSource,
     /detection_radius|clearance_threshold|clearance_upper|lowest_cluster|Math\.sqrt/,

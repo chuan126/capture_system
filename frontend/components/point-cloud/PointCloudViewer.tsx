@@ -27,7 +27,7 @@ function makeAxisLabel(text: string, color: string): THREE.Sprite {
   canvas.height = 80;
   const context = canvas.getContext("2d");
   if (!context) {
-    throw new Error("浏览器无法创建东北天坐标轴标签");
+    throw new Error("浏览器无法创建XYZ坐标轴标签");
   }
   context.font = "700 36px sans-serif";
   context.textAlign = "center";
@@ -54,11 +54,9 @@ function makeAxisLabel(text: string, color: string): THREE.Sprite {
 export default function PointCloudViewer({
   socketPath = "/ws/v1/cloud-preview",
   liveLabel = "实时点云",
-  axisMode = "enu",
 }: {
   socketPath?: string;
   liveLabel?: string;
-  axisMode?: "enu" | "sensor";
 } = {}) {
   const hostRef = useRef<HTMLDivElement>(null);
   const resourcesRef = useRef<ViewerResources | null>(null);
@@ -112,12 +110,12 @@ export default function PointCloudViewer({
       const scene = new THREE.Scene();
       scene.background = new THREE.Color(0xf5f8fc);
       scene.fog = new THREE.FogExp2(0xf5f8fc, 0.01);
-      const enuSceneRoot = new THREE.Group();
-      enuSceneRoot.name = "lidar-local-enu";
-      scene.add(enuSceneRoot);
+      const rawSceneRoot = new THREE.Group();
+      rawSceneRoot.name = "lidar-raw-xyz";
+      scene.add(rawSceneRoot);
 
       const camera = new THREE.PerspectiveCamera(48, 1, 0.01, 2_000);
-      camera.up.set(0, 0, 1);
+      camera.up.set(1, 0, 0);
       camera.position.set(8, -12, 12);
 
       const positions = new Float32Array(PCV1_MAX_POINTS * 3);
@@ -138,23 +136,23 @@ export default function PointCloudViewer({
         opacity: 0.95,
       });
       const points = new THREE.Points(geometry, material);
-      enuSceneRoot.add(points);
+      rawSceneRoot.add(points);
 
       const grid = new THREE.GridHelper(100, 100, 0x9fb8d8, 0xd8e2ef);
-      grid.rotation.x = Math.PI / 2;
+      grid.rotation.z = Math.PI / 2;
       grid.material.transparent = true;
       grid.material.opacity = 0.68;
-      enuSceneRoot.add(grid);
+      rawSceneRoot.add(grid);
 
       const axes = new THREE.AxesHelper(2.0);
-      enuSceneRoot.add(axes);
-      const eastLabel = makeAxisLabel(axisMode === "enu" ? "东 E" : "X", "#d43e50");
-      eastLabel.position.set(2.45, 0, 0);
-      const northLabel = makeAxisLabel(axisMode === "enu" ? "北 N" : "Y", "#14946b");
-      northLabel.position.set(0, 2.45, 0);
-      const upLabel = makeAxisLabel(axisMode === "enu" ? "天 U" : "Z", "#1769ee");
-      upLabel.position.set(0, 0, 2.45);
-      enuSceneRoot.add(eastLabel, northLabel, upLabel);
+      rawSceneRoot.add(axes);
+      const xLabel = makeAxisLabel("X", "#d43e50");
+      xLabel.position.set(2.45, 0, 0);
+      const yLabel = makeAxisLabel("Y", "#14946b");
+      yLabel.position.set(0, 2.45, 0);
+      const zLabel = makeAxisLabel("Z", "#1769ee");
+      zLabel.position.set(0, 0, 2.45);
+      rawSceneRoot.add(xLabel, yLabel, zLabel);
 
       const controls = new OrbitControls(camera, renderer.domElement);
       controls.enableDamping = false;
@@ -228,7 +226,7 @@ export default function PointCloudViewer({
         geometry.dispose();
         material.dispose();
         axes.dispose();
-        for (const label of [eastLabel, northLabel, upLabel]) {
+        for (const label of [xLabel, yLabel, zLabel]) {
           const labelMaterial = label.material as THREE.SpriteMaterial;
           labelMaterial.map?.dispose();
           labelMaterial.dispose();
@@ -246,7 +244,7 @@ export default function PointCloudViewer({
         if (!disposed) setWebglError(detail);
       });
     }
-  }, [axisMode]);
+  }, []);
 
   const connection = useCloudPreviewSocket(handleFrame, socketPath);
   const isStreaming = connection.streamState === "streaming" && !webglError;
@@ -267,7 +265,7 @@ export default function PointCloudViewer({
       <div className="cloud-color-legend" aria-label="点云颜色图例">
         <span><i style={{ background: "#3B82F6" }} />仅预览</span>
         <span><i style={{ background: "#22C55E" }} />计算范围</span>
-        <span><i style={{ background: "#FF4D4F" }} />阈值异常簇</span>
+        <span><i style={{ background: "#FF4D4F" }} />最低可信簇</span>
       </div>
       {showStatusOverlay && (
         <div className="cloud-overlay-status" role="status">

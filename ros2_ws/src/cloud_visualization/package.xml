@@ -2,7 +2,7 @@
 <package format="3">
   <name>cloud_visualization</name>
   <version>0.1.0</version>
-  <description>为浏览器生成限频、字段裁减并限制点数的局部东北天预览点云。</description>
+  <description>为浏览器生成限频、字段裁减并限制点数的原始雷达XYZ预览点云。</description>
 
   <maintainer email="todo@example.com">capture_system maintainers</maintainer>
   <license>Proprietary</license>

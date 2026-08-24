@@ -22,7 +22,6 @@
 #include <vector>
 
 #include "interfaces/msg/recording_status.hpp"
-#include "interfaces/msg/task_clearance_config.hpp"
 #include "interfaces/msg/task_status.hpp"
 #include "interfaces/srv/prepare_recording.hpp"
 #include "interfaces/srv/recording_command.hpp"
@@ -146,9 +145,6 @@ public:
     status_publisher_ = create_publisher<interfaces::msg::TaskStatus>(
       "/capture/task/status",
       rclcpp::QoS(rclcpp::KeepLast(10)).reliable().transient_local());
-    clearance_config_publisher_ = create_publisher<interfaces::msg::TaskClearanceConfig>(
-      "/capture/task/clearance_config",
-      rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local());
     prepare_client_ = create_client<interfaces::srv::PrepareRecording>(
       recorder_prepare_service_, rmw_qos_profile_services_default, callback_group_);
     recorder_control_client_ = create_client<interfaces::srv::RecordingCommand>(
@@ -181,12 +177,6 @@ public:
       std::bind(&TaskManagerNode::on_recording_status, this, std::placeholders::_1));
 
     recover_interrupted_tasks();
-    // 启动恢复会清除活动槽；覆盖DDS中可能残留的旧任务阈值，避免预览误标红色。
-    interfaces::msg::TaskClearanceConfig inactive_config;
-    inactive_config.header.stamp = now();
-    inactive_config.active = false;
-    inactive_config.parameters_valid = false;
-    clearance_config_publisher_->publish(inactive_config);
     if (!recovered_task_ids_.empty()) {
       recovery_timer_ = create_wall_timer(
         500ms, std::bind(&TaskManagerNode::recover_recording_files, this), callback_group_);
@@ -1303,15 +1293,6 @@ private:
     status.completed_at_ns = task.completed_at_ns;
     status_publisher_->publish(status);
 
-    interfaces::msg::TaskClearanceConfig clearance_config;
-    clearance_config.header.stamp = status.header.stamp;
-    clearance_config.task_id = task.task_id;
-    clearance_config.active = task.active;
-    clearance_config.parameters_valid = task.clearance_parameters_valid;
-    clearance_config.lidar_mount_height_m = task.lidar_mount_height_m;
-    clearance_config.clearance_threshold_m = task.clearance_threshold_m;
-    clearance_config.clearance_upper_limit_m = task.clearance_upper_limit_m;
-    clearance_config_publisher_->publish(clearance_config);
   }
 
   template<typename ResponseT>
@@ -1740,8 +1721,6 @@ private:
   int stop_transition_timeout_ms_{20000};
   rclcpp::CallbackGroup::SharedPtr callback_group_;
   rclcpp::Publisher<interfaces::msg::TaskStatus>::SharedPtr status_publisher_;
-  rclcpp::Publisher<interfaces::msg::TaskClearanceConfig>::SharedPtr
-    clearance_config_publisher_;
   rclcpp::Client<interfaces::srv::PrepareRecording>::SharedPtr prepare_client_;
   rclcpp::Client<interfaces::srv::RecordingCommand>::SharedPtr recorder_control_client_;
   rclcpp::Service<interfaces::srv::StartTask>::SharedPtr start_service_;

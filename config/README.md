@@ -11,9 +11,7 @@
 config/                     # 设备和现场覆盖配置
 ├── calibration/            # 外参和标定版本规划目录
 ├── sensors/                # 传感器接入覆盖规划目录
-├── coordinate_system/      # 坐标和 TF 覆盖规划目录
-├── motion_compensation/    # 时间和补偿参数覆盖规划目录
-├── localization/           # 定位参数规划目录
+├── coordinate_system/      # 原始雷达轴向和标定覆盖规划目录
 ├── clearance/              # 净空参数覆盖规划目录
 ├── vehicle/                # 车辆尺寸规划目录
 ├── task/                   # 任务策略规划目录

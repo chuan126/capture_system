@@ -13,8 +13,6 @@
 | `interfaces` | 已实现 | `RtkStatus`、`ClearanceResult`、任务与记录消息和Service |
 | `rtk_driver` | 已实现 | `rtk_driver_node` |
 | `sensor_adapter` | 已实现 | Launch remapping，无独立中继节点 |
-| `motion_compensation` | 已实现 | 时间适配节点、ENU点云补偿节点 |
-| `localization` | 公共库 | 仅姿态矩阵/变换库；融合定位节点已删除 |
 | `clearance_engine` | 已实现首版 | `clearance_engine_node` |
 | `cloud_visualization` | 已实现 | `cloud_visualization_node` |
 | `system_monitor` | 已实现 | `system_monitor_node` |
@@ -26,15 +24,12 @@
 
 | Topic | 类型 | 发布者 | 订阅者 | 语义 |
 | --- | --- | --- | --- | --- |
-| `/capture/lidar/points_raw` | `PointCloud2` | ODIN 经 remap | 净空、点云补偿旁路 | 原始雷达点，包含逐点时间；正式净空输入 |
+| `/capture/lidar/points_raw` | `PointCloud2` | ODIN 经 remap | 净空、网页预览 | 原始雷达X-Y-Z点，包含逐点时间 |
 | `/capture/lidar/points_slam` | `PointCloud2` | ODIN 经 remap | RViz2、辅助诊断 | 厂商 SLAM 世界点云，当前网页不使用 |
-| `/capture/imu/data` | `Imu` | ODIN 经 remap | 后续定位 | 当前补偿节点未用加速度修正 Up |
-| `/capture/odometry/high_rate_raw` | `Odometry` | ODIN 经 remap | 时间适配 | 厂商高频里程计 |
-| `/capture/odometry/high_rate` | `Odometry` | 时间适配节点 | 点云补偿 | 重复时间戳已展开 |
-| `/capture/lidar/points_compensated_enu` | `PointCloud2` | 点云补偿 | 预览 | 局部东北天，`lidar_local_enu`；不参与净空计算 |
+| `/capture/imu/data` | `Imu` | ODIN 经 remap | 记录与独立诊断 | 不进入净空或预览点云处理 |
+| `/capture/odometry/high_rate_raw` | `Odometry` | ODIN 经 remap | 记录与独立诊断 | 不进入净空或预览点云处理 |
 | `/capture/clearance/result` | `ClearanceResult` | 净空算法 | FastAPI、记录器 | 原始本体系最低可信簇中位距离和质量 |
 | `/capture/clearance/raw_diagnostics` | `RawClearanceDiagnostics` | 净空算法 | 预览节点 | 同帧原始ROI/簇索引，best-effort旁路 |
-| `/capture/task/clearance_config` | `TaskClearanceConfig` | 任务管理器 | 当前无正式消费者 | 活动任务冻结安装高度和上下限，transient-local；不控制预览颜色 |
 | `/capture/visualization/cloud_preview` | `PointCloud2` | 预览节点 | FastAPI | 5 Hz、XYZ+classification、最多 10,000 点 |
 | `/capture/rtk/fix` | `NavSatFix` | RTK驱动 | FastAPI、记录器、后续定位 | WGS84位置 |
 | `/capture/rtk/status` | `RtkStatus` | RTK驱动 | FastAPI、记录器、后续定位 | 解析器原始状态集合 |
@@ -60,11 +55,10 @@
 有效点比例、无效原因和处理时间。当前 `lidar_to_top_m` 为原始本体系最低可信簇 X 中位数；
 旧平面几何字段只为接口兼容，不再有正式算法语义。
 
-### `RawClearanceDiagnostics` 与 `TaskClearanceConfig`
+### `RawClearanceDiagnostics`
 
-前者携带同帧原始索引和本体系代表点，仅供诊断及预览关联，允许丢帧。有效最低可信簇始终
-标红，不依赖任务参数。后者继续由任务管理器发布活动任务冻结阈值，供设备状态诊断和后续扩展；
-启动恢复先发布 inactive/invalid，但不参与点云颜色判定。浏览器和 FastAPI 不反向推导颜色。
+该消息携带同帧原始索引和本体系代表点，仅供诊断及预览关联，允许丢帧。有效最低可信簇始终
+标红，不依赖任务参数。浏览器和 FastAPI 不反向推导颜色。
 
 ## 5. 当前任务控制 Service
 
@@ -86,8 +80,7 @@
 - 任务和记录状态使用 reliable、transient local；
 - QoS 以源码和实机发现结果为准，不用文档默认值覆盖厂商实际配置。
 
-## 7. TF 和坐标
+## 7. 坐标语义
 
-目标 TF 树为 `map → odom → base_link → lidar_link/imu_link/rtk_link`，但当前
-生产链路没有完成全部静态外参和定位 TF。`lidar_local_enu` 是以雷达为局部原点的
-导航轴向点云，不等同于全局地图坐标，也不表示已变换到 `base_link`。
+净空与网页预览都保持传感器原始 X-Y-Z 坐标。当前安装定义以 `+X` 为雷达上方高度方向，
+但仍需现场标定确认；生产链路不把该坐标冒充 ENU、`base_link` 或重力对齐坐标系。

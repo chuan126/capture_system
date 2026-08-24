@@ -22,9 +22,9 @@ bash scripts/build/build.sh all --release --variant customer
 - RTK状态。复用采集首页 `/ws/v1/rtk`，显示原始RTK解状态、卫星数、HDOP、串口和坐标；融合定位卡已删除；
 - 净空算法。复用 `/ws/v1/clearance`，显示原始 `lidar_to_top_m`、最低可信簇点数、有效点比例和处理时间；旧平面几何字段只作接口兼容；
 - 保存完整测试数据。页面只提供保存、停止、删除三种样本操作。一次操作把原始点云、RTK、IMU、里程计、算法结果和诊断信息写入同一个 MCAP；
-- 核心配置。主列表只读显示 9 项关键参数的正式 YAML 值和当前 ROS 运行值，运行值不一致时明确标记；可写参数需要打开详情后才能设置当前运行值。
+- 核心配置。主列表显示 8 项净空参数的唯一正式 YAML 值和当前 ROS 运行值，运行值不一致时明确标记；可写参数需要打开详情后才能设置当前运行值。
 
-当前页面不调用 `/api/dev/overview`，因此打开测试页不会续租 `DevTelemetryBridge` 的原始点云、补偿点云和高频里程计订阅。后端 overview 接口继续保留供直接诊断使用。页面也不连接 `/ws/dev/raw-cloud-preview`；三维点云统一在采集首页查看。
+当前页面不调用 `/api/dev/overview`，因此打开测试页不会续租 `DevTelemetryBridge` 的原始点云和高频里程计订阅。后端 overview 接口继续保留供直接诊断使用。页面也不连接 `/ws/dev/raw-cloud-preview`；三维点云统一在采集首页查看。
 
 ## 3. 开发录制
 
@@ -52,9 +52,10 @@ bash scripts/build/build.sh all --release --variant customer
 `algorithm_debug` 保存处理链数据：
 
 ```text
-/capture/odometry/high_rate
-/capture/lidar/points_compensated_enu
+/capture/lidar/points_raw
 /capture/clearance/result
+/capture/clearance/raw_diagnostics
+/capture/visualization/cloud_preview
 /capture/rtk/fix
 /capture/rtk/status
 /capture/task/status
@@ -73,16 +74,16 @@ bash scripts/build/build.sh all --release --variant customer
 | 测试信息 | MCAP Topic与字段 |
 | --- | --- |
 | 原始逐点点云与逐点时间 | `/capture/lidar/points_raw`；`PointCloud2` 的完整字段（包括厂商提供的 `offset_time`）和 Header 时间 |
-| 采样序号与运动补偿质量 | `/capture/debug/frame_context`；`cloud_sequence`、点云起止时间、位姿覆盖、丢帧累计、队列及处理耗时 |
+| 原始点云与检测关联 | `/capture/lidar/points_raw`、`/capture/clearance/raw_diagnostics`；使用相同源时间戳和原始线性索引关联 |
 | RTK时间、纬度、经度和高度 | `/capture/rtk/status` 的 UTC 字段，以及 `/capture/rtk/fix` 的 Header、经纬高和协方差 |
 | RTK定位质量 | `/capture/rtk/status`；解类型、卫星数、HDOP、PDOP、三轴误差、速度和航向 |
 | IMU | `/capture/imu/data`；三轴角速度、三轴线加速度、姿态四元数、协方差和时间戳 |
-| 里程计 | `/capture/odometry/high_rate_raw`、`/capture/odometry/high_rate`、`/capture/odometry/slam`；三轴位置、四元数、速度、角速度和协方差 |
+| 里程计 | `/capture/odometry/high_rate_raw`、`/capture/odometry/slam`；三轴位置、四元数、速度、角速度和协方差，仅用于独立诊断 |
 | 原始定位结果 | `/capture/rtk/fix`、`/capture/rtk/status`；不再录制已删除的融合定位Topic |
-| 算法结果 | `/capture/clearance/result`、`/capture/clearance/raw_diagnostics`；补偿点云仅作预览诊断 |
+| 算法结果 | `/capture/clearance/result`、`/capture/clearance/raw_diagnostics`；预览另保存原始X-Y-Z分类点云 |
 | 设备、任务和系统诊断 | `/capture/lidar/device_online`、`/capture/lidar/device_offline`、`/capture/task/status`、`/capture/recording/status`、`/capture/system/diagnostics`、`/diagnostics` |
 
-这些 Topic 没有在录制期间发布时，MCAP 不会伪造对应消息。采样序号来自运动补偿节点实际接收每帧点云时发布的 `cloud_sequence`，可结合相同帧时间戳关联原始点云；它不是人为补齐的 ROS 1 `Header.seq`。
+这些 Topic 没有在录制期间发布时，MCAP 不会伪造对应消息。净空诊断通过相同帧时间戳和原始线性索引关联原始点云，不人为补齐 ROS 1 `Header.seq`。
 
 离线算法回放只从 `pointcloud_10hz.mcap` 或综合 MCAP 注入 `/capture/lidar/points_raw`，不播放里程计，也不回灌保存的在线算法结果。编排器直接启动隔离的正式净空可执行程序；仅包含原始点云的旧样本同样可回放。具体验收方法见[综合测试样本离线回放验收方案](../testing/综合测试样本离线回放验收方案.md)。
 
@@ -105,17 +106,15 @@ CAPTURE_DATA_ROOT/dev-tests/raw-cloud/        # 测试页综合测试样本目�
 ros2_ws/src/bringup/config/dev_parameter_bindings.yaml
 ```
 
-装订表只描述参数的逻辑键、ROS 节点、ROS 参数名、显示名称、单位、类型、允许范围、可写性和来源配置文件。正式默认值仍由各节点自己的 YAML 提供，例如：
+装订表只描述参数的逻辑键、ROS 节点、ROS 参数名、显示名称、单位、类型、允许范围、可写性和来源配置文件。所有净空正式默认值只来自：
 
 ```text
-ros2_ws/src/motion_compensation/config/motion_compensation.yaml
-ros2_ws/src/motion_compensation/config/odometry_timestamp_adapter.yaml
-ros2_ws/src/clearance_engine/config/clearance_engine_tunnel_4cm.yaml
+ros2_ws/src/clearance_engine/config/clearance_engine.yaml
 ```
 
 因此同一个算法参数不存在两份默认值来源。
 
-单页保留运动补偿旁路的只读启动参数，并显示六项正式净空核心参数：圆柱半径、高度带、最少支持点、YZ 网格边长、最少占用格和最小空间跨度。主列表同时显示所属正式 YAML 配置值和 ROS 2 节点实际运行值。节点未启动、ROS 发现失败或单项读取超时时，正式配置值仍可见，运行值显示不可用，不使用 YAML 值冒充节点实际值。可写净空参数需要打开详情后设置当前运行值；运行时修改不改写正式 YAML，节点重启后恢复。离线检测启动后使用启动瞬间参数快照，检测过程中禁止继续修改。
+单页显示八项正式净空参数：X检测上下限、圆柱半径、高度带、最少支持点、YZ 网格边长、最少占用格和最小空间跨度。主列表同时显示所属正式 YAML 配置值和 ROS 2 节点实际运行值。节点未启动、ROS 发现失败或单项读取超时时，正式配置值仍可见，运行值显示不可用，不使用 YAML 值冒充节点实际值。可写净空参数需要打开详情后设置当前运行值；运行时修改不改写正式 YAML，节点重启后恢复。离线检测启动后使用启动瞬间参数快照，检测过程中禁止继续修改。
 
 测试页用 `selected_inlier_count` 显示“最低簇点数”。`candidate_count` 对有效帧为 1、无效帧为 0；`ransac_plane_count` 和旧平面几何字段不再作为当前算法指标。
 
@@ -156,7 +155,7 @@ MCAP points_raw
 
 离线实例运行 `clearance_engine` 的正式 C++ 可执行程序，只通过节点名和 Topic 参数隔离。rosbag 以 1× 原记录时序只播放原始点云；综合 MCAP 中的里程计、在线算法结果、定位和诊断均不回灌。启动时复制可读取的当前净空参数，失败项保持正式 YAML 值并列出回退键。播放完成但没有收到离线净空结果时标记失败，不返回伪成功。
 
-开发接口为 `/api/dev/offline/status`、`/api/dev/offline/start` 和 `/api/dev/offline/stop`。离线检测和正式任务开始双向互斥。离线检测不写正式任务数据库、测量数据库或报告。停止、失败和正常完成时使用 monotonic 结束时间冻结 elapsed/progress。监控线程每约 100 ms 检查时间适配、运动补偿、净空和 rosbag 进程，算法节点提前退出时立即终止其余离线进程；失败信息附带对应子进程日志末尾。离线监听同时订阅净空结果和 `/capture/dev/offline/diagnostics`。当前帧无效时保留最后一次有效雷达到顶距离用于诊断，同时 `latest_result_valid=false` 和 `invalid_reason` 明确表示该值不是当前帧有效结果。
+开发接口为 `/api/dev/offline/status`、`/api/dev/offline/start` 和 `/api/dev/offline/stop`。离线检测和正式任务开始双向互斥。离线检测不写正式任务数据库、测量数据库或报告。停止、失败和正常完成时使用 monotonic 结束时间冻结 elapsed/progress。监控线程每约 100 ms 检查净空和 rosbag 进程，算法节点提前退出时立即终止播放器；失败信息附带对应子进程日志末尾。离线监听同时订阅净空结果和 `/capture/dev/offline/diagnostics`。当前帧无效时保留最后一次有效雷达到顶距离用于诊断，同时 `latest_result_valid=false` 和 `invalid_reason` 明确表示该值不是当前帧有效结果。
 
 ## 7. 数据真实性边界
 

@@ -166,7 +166,7 @@ public:
       "rtk_status_topic", "/capture/rtk/status");
     imu_topic_ = declare_parameter<std::string>("imu_topic", "/capture/imu/data");
     odometry_topic_ = declare_parameter<std::string>(
-      "odometry_topic", "/capture/odometry/high_rate");
+      "odometry_topic", "/capture/odometry/high_rate_raw");
     radar_temperature_topic_ = declare_parameter<std::string>(
       "radar_temperature_topic", "/capture/lidar/temperature");
     sample_rate_hz_ = declare_parameter<double>("sample_rate_hz", 50.0);
@@ -181,7 +181,7 @@ public:
     algorithm_version_ = declare_parameter<std::string>(
       "algorithm_version", "clearance_engine-current");
     config_version_ = declare_parameter<std::string>(
-      "config_version", "clearance_engine_tunnel_4cm.yaml");
+      "config_version", "clearance_engine.yaml");
 
     if (!(sample_rate_hz_ > 0.0 && sample_rate_hz_ <= 200.0)) {
       throw std::runtime_error("sample_rate_hz必须位于(0, 200]范围");
