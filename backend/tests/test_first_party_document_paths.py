@@ -8,7 +8,10 @@ def test_first_party_document_names_and_relative_markdown_links_resolve() -> Non
     first_party_files = [
         path
         for path in root.rglob("*")
-        if path.is_file() and "third_party" not in path.parts and ".git" not in path.parts
+        if path.is_file()
+        and "third_party" not in path.parts
+        and "node_modules" not in path.parts
+        and ".git" not in path.parts
     ]
     assert not [path for path in first_party_files if "#U" in path.name]
 

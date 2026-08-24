@@ -2,17 +2,13 @@
 <package format="3">
   <name>localization</name>
   <version>0.1.0</version>
-  <description>局部水平姿态转换、RTK稳定窗口和洞内相对定位。</description>
+  <description>供点云预览运动补偿使用的雷达四元数姿态转换工具。</description>
 
   <maintainer email="todo@example.com">capture_system maintainers</maintainer>
   <license>Proprietary</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
-  <depend>interfaces</depend>
-  <depend>nav_msgs</depend>
-  <depend>rclcpp</depend>
-  <depend>sensor_msgs</depend>
 
   <test_depend>ament_cmake_gtest</test_depend>
 

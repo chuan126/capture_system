@@ -2,6 +2,8 @@
 #define CLOUD_VISUALIZATION__CLOUD_PREVIEW_CONVERTER_HPP_
 
 #include <cstddef>
+#include <cstdint>
+#include <vector>
 
 #include "sensor_msgs/msg/point_cloud2.hpp"
 
@@ -27,7 +29,8 @@ public:
   sensor_msgs::msg::PointCloud2 convert(
     const sensor_msgs::msg::PointCloud2 & input,
     std::size_t max_points,
-    double voxel_size_m = 0.05) const;
+    double voxel_size_m = 0.05,
+    const std::vector<std::uint8_t> & classifications = {}) const;
 };
 
 }  // 结束cloud_visualization命名空间

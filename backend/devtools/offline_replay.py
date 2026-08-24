@@ -4,7 +4,6 @@ import math
 import os
 import shutil
 import signal
-import struct
 import subprocess
 import tempfile
 import threading
@@ -20,16 +19,10 @@ class OfflineReplayError(RuntimeError):
 
 
 OFFLINE_RAW_CLOUD_TOPIC = "/capture/dev/offline/lidar/points_raw"
-OFFLINE_RAW_ODOMETRY_TOPIC = "/capture/dev/offline/odometry/high_rate_raw"
-OFFLINE_ODOMETRY_TOPIC = "/capture/dev/offline/odometry/high_rate"
-OFFLINE_COMPENSATED_CLOUD_TOPIC = "/capture/dev/offline/lidar/points_compensated_enu"
 OFFLINE_CLEARANCE_TOPIC = "/capture/dev/offline/clearance/result"
-OFFLINE_DIAGNOSTICS_TOPIC = "/capture/dev/offline/diagnostics"
 
 _SOURCE_RAW_CLOUD_TOPIC = "/capture/lidar/points_raw"
-_SOURCE_RAW_ODOMETRY_TOPIC = "/capture/odometry/high_rate_raw"
 _SPLIT_PLAYBACK_RATE = 0.5
-_OFFLINE_POSE_CACHE_DURATION_S = 5.0
 
 
 def _project_root() -> Path:
@@ -76,18 +69,10 @@ class _OfflineClearanceListener:
     def __init__(
         self,
         callback: Callable[[object], None],
-        diagnostics_callback: Callable[[object], None] | None = None,
-        odometry_callback: Callable[[object], None] | None = None,
         topic: str = OFFLINE_CLEARANCE_TOPIC,
-        diagnostics_topic: str = OFFLINE_DIAGNOSTICS_TOPIC,
-        odometry_topic: str = OFFLINE_ODOMETRY_TOPIC,
     ) -> None:
         self.callback = callback
-        self.diagnostics_callback = diagnostics_callback
-        self.odometry_callback = odometry_callback
         self.topic = topic
-        self.diagnostics_topic = diagnostics_topic
-        self.odometry_topic = odometry_topic
         self.error: str | None = None
         self._thread: threading.Thread | None = None
         self._started = threading.Event()
@@ -119,9 +104,7 @@ class _OfflineClearanceListener:
         context = node = executor = None
         try:
             import rclpy
-            from diagnostic_msgs.msg import DiagnosticArray
             from interfaces.msg import ClearanceResult
-            from nav_msgs.msg import Odometry
             from rclpy.context import Context
             from rclpy.executors import SingleThreadedExecutor
             from rclpy.node import Node
@@ -137,12 +120,6 @@ class _OfflineClearanceListener:
                 depth=10,
             )
             node.create_subscription(ClearanceResult, self.topic, self.callback, qos)
-            if self.diagnostics_callback is not None:
-                node.create_subscription(
-                    DiagnosticArray, self.diagnostics_topic, self.diagnostics_callback, qos
-                )
-            if self.odometry_callback is not None:
-                node.create_subscription(Odometry, self.odometry_topic, self.odometry_callback, qos)
             executor = SingleThreadedExecutor(context=context)
             executor.add_node(node)
             self._executor = executor
@@ -174,7 +151,7 @@ class _OfflineClearanceListener:
 
 
 class OfflineReplayManager:
-    """Run the formal timestamp-adapter -> ENU -> clearance chain on an isolated saved sample."""
+    """在隔离Topic上用原始点云运行正式净空可执行程序。"""
 
     def __init__(
         self,
@@ -184,21 +161,15 @@ class OfflineReplayManager:
         project_root: Path | None = None,
         listener_factory: Callable[..., object] | None = None,
         startup_delay_seconds: float = 0.6,
-        pose_prefill_seconds: float = 1.0,
-        pose_prefill_timeout_seconds: float = 20.0,
         drain_delay_seconds: float = 1.0,
     ) -> None:
         self.recording_manager = recording_manager
         self.parameter_snapshot_provider = parameter_snapshot_provider
         self.project_root = (project_root or _project_root()).resolve()
         self.listener_factory = listener_factory or (
-            lambda callback, diagnostics_callback, odometry_callback: _OfflineClearanceListener(
-                callback, diagnostics_callback, odometry_callback
-            )
+            lambda callback: _OfflineClearanceListener(callback)
         )
         self.startup_delay_seconds = max(0.0, startup_delay_seconds)
-        self.pose_prefill_seconds = max(0.0, pose_prefill_seconds)
-        self.pose_prefill_timeout_seconds = max(1.0, pose_prefill_timeout_seconds)
         self.drain_delay_seconds = max(0.0, drain_delay_seconds)
         self.temp_root = self.recording_manager.root / ".offline"
         self.temp_root.mkdir(parents=True, exist_ok=True)
@@ -223,18 +194,15 @@ class OfflineReplayManager:
         self._parameter_fallback_keys: list[str] = []
         self._log_paths: dict[str, Path] = {}
         self._diagnostics: dict[str, int | float | str | None] = {}
-        self._pose_ready = threading.Event()
-        self._pose_prefill_target_ns: int | None = None
-        self._pose_prefill_latest_ns: int | None = None
         self._reset_statistics_locked()
 
     def _reset_statistics_locked(self) -> None:
         self._processed_frames = 0
         self._valid_frames = 0
         self._invalid_frames = 0
-        self._ransac_plane_total = 0
-        self._ransac_plane_max = 0
-        self._ransac_plane_last: int | None = None
+        self._cluster_point_total = 0
+        self._cluster_point_max = 0
+        self._cluster_point_last: int | None = None
         self._clearance_total = 0.0
         self._clearance_min: float | None = None
         self._clearance_max: float | None = None
@@ -271,7 +239,7 @@ class OfflineReplayManager:
             raise OfflineReplayError("正在保存的综合测试样本不能离线检测")
         if not record.get("replay_ready"):
             raise OfflineReplayError(
-                "该样本缺少原始高频里程计，无法完整重放运动补偿链；请使用当前版本重新保存样本"
+                "该样本缺少原始点云，无法运行原始本体系净空算法"
             )
         if shutil.which("ros2") is None:
             raise OfflineReplayError("未找到ros2命令，无法启动离线算法链")
@@ -298,7 +266,6 @@ class OfflineReplayManager:
                 self._duration_seconds is not None
                 and isinstance(replay_inputs, dict)
                 and "pointcloud_10hz" in replay_inputs
-                and "radar_state_400hz" in replay_inputs
             ):
                 self._duration_seconds /= _SPLIT_PLAYBACK_RATE
             self._started_at_ns = time.time_ns()
@@ -310,19 +277,12 @@ class OfflineReplayManager:
             self._parameter_fallback_keys = fallback_keys
             self._log_paths = {}
             self._reset_statistics_locked()
-            self._pose_ready.clear()
-            self._pose_prefill_target_ns = None
-            self._pose_prefill_latest_ns = None
 
         try:
             temp_dir = Path(tempfile.mkdtemp(prefix="run-", dir=self.temp_root))
             with self._lock:
                 self._temp_dir = temp_dir
             split_inputs = replay_inputs if isinstance(replay_inputs, dict) else None
-            if split_inputs and "pointcloud_10hz" in split_inputs:
-                self._pose_prefill_target_ns = self._first_cloud_end_stamp_ns(
-                    Path(str(split_inputs["pointcloud_10hz"]))
-                )
             commands = self._build_commands(
                 recording_path,
                 temp_dir,
@@ -330,21 +290,17 @@ class OfflineReplayManager:
                 split_inputs,
             )
             try:
-                listener = self.listener_factory(
-                    self._on_result, self._on_diagnostics, self._on_odometry
-                )
+                listener = self.listener_factory(self._on_result)
             except TypeError:
-                try:
-                    listener = self.listener_factory(self._on_result, self._on_diagnostics)
-                except TypeError:
-                    # Test/custom factories written for the older one-callback interface remain compatible.
-                    listener = self.listener_factory(self._on_result)
+                # 旧测试工厂可能保留第二个诊断回调形参；传入空操作以维持调用兼容。
+                listener = self.listener_factory(self._on_result, lambda _message: None)
             with self._lock:
                 self._listener = listener
             if not bool(listener.start()):
                 raise OfflineReplayError(getattr(listener, "error", None) or "离线净空结果监听启动失败")
 
-            for name in ("odometry", "motion", "clearance"):
+            # 原始本体系算法不再以里程计预填充和点云运动补偿作为离线回放前置条件。
+            for name in ("clearance",):
                 process = self._spawn(commands[name], temp_dir / f"{name}.log")
                 with self._lock:
                     self._processes[name] = process
@@ -422,8 +378,8 @@ class OfflineReplayManager:
             progress = min(0.99, max(0.0, elapsed / self._duration_seconds))
         else:
             progress = None
-        ransac_mean = (
-            self._ransac_plane_total / self._processed_frames if self._processed_frames else None
+        cluster_point_mean = (
+            self._cluster_point_total / self._processed_frames if self._processed_frames else None
         )
         clearance_mean = (
             self._clearance_total / self._valid_frames if self._valid_frames else None
@@ -440,9 +396,9 @@ class OfflineReplayManager:
             "processed_frames": self._processed_frames,
             "valid_frames": self._valid_frames,
             "invalid_frames": self._invalid_frames,
-            "ransac_plane_last": self._ransac_plane_last,
-            "ransac_plane_mean": ransac_mean,
-            "ransac_plane_max": self._ransac_plane_max if self._processed_frames else None,
+            "cluster_point_count_last": self._cluster_point_last,
+            "cluster_point_count_mean": cluster_point_mean,
+            "cluster_point_count_max": self._cluster_point_max if self._processed_frames else None,
             "lidar_to_top_last_m": self._clearance_last,
             "latest_result_valid": self._latest_result_valid,
             "lidar_to_top_min_m": self._clearance_min,
@@ -455,14 +411,8 @@ class OfflineReplayManager:
             "parameter_snapshot_complete": self._parameter_snapshot_complete,
             "parameter_fallback_keys": list(self._parameter_fallback_keys),
             "diagnostics": dict(self._diagnostics),
-            "pose_prefill_target_ns": self._pose_prefill_target_ns,
-            "pose_prefill_latest_ns": self._pose_prefill_latest_ns,
-            "pose_prefill_ready": self._pose_ready.is_set(),
             "topics": {
                 "raw_cloud": OFFLINE_RAW_CLOUD_TOPIC,
-                "raw_odometry": OFFLINE_RAW_ODOMETRY_TOPIC,
-                "odometry": OFFLINE_ODOMETRY_TOPIC,
-                "compensated_cloud": OFFLINE_COMPENSATED_CLOUD_TOPIC,
                 "clearance": OFFLINE_CLEARANCE_TOPIC,
             },
         }
@@ -470,11 +420,7 @@ class OfflineReplayManager:
     def _runtime_parameter_overrides(
         self, snapshot: dict[str, object]
     ) -> tuple[dict[str, dict[str, object]], list[str]]:
-        overrides: dict[str, dict[str, object]] = {
-            "/odometry_timestamp_adapter_node": {},
-            "/enu_cloud_transform_node": {},
-            "/clearance_engine_node": {},
-        }
+        overrides: dict[str, dict[str, object]] = {"/clearance_engine_node": {}}
         fallback_keys: list[str] = []
         parameters = snapshot.get("parameters")
         if not isinstance(parameters, list):
@@ -502,72 +448,30 @@ class OfflineReplayManager:
         replay_inputs: dict[str, object] | None = None,
     ) -> dict[str, list[str]]:
         source_configs = {
-            "odometry": self.project_root / "ros2_ws/src/motion_compensation/config/odometry_timestamp_adapter.yaml",
-            "motion": self.project_root / "ros2_ws/src/motion_compensation/config/motion_compensation.yaml",
             "clearance": self.project_root / "ros2_ws/src/clearance_engine/config/clearance_engine_tunnel_4cm.yaml",
         }
-        node_names = {
-            "odometry": "offline_odometry_timestamp_adapter_node",
-            "motion": "offline_enu_cloud_transform_node",
-            "clearance": "offline_clearance_engine_node",
-        }
+        node_names = {"clearance": "offline_clearance_engine_node"}
         param_files: dict[str, Path] = {}
         for key, source in source_configs.items():
             destination = temp_dir / f"{key}.yaml"
             _rewrite_parameter_file(source.resolve(), destination, node_names[key])
             param_files[key] = destination
 
-        odom_overrides = dict(overrides.get("/odometry_timestamp_adapter_node", {}))
-        odom_overrides.update({
-            "input_topic": OFFLINE_RAW_ODOMETRY_TOPIC,
-            "output_topic": OFFLINE_ODOMETRY_TOPIC,
-        })
-        motion_overrides = dict(overrides.get("/enu_cloud_transform_node", {}))
-        motion_overrides.update({
-            "input_cloud_topic": OFFLINE_RAW_CLOUD_TOPIC,
-            "odometry_topic": OFFLINE_ODOMETRY_TOPIC,
-            "output_cloud_topic": OFFLINE_COMPENSATED_CLOUD_TOPIC,
-            "diagnostics_topic": OFFLINE_DIAGNOSTICS_TOPIC,
-        })
-        if replay_inputs and "pointcloud_10hz" in replay_inputs:
-            configured_cache = motion_overrides.get("pose_cache_duration_s", 0.0)
-            if not isinstance(configured_cache, (int, float)):
-                configured_cache = 0.0
-            motion_overrides["pose_cache_duration_s"] = max(
-                float(configured_cache), _OFFLINE_POSE_CACHE_DURATION_S
-            )
         clearance_overrides = dict(overrides.get("/clearance_engine_node", {}))
         clearance_overrides.update({
-            "input_topic": OFFLINE_COMPENSATED_CLOUD_TOPIC,
+            "input_topic": OFFLINE_RAW_CLOUD_TOPIC,
             "output_topic": OFFLINE_CLEARANCE_TOPIC,
         })
 
         commands: dict[str, list[str]] = {
-            "odometry": self._node_command(
-                "motion_compensation", "odometry_timestamp_adapter_node",
-                node_names["odometry"], param_files["odometry"], odom_overrides,
-            ),
-            "motion": self._node_command(
-                "motion_compensation", "enu_cloud_transform_node",
-                node_names["motion"], param_files["motion"], motion_overrides,
-            ),
             "clearance": self._node_command(
                 "clearance_engine", "clearance_engine_node",
                 node_names["clearance"], param_files["clearance"], clearance_overrides,
             ),
         }
         player_common = ["ros2", "bag", "play", "-s", "mcap"]
-        if replay_inputs and "pointcloud_10hz" in replay_inputs and "radar_state_400hz" in replay_inputs:
-            # 分频文件必须由编排层显式建立位姿预填充窗口。两个播放器使用相同-d参数
-            # 只会同时等待，并不能让400 Hz位姿真正先于点云进入运动补偿缓存。
-            commands["player_odometry"] = [
-                *player_common, str(replay_inputs["radar_state_400hz"]),
-                "--disable-keyboard-controls", "--rate", str(_SPLIT_PLAYBACK_RATE),
-                "--topics", _SOURCE_RAW_ODOMETRY_TOPIC,
-                "--remap",
-                f"{_SOURCE_RAW_ODOMETRY_TOPIC}:={OFFLINE_RAW_ODOMETRY_TOPIC}",
-            ]
-            commands["player_cloud"] = [
+        if replay_inputs and "pointcloud_10hz" in replay_inputs:
+            commands["player"] = [
                 *player_common, str(replay_inputs["pointcloud_10hz"]),
                 "--disable-keyboard-controls", "--rate", str(_SPLIT_PLAYBACK_RATE),
                 "--topics", _SOURCE_RAW_CLOUD_TOPIC,
@@ -577,109 +481,20 @@ class OfflineReplayManager:
             commands["player"] = [
                 *player_common, str(recording_path),
                 "--disable-keyboard-controls", "-d", "1.0",
-                # 旧版综合MCAP只回放两路原始输入，避免保存的输出Topic重新注入。
-                "--topics", _SOURCE_RAW_CLOUD_TOPIC, _SOURCE_RAW_ODOMETRY_TOPIC,
+                # 旧版综合MCAP只回放原始点云，避免保存的在线算法输出重新注入。
+                "--topics", _SOURCE_RAW_CLOUD_TOPIC,
                 "--remap",
                 f"{_SOURCE_RAW_CLOUD_TOPIC}:={OFFLINE_RAW_CLOUD_TOPIC}",
-                f"{_SOURCE_RAW_ODOMETRY_TOPIC}:={OFFLINE_RAW_ODOMETRY_TOPIC}",
             ]
         return commands
 
     def _start_players(
         self, commands: dict[str, list[str]], temp_dir: Path
     ) -> list[subprocess.Popen[bytes]]:
-        if "player_odometry" not in commands or "player_cloud" not in commands:
-            player = self._spawn(commands["player"], temp_dir / "player.log")
-            with self._lock:
-                self._processes["player"] = player
-            return [player]
-
-        odometry_player = self._spawn(
-            commands["player_odometry"], temp_dir / "player_odometry.log"
-        )
+        player = self._spawn(commands["player"], temp_dir / "player.log")
         with self._lock:
-            self._processes["player_odometry"] = odometry_player
-
-        # RK3588负载会改变400 Hz链路的实际推进速度，固定等待时间并不可靠。
-        # 有真实首帧目标时按消息时间戳等待；单元测试和旧调用才使用固定预填充时长。
-        timestamp_driven = self._pose_prefill_target_ns is not None
-        wait_seconds = (
-            self.pose_prefill_timeout_seconds if timestamp_driven else self.pose_prefill_seconds
-        )
-        deadline = time.monotonic() + wait_seconds
-        while time.monotonic() < deadline:
-            if self._stop_requested.is_set():
-                raise OfflineReplayError("离线播放启动已取消")
-            return_code = odometry_player.poll()
-            if return_code is not None:
-                raise OfflineReplayError(
-                    self._failure_with_log(
-                        "player_odometry", f"高频里程计样本过短或播放失败：退出状态{return_code}"
-                    )
-                )
-            algorithm_failure = self._poll_algorithm_failure()
-            if algorithm_failure is not None:
-                raise OfflineReplayError(algorithm_failure)
-            if timestamp_driven and self._pose_ready.is_set():
-                break
-            time.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
-
-        if timestamp_driven and not self._pose_ready.is_set():
-            raise OfflineReplayError(
-                "高频位姿预填充超时："
-                f"目标时间戳={self._pose_prefill_target_ns}，"
-                f"最新位姿时间戳={self._pose_prefill_latest_ns}；"
-                "请检查原始里程计时间戳和设备负载"
-            )
-
-        cloud_player = self._spawn(commands["player_cloud"], temp_dir / "player_cloud.log")
-        with self._lock:
-            self._processes["player_cloud"] = cloud_player
-        return [odometry_player, cloud_player]
-
-    @staticmethod
-    def _first_cloud_end_stamp_ns(path: Path) -> int:
-        try:
-            import rosbag2_py
-            from rclpy.serialization import deserialize_message
-            from sensor_msgs.msg import PointCloud2
-
-            reader = rosbag2_py.SequentialReader()
-            reader.open(
-                rosbag2_py.StorageOptions(uri=str(path), storage_id="mcap"),
-                rosbag2_py.ConverterOptions("", ""),
-            )
-            while reader.has_next():
-                topic, data, _ = reader.read_next()
-                if topic != _SOURCE_RAW_CLOUD_TOPIC:
-                    continue
-                message = deserialize_message(data, PointCloud2)
-                stamp_ns = (
-                    int(message.header.stamp.sec) * 1_000_000_000
-                    + int(message.header.stamp.nanosec)
-                )
-                offset_field = next(
-                    (field for field in message.fields if field.name == "offset_time"), None
-                )
-                if stamp_ns <= 0 or offset_field is None or offset_field.datatype != 7:
-                    raise OfflineReplayError("首帧点云时间戳或FLOAT32 offset_time字段无效")
-                endian = ">" if message.is_bigendian else "<"
-                maximum_offset_s = 0.0
-                for row in range(int(message.height)):
-                    row_start = row * int(message.row_step)
-                    for column in range(int(message.width)):
-                        position = (
-                            row_start + column * int(message.point_step) + int(offset_field.offset)
-                        )
-                        value = struct.unpack_from(endian + "f", message.data, position)[0]
-                        if math.isfinite(value) and value >= 0.0:
-                            maximum_offset_s = max(maximum_offset_s, value)
-                return stamp_ns + int(round(maximum_offset_s * 1.0e9))
-        except OfflineReplayError:
-            raise
-        except Exception as error:
-            raise OfflineReplayError(f"无法读取首帧点云时间范围：{error}") from error
-        raise OfflineReplayError("点云MCAP中没有原始点云消息")
+            self._processes["player"] = player
+        return [player]
 
     @staticmethod
     def _node_command(
@@ -782,7 +597,7 @@ class OfflineReplayManager:
             items = [
                 (name, process)
                 for name, process in self._processes.items()
-                if name in {"odometry", "motion", "clearance"}
+                if name == "clearance"
             ]
         for name, process in items:
             return_code = process.poll()
@@ -827,15 +642,9 @@ class OfflineReplayManager:
                     name, code = exited[0]
                     failed = self._failure_with_log(name, f"离线{name}节点提前退出：退出状态{code}")
                 elif self._processed_frames == 0:
-                    received = self._diagnostics.get("clouds_received_total")
-                    processed = self._diagnostics.get("clouds_processed_total")
-                    detail = ""
-                    if received is not None or processed is not None:
-                        detail = f"（运动补偿收到{received or 0}帧、成功处理{processed or 0}帧）"
                     failed = self._failure_with_log(
-                        "motion",
-                        "离线播放结束但未收到净空结果"
-                        f"{detail}；请根据运动补偿日志检查时间覆盖和点云有效性",
+                        "clearance",
+                        "离线播放结束但未收到净空结果；请检查原始点云布局、坐标帧和算法日志",
                     )
             processes = list(self._processes.values())
             listener = self._listener
@@ -903,20 +712,6 @@ class OfflineReplayManager:
         if path is not None and path.is_dir() and self.temp_root in path.parents:
             shutil.rmtree(path, ignore_errors=True)
 
-    def _on_odometry(self, message: object) -> None:
-        header = getattr(message, "header", None)
-        stamp = getattr(header, "stamp", None)
-        stamp_ns = int(getattr(stamp, "sec", 0)) * 1_000_000_000 + int(
-            getattr(stamp, "nanosec", 0)
-        )
-        if stamp_ns <= 0:
-            return
-        with self._lock:
-            self._pose_prefill_latest_ns = stamp_ns
-            target = self._pose_prefill_target_ns
-            if target is not None and stamp_ns >= target:
-                self._pose_ready.set()
-
     def _on_result(self, message: object) -> None:
         header = getattr(message, "header", None)
         stamp = getattr(header, "stamp", None)
@@ -926,7 +721,7 @@ class OfflineReplayManager:
                 stamp_ns = int(getattr(stamp, "sec")) * 1_000_000_000 + int(getattr(stamp, "nanosec"))
             except (TypeError, ValueError):
                 stamp_ns = None
-        ransac_planes = max(0, int(getattr(message, "ransac_plane_count", 0)))
+        cluster_points = max(0, int(getattr(message, "selected_inlier_count", 0)))
         valid = bool(getattr(message, "valid", False))
         clearance_raw = getattr(message, "lidar_to_top_m", None)
         clearance = None
@@ -947,9 +742,9 @@ class OfflineReplayManager:
             if self._state not in {"starting", "running"}:
                 return
             self._processed_frames += 1
-            self._ransac_plane_last = ransac_planes
-            self._ransac_plane_total += ransac_planes
-            self._ransac_plane_max = max(self._ransac_plane_max, ransac_planes)
+            self._cluster_point_last = cluster_points
+            self._cluster_point_total += cluster_points
+            self._cluster_point_max = max(self._cluster_point_max, cluster_points)
             self._processing_time_last = processing
             self._invalid_reason = str(getattr(message, "invalid_reason", ""))
             self._latest_stamp_ns = stamp_ns
@@ -963,49 +758,3 @@ class OfflineReplayManager:
             else:
                 self._invalid_frames += 1
                 self._latest_result_valid = False
-
-    def _on_diagnostics(self, message: object) -> None:
-        statuses = getattr(message, "status", None)
-        if not isinstance(statuses, (list, tuple)) or not statuses:
-            return
-        selected = statuses[0]
-        values = getattr(selected, "values", None)
-        if not isinstance(values, (list, tuple)):
-            return
-        parsed: dict[str, int | float | str | None] = {}
-        integer_keys = {
-            "pending_cloud_count",
-            "pending_cloud_max_count",
-            "clouds_received_total",
-            "clouds_processed_total",
-            "clouds_dropped_total",
-            "pose_wait_count",
-            "interpolation_failure_count",
-        }
-        float_keys = {
-            "queue_wait_ms_last",
-            "queue_wait_ms_mean",
-            "queue_wait_ms_max",
-            "processing_time_ms_last",
-            "processing_time_ms_mean",
-            "processing_time_ms_max",
-        }
-        for item in values:
-            key = str(getattr(item, "key", ""))
-            raw = str(getattr(item, "value", ""))
-            if key in integer_keys:
-                try:
-                    parsed[key] = int(raw)
-                except ValueError:
-                    parsed[key] = raw
-            elif key in float_keys:
-                try:
-                    parsed[key] = float(raw)
-                except ValueError:
-                    parsed[key] = raw
-        if not parsed:
-            return
-        with self._lock:
-            if self._state not in {"starting", "running"}:
-                return
-            self._diagnostics.update(parsed)

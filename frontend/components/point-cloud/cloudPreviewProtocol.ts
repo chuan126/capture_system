@@ -3,16 +3,16 @@ export const PCV1_MAX_POINTS = 10_000;
 
 export type CloudStreamInfo = {
   type: "stream_info";
-  protocol: "PCV1";
+  protocol: "PCV1" | "PCV2";
   version: number;
   header_bytes: number;
-  point_format: "xyz_float32_le";
+  point_format: "xyz_float32_le" | "xyz_float32_class_uint8_le";
   point_stride: number;
   max_points: number;
   frame_id: string;
   coordinate_mode: "local_enu" | "sensor";
   sensor_clock: "device_boot";
-  color_mode: "single";
+  color_mode: "single" | "classification";
 };
 
 export type CloudStatusMessage = {
@@ -32,6 +32,7 @@ export type CloudPreviewFrame = {
   sensorStampNs: bigint;
   pointCount: number;
   positions: Float32Array;
+  colors?: Float32Array;
 };
 
 export function parseCloudPreviewText(
@@ -44,19 +45,22 @@ export function parseCloudPreviewText(
 
   if (message.type === "stream_info") {
     const stream = message as Partial<CloudStreamInfo>;
+    const pcv1Contract = stream.protocol === "PCV1" && stream.version === 1
+      && stream.point_format === "xyz_float32_le" && stream.point_stride === 12
+      && stream.color_mode === "single";
+    const pcv2Contract = stream.protocol === "PCV2" && stream.version === 2
+      && stream.point_format === "xyz_float32_class_uint8_le" && stream.point_stride === 16
+      && stream.color_mode === "classification";
     if (
-      stream.protocol !== "PCV1"
-      || stream.version !== 1
+      (!pcv1Contract && !pcv2Contract)
       || stream.header_bytes !== PCV1_HEADER_BYTES
-      || stream.point_format !== "xyz_float32_le"
-      || stream.point_stride !== 12
       || !["local_enu", "sensor"].includes(String(stream.coordinate_mode))
       || typeof stream.frame_id !== "string"
       || !stream.frame_id
       || typeof stream.max_points !== "number"
       || stream.max_points > PCV1_MAX_POINTS
     ) {
-      throw new Error("点云流描述与PCV1首版不兼容");
+      throw new Error("点云流描述与PCV1/PCV2不兼容");
     }
     return stream as CloudStreamInfo;
   }
@@ -94,19 +98,21 @@ export function parseCloudPreviewBinary(
   const version = view.getUint16(4, true);
   const pointCount = view.getUint32(20, true);
 
-  if (magic !== "PCV1" || version !== 1) {
-    throw new Error("PCV1 magic或版本不受支持");
+  const isPcv2 = magic === "PCV2" && version === 2;
+  if (!(magic === "PCV1" && version === 1) && !isPcv2) {
+    throw new Error("PCV1/PCV2 magic或版本不受支持");
   }
   if (pointCount > maxPoints || pointCount > PCV1_MAX_POINTS) {
     throw new Error("PCV1点数超过首版上限");
   }
 
-  const expectedLength = PCV1_HEADER_BYTES + pointCount * 12;
+  const stride = isPcv2 ? 16 : 12;
+  const expectedLength = PCV1_HEADER_BYTES + pointCount * stride;
   if (buffer.byteLength !== expectedLength) {
     throw new Error("PCV1帧长度与点数不一致");
   }
 
-  return {
+  if (!isPcv2) return {
     sequence: view.getUint32(8, true),
     sensorStampNs: view.getBigUint64(12, true),
     pointCount,
@@ -117,4 +123,21 @@ export function parseCloudPreviewBinary(
       pointCount * 3,
     ),
   };
+  const positions = new Float32Array(pointCount * 3);
+  const colors = new Float32Array(pointCount * 3);
+  const palette = [
+    [0x3b / 255, 0x82 / 255, 0xf6 / 255],
+    [0x22 / 255, 0xc5 / 255, 0x5e / 255],
+    [0xff / 255, 0x4d / 255, 0x4f / 255],
+  ];
+  for (let index = 0; index < pointCount; index += 1) {
+    const inputOffset = PCV1_HEADER_BYTES + index * 16;
+    positions[index * 3] = view.getFloat32(inputOffset, true);
+    positions[index * 3 + 1] = view.getFloat32(inputOffset + 4, true);
+    positions[index * 3 + 2] = view.getFloat32(inputOffset + 8, true);
+    const classification = view.getUint8(inputOffset + 12);
+    const color = palette[classification <= 2 ? classification : 0];
+    colors.set(color, index * 3);
+  }
+  return {sequence: view.getUint32(8, true), sensorStampNs: view.getBigUint64(12, true), pointCount, positions, colors};
 }

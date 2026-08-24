@@ -1,6 +1,6 @@
 # interfaces
 
-核对日期：2026-08-17
+核对日期：2026-08-24
 
 系统自定义ROS 2消息和Service包。优先使用标准消息，只为标准消息无法表达的任务状态、
 RTK原始字段、净空结果和记录控制创建接口。
@@ -9,20 +9,23 @@ RTK原始字段、净空结果和记录控制创建接口。
 
 ```text
 interfaces/
-├── CMakeLists.txt
-├── package.xml
-├── README.md
+├── CMakeLists.txt                         # 接口生成与依赖
+├── package.xml                            # ROS 2包元数据
+├── README.md                              # 接口职责说明
 ├── msg/
-│   ├── ClearanceResult.msg
-│   ├── LocalizationStatus.msg
-│   ├── RtkStatus.msg
-│   ├── TaskStatus.msg
-│   └── RecordingStatus.msg
+│   ├── ClearanceResult.msg                # 正式净空帧结果
+│   ├── RawClearanceDiagnostics.msg        # 原始ROI与最低簇诊断
+│   ├── TaskClearanceConfig.msg            # 活动任务冻结净空参数
+│   ├── CloudPreviewDiagnostics.msg         # 三色预览分类与转换耗时
+│   ├── LocalizationStatus.msg             # 旧融合定位MCAP与客户端兼容接口
+│   ├── RtkStatus.msg                      # RTK解析状态
+│   ├── TaskStatus.msg                     # 任务生命周期状态
+│   └── RecordingStatus.msg                # 记录器状态
 └── srv/
-    ├── StartTask.srv
-    ├── TaskCommand.srv
-    ├── PrepareRecording.srv
-    └── RecordingCommand.srv
+    ├── StartTask.srv                      # 开始任务命令
+    ├── TaskCommand.srv                    # 暂停继续停止恢复命令
+    ├── PrepareRecording.srv               # 准备正式记录
+    └── RecordingCommand.srv               # 记录器控制命令
 ```
 
 `TaskStatus`发布持久任务状态、执行阶段、状态版本、RTK端点状态、记录路径和错误。
@@ -35,15 +38,17 @@ QoS由`task_manager`设置为reliable、transient local，使FastAPI重连后可
 
 `RtkStatus`只承载NMEA解析器直接输出，不包含稳定性或进出洞结论。
 
-`LocalizationStatus`承载融合定位和ODIN航位推算后的业务状态。经纬高字段始终存在；
-RTK从未有效或航位推算不可用时使用0占位，并通过`valid=false`、
-`mode=MODE_INVALID`和`invalid_reason`明确失效原因。消息同时提供ODIN原始四元数经
-`q2att([w,x,y,z])`换算的俯仰、横滚、方位显示字段，以及独立的航向对齐和尺度模式状态。
+`LocalizationStatus` 不再由当前节点发布，只为旧 MCAP、旧数据库工具和客户端编译兼容保留。
+新链路不得实例化零坐标消息冒充融合结果。
 
-`ClearanceResult`区分本帧有效性、沿Up方向的雷达到顶部距离、RANSAC成功平面模型数、
-通过置信度检查的局部曲面数量、统一候选质量和无效原因。`ransac_plane_count` 在平面模型回到原始分辨率
-并达到最少内点要求后计数；`candidate_count` 表示通过质量和置信度检查的统一候选数。
-消息字段保持兼容，上层不区分最终高度来自平面还是曲面。无效结果不得由消费端用上一
-有效高度补齐。
+`ClearanceResult`区分本帧有效性、原始雷达本体系最低可信簇 X 中位距离、簇点数和无效原因。
+旧 RANSAC/曲面几何字段为记录与 Web 协议兼容保留，新算法置零或非有限值。无效结果不得由
+消费端用上一有效高度补齐。
+
+`RawClearanceDiagnostics` 按源帧发布原始 ROI/最低簇线性索引、计数和真实代表点本体系坐标，
+仅用于诊断及预览，允许 best-effort 丢帧。有效最低可信簇的红色分类直接来自该消息，不依赖
+任务阈值。`TaskClearanceConfig` 由任务管理器以 transient-local 发布活动任务冻结的安装高度和
+上下限；任务结束、失败或启动恢复时 `active=false`，当前不参与点云颜色判定。
+`CloudPreviewDiagnostics` 只记录旁路分类与预览转换耗时，不进入正式计算和记录。
 
 详细Topic和Service见[ROS 2架构](../../../docs/architecture/ROS2架构.md)。

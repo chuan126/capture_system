@@ -1,8 +1,8 @@
 #ifndef CLEARANCE_ENGINE__CLEARANCE_ESTIMATOR_HPP_
 #define CLEARANCE_ENGINE__CLEARANCE_ESTIMATOR_HPP_
 
-#include <array>
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -11,60 +11,45 @@ namespace clearance_engine
 
 struct Point3f
 {
-  float east;
-  float north;
-  float up;
+  union {float x; float east;};
+  union {float y; float north;};
+  union {float z; float up;};
+  std::uint32_t original_index{0U};
 };
 
 struct ClearanceConfig
 {
-  double min_range_m{0.20};
-  double min_up_height_m{1.0};
-  double max_up_height_m{10.0};
-  double east_half_angle_deg{60.0};
-  double north_half_angle_deg{60.0};
-
-  double max_normal_angle_deg{20.0};
-  double distance_threshold_m{0.04};
-  double voxel_size_m{0.04};
-  int max_iterations{200};
-  double probability{0.99};
-  int max_candidate_planes{4};
-  std::size_t min_remaining_points{100};
-  std::size_t min_inliers_absolute{60};
-  double min_inlier_ratio{0.0003};
-
-  double region_grid_size_m{0.03};
-  std::size_t min_region_span_cells{4};
-  std::size_t min_region_occupied_cells{12};
-  double max_residual_p95_m{0.05};
-};
-
-struct PlaneCandidate
-{
-  std::array<double, 4> coefficients{};
-  std::size_t inlier_count{0};
-  std::size_t occupied_cell_count{0};
-  double occupied_area_m2{0.0};
-  double tilt_deg{0.0};
-  double residual_median_m{0.0};
-  double residual_p95_m{0.0};
-  double min_height_m{0.0};
-  double min_position_east_m{0.0};
-  double min_position_north_m{0.0};
-  double min_position_up_m{0.0};
+  double min_detection_x_m{0.2};
+  double max_detection_x_m{10.0};
+  double detection_radius_m{1.0};
+  double support_height_band_m{0.05};
+  std::size_t min_support_points{10U};
+  double spatial_grid_size_m{0.10};
+  std::size_t min_occupied_cells{3U};
+  double min_spatial_span_m{0.10};
 };
 
 struct ClearanceEstimate
 {
   bool valid{false};
-  std::string invalid_reason{"NO_PLANE_FOUND"};
-  std::size_t input_point_count{0};
-  std::size_t valid_point_count{0};
+  std::string invalid_reason{"NO_VALID_RAW_POINTS"};
+  std::size_t input_point_count{0U};
+  std::size_t valid_point_count{0U};
+  std::size_t roi_point_count{0U};
   double valid_point_ratio{0.0};
-  std::size_t ransac_plane_count{0};
-  std::vector<PlaneCandidate> candidates;
-  PlaneCandidate selected;
+  double detection_radius_m{0.0};
+  double lowest_raw_x{0.0};
+  double cluster_min_x{0.0};
+  double cluster_median_x{0.0};
+  double cluster_max_x{0.0};
+  Point3f representative{};
+  std::vector<std::uint32_t> roi_point_indices;
+  std::vector<std::uint32_t> cluster_point_indices;
+  double filtering_time_ms{0.0};
+  double roi_time_ms{0.0};
+  double sorting_time_ms{0.0};
+  double support_band_time_ms{0.0};
+  double connectivity_time_ms{0.0};
 };
 
 class ClearanceEstimator

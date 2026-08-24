@@ -979,7 +979,7 @@ th { color: #7f8b9e; background: #fafbfd; font-weight: 600; white-space: nowrap;
 
 .dashboard-side-stack {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   gap: 10px;
   min-width: 0;
   min-height: 0;
@@ -998,45 +998,6 @@ th { color: #7f8b9e; background: #fafbfd; font-weight: 600; white-space: nowrap;
   border-bottom: 1px solid var(--line-soft);
 }
 .dashboard-side-stack .panel-head .status-pill { flex: 0 0 auto; padding: 5px 7px; font-size: 8px; }
-.fusion-position-grid,
-.fusion-attitude-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-  min-width: 0;
-}
-.fusion-position-grid > div,
-.fusion-attitude-grid > div {
-  display: grid;
-  gap: 5px;
-  min-width: 0;
-}
-.fusion-position-grid span,
-.fusion-attitude-grid span {
-  color: var(--muted);
-  font-size: 9px;
-  font-weight: 700;
-}
-.fusion-position-grid strong,
-.fusion-attitude-grid strong {
-  max-width: 100%;
-  overflow: hidden;
-  color: #26364d;
-  font: 800 clamp(11px, .68vw, 15px)/1.2 Arial, sans-serif;
-  letter-spacing: 0;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.fusion-position-grid {
-  padding-bottom: 11px;
-  border-bottom: 1px solid var(--line-soft);
-}
-.localization-panel { flex: 0 0 auto; }
-.fusion-attitude-grid {
-  margin-top: 11px;
-  padding-bottom: 0;
-}
-.fusion-attitude-grid strong { color: #185f92; font-size: clamp(14px, .9vw, 19px); }
 .task-operation-head-actions {
   display: flex;
   align-items: center;
@@ -1469,6 +1430,9 @@ th { color: #7f8b9e; background: #fafbfd; font-weight: 600; white-space: nowrap;
 .cloud-live-badge--streaming { color: var(--green); }
 .cloud-live-badge--degraded { color: var(--orange); }
 .cloud-live-badge--ros_unavailable { color: var(--red); }
+.cloud-color-legend { position: absolute; z-index: 3; right: 14px; bottom: 14px; display: flex; gap: 10px; padding: 7px 10px; border: 1px solid #dce4ef; border-radius: 8px; background: rgba(255,255,255,.9); color: #56657a; font-size: 10px; font-weight: 700; }
+.cloud-color-legend span { display: flex; align-items: center; gap: 4px; }
+.cloud-color-legend i { width: 8px; height: 8px; border-radius: 50%; }
 .cloud-overlay-status { position: absolute; z-index: 2; top: 50%; left: 50%; display: grid; min-width: 250px; justify-items: center; gap: 7px; padding: 18px 22px; color: #708096; border: 1px solid #dce4ef; border-radius: 13px; background: rgba(255,255,255,.92); text-align: center; transform: translate(-50%, -50%); backdrop-filter: blur(8px); box-shadow: 0 12px 30px rgba(44,63,92,.08); }
 .cloud-overlay-status > span { display: grid; width: 40px; height: 40px; place-items: center; color: var(--primary); border-radius: 12px; background: var(--primary-light); font-size: 23px; }
 .cloud-overlay-status strong { color: #405069; font-size: 12px; }
@@ -1900,9 +1864,6 @@ table {
 
   .dashboard-side-stack > .panel > .panel-head { margin-bottom: 12px; padding-bottom: 12px; }
   .dashboard-side-stack .panel-head .status-pill { padding: 6px 9px; font-size: 10px; }
-  .fusion-position-grid span,
-  .fusion-attitude-grid span { font-size: 11px; }
-
   .task-operation-head-actions button { min-height: 36px; padding: 8px 13px; font-size: 11px; }
   .task-operation-body { gap: 11px; }
   .task-section-heading { gap: 12px; }
@@ -1957,7 +1918,7 @@ table {
   .dashboard-layout { grid-template-columns: 1fr; }
   .dashboard-main { grid-template-rows: minmax(430px, 1fr) 210px; }
   .dashboard-side-stack {
-    grid-template-columns: minmax(0, .58fr) minmax(0, 1.42fr);
+    grid-template-columns: minmax(0, 1fr);
     grid-template-rows: none;
   }
   .dashboard-side-stack > .panel { min-height: 0; }
@@ -1988,7 +1949,7 @@ table {
   .capture-state-bar > p { grid-column: 1 / -1; }
   .dashboard-grid, .preview-grid, .report-grid,
   .dashboard-layout, .alert-grid, .preview-layout { grid-template-columns: 1fr; }
-  .dashboard-side-stack { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: none; }
+  .dashboard-side-stack { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; }
   .report-taskbar { grid-template-columns: minmax(330px, 1fr) repeat(3, minmax(120px, 150px)); }
   .report-layout { grid-template-columns: 300px minmax(0, 1fr); }
   .report-basic-info { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -2062,8 +2023,6 @@ table {
   .health-device-grid { grid-template-columns: 1fr; }
   .health-device-card { min-height: 88px; }
   .dashboard-side-stack { grid-template-columns: 1fr; }
-  .fusion-position-grid,
-  .fusion-attitude-grid { grid-template-columns: 1fr; }
   .task-operation-head-actions { flex-wrap: wrap; justify-content: flex-end; }
   .task-parameter-grid { grid-template-columns: 1fr; }
   .task-parameter-grid > label,

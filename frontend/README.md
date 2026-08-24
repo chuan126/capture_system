@@ -1,6 +1,6 @@
 # 隧道净空测量显控终端前端
 
-核对日期：2026-08-09
+核对日期：2026-08-24
 
 前端使用 Next.js、React 和 Three.js，设备构建输出为静态文件，由 FastAPI 同端口
 托管。客户版导航包含采集首页、数据回放和报告导出。development 构建额外包含“测试”工作台，customer 构建的模块图和静态产物均不包含该工作台。独立任务管理页面已经删除。
@@ -22,28 +22,25 @@
 
 ### 1.2 点云和地图
 
-点云预览通过 `/ws/v1/cloud-preview` 接收 PCV1 二进制帧，只提供三维交互视图。
+点云预览通过 `/ws/v1/cloud-preview` 接收 PCV2 分类帧（兼容PCV1），只提供三维交互视图。
 坐标语义固定为局部东北天，`x=East`、`y=North`、`z=Up`。页面不再提供沿 X 轴
 俯视或断面视图，也不显示旧的底部坐标状态栏。
 
 点云和高德地图均提供右上角放大按钮。放大时使用页面遮罩，并支持再次点击、点击
 遮罩或按 `Esc` 退出。
 
-高德地图使用 `/ws/v1/rtk` 的 WGS84 坐标，在前端转换为 GCJ-02。原始 RTK 有效时
-使用原始坐标并绘制蓝色轨迹；RTK 无效而融合定位有效时，使用航位推算坐标绘制
-浅黄色轨迹，并在消息栏显示“当前为融合定位结果”。两类来源按颜色分段，切换点复用
-上一定位点保持轨迹连续；两者都无效时保留最后有效地图位置，不新增轨迹点。
+高德地图使用 `/ws/v1/rtk` 的原始 WGS84 坐标，在前端转换为 GCJ-02，并只绘制蓝色 RTK
+轨迹。RTK 无效时保留最后有效地图位置但不新增轨迹点，不再回退到已删除的融合定位。
 
-### 1.3 RTK 与融合定位
+### 1.3 原始 RTK
 
 顶部 RTK 定位栏显示原始卫星定位：
 
 - 纬度、经度和高度；
 - 卫星数和 HDOP/PDOP。
 
-主体融合定位栏显示系统最终输出的纬度、经度和高度。RTK 有效时该结果由 RTK
-约束；RTK 失锁后由 ODIN1 航位推算连续更新。该栏同时显示 ODIN1 原始四元数按
-`q2att([w,x,y,z])` 换算得到的俯仰、横滚和方位角，单位为度。
+融合定位和航位推算已删除。测试页只显示原始 RTK 卡；采集首页原任务状态卡扩展到释放的
+侧栏区域。浏览器不会用 ODIN 位姿伪造 RTK 失锁期间的位置。
 
 入口坐标和出口坐标未在当前页面显示。进出洞稳定窗口尚未实现，前端不得用当前
 fix 伪造入口或出口结论。
@@ -107,11 +104,11 @@ TXT 文件名使用任务时间编号，例如 `20260807_145601_T-001_50Hz测量
 
 ## 3. 开发测试工作台
 
-测试工作台只存在于 `development` 构建。浏览器仍然只访问 FastAPI 和正式同源 WebSocket，不直接连接 ROS 2。当前页面取消七个页签，采用左右两列单页布局：左列依次显示核心配置和离线算法调试，右列依次显示净空算法、RTK与融合定位和综合测试样本；两列整体高度由同一网格行约束，末卡自动吸收剩余高度。净空卡片为无效原因预留固定高度，只显示新增 `ransac_plane_count` 对应的“RANSAC平面”，不再把 `candidate_count` 误标成平面数。页面复用采集首页的 `/ws/v1/rtk` 与 `/ws/v1/clearance`，不调用 `/api/dev/overview`，因此普通打开测试页不会续租原始点云、补偿点云和高频里程计 development telemetry。
+测试工作台只存在于 `development` 构建。浏览器仍然只访问 FastAPI 和正式同源 WebSocket，不直接连接 ROS 2。当前页面采用左右两列单页布局；净空卡显示 `selected_inlier_count` 对应的“最低簇点数”，不再显示旧 RANSAC 指标。页面复用采集首页的 `/ws/v1/rtk` 与 `/ws/v1/clearance`，不调用 `/api/dev/overview`，因此普通打开测试页不会续租 development 高频 telemetry。
 
-主页面的综合测试样本只提供保存、停止和删除。一个样本目录按频率分别保存10 Hz原始点云、400 Hz雷达状态、10 Hz RTK、算法输出和事件诊断MCAP。样本可直接启动隔离的离线完整算法链；播放器只放行原始点云和原始高频里程计，不回灌 MCAP 内已有的在线结果。分频回放以适配后高频位姿时间戳覆盖首帧点云结束时间作为点云播放器启动条件，两路以相同0.5×速率播放并使用5秒离线位姿缓存，保持正式50 ms点云等待门限不变。离线停止后 elapsed/progress 使用冻结的 monotonic 结束时间，不再继续增长；监控线程周期检查 rosbag、时间适配、运动补偿和净空进程，算法节点提前退出时立即终止其余离线进程并返回日志末尾。净空卡保留最后一次有效 `lidar_to_top_m`，同时单独显示当前帧是否有效和无效原因，并读取离线 ENU diagnostics 的接收、处理、丢帧、插值失败和队列计数。`raw_sensor`、`algorithm_debug`、`full_debug` 等高级开发录制接口继续保留，供专项故障分析直接调用，但不占据日常测试界面。所有录制都由 rosbag2 直接订阅 Topic 写 MCAP，不经过浏览器预览，不设置降频。
+主页面的综合测试样本只提供保存、停止和删除。样本可直接启动隔离的离线净空算法；播放器只放行原始点云，不等待或播放里程计，也不回灌 MCAP 内已有的在线结果。仅包含原始点云的旧样本同样可用。算法节点提前退出时编排器立即停止播放器并返回日志摘要。`raw_sensor`、`algorithm_debug`、`full_debug` 等高级录制接口继续保留用于专项旁路诊断。
 
-核心参数由 `ros2_ws/src/bringup/config/dev_parameter_bindings.yaml` 装订。单页显示三项运动补偿启动参数 `processing_poll_interval_ms`、`max_interpolation_gap_s`、`minimum_valid_pose_ratio`，以及六项净空参数 `ransac.distance_threshold_m`、`ransac.max_candidate_planes`、`ransac.min_inliers_absolute`、`region.grid_size_m`、`region.min_occupied_cells`、`region.max_residual_p95_m`。主列表同时显示正式 YAML 配置值和 ROS 2 实际运行值，二者不一致时明确标记。可写参数需要点开详情后才能设置当前运行值，主列表不提供直接输入框。`ransac.max_candidate_planes` 的 development 上限与当前 small-board 正式值统一为 2500。运行时修改不写回 YAML，节点重启后恢复正式配置。其余装订参数继续用于开发录制参数快照。
+核心参数由 `ros2_ws/src/bringup/config/dev_parameter_bindings.yaml` 装订。当前六项净空参数为圆柱半径、高度带、最少支持点、YZ 网格、最少占用格和最小跨度。主列表同时显示正式 YAML 与 ROS 2 实际运行值；可写值只在详情中修改，且不写回 YAML。
 
 测试页不再包含三维点云预览。采集首页继续使用正式点云预览旁路；综合测试 MCAP 独立保存于 `CAPTURE_DATA_ROOT/dev-tests/raw-cloud/`，不会进入任务列表、历史回放或正式报告。
 

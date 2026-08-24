@@ -3,10 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { useClearanceSocket, type ClearanceConnectionState } from "@/components/clearance/useClearanceSocket";
-import {
-  deriveLocalizationStatus,
-  rtkSolutionLabel,
-} from "@/components/rtk/localizationView";
+import { rtkSolutionLabel } from "@/components/rtk/localizationView";
 import { useRtkSocket, type RtkConnectionState } from "@/components/rtk/useRtkSocket";
 
 import {
@@ -36,9 +33,6 @@ const bytesText = (value: number | null | undefined) => {
 
 const fixed = (value: unknown, digits = 2) =>
   typeof value === "number" && Number.isFinite(value) ? value.toFixed(digits) : "--";
-
-const secondsAge = (value: number | null | undefined) =>
-  value === null || value === undefined || !Number.isFinite(value) ? "--" : `${value.toFixed(2)} s`;
 
 function Metric({ label, value, detail }: { label: string; value: React.ReactNode; detail?: React.ReactNode }) {
   return <div className="dev-metric"><span>{label}</span><strong>{value}</strong>{detail && <small>{detail}</small>}</div>;
@@ -198,37 +192,31 @@ function useOfflineReplay() {
 function PositionPanel({ rtk }: { rtk: RtkConnectionState }) {
   const snapshot = rtk.snapshot;
   const streamAvailable = rtk.connection === "connected" && rtk.streamState === "streaming";
-  const localization = deriveLocalizationStatus(snapshot, streamAvailable);
-  const attitudeValid = localization.valid && snapshot?.localization_vehicle_attitude_valid === true;
-  const heading = localization.valid && snapshot?.localization_heading_source !== 0 &&
-    typeof snapshot?.localization_heading_deg === "number" && Number.isFinite(snapshot.localization_heading_deg)
-    ? snapshot.localization_heading_deg
-    : null;
   const rawFix = rtkSolutionLabel(snapshot?.gps_state);
   const rtkTone = !streamAvailable ? "idle" : snapshot?.gps_state === 4 ? "ok" : snapshot?.gps_state === 5 ? "warn" : "danger";
+  const hasPosition = streamAvailable && snapshot?.fix_status !== -1 &&
+    snapshot?.rmc_validity !== "V".charCodeAt(0) &&
+    typeof snapshot?.latitude === "number" && Number.isFinite(snapshot.latitude) &&
+    typeof snapshot.longitude === "number" && Number.isFinite(snapshot.longitude);
 
   return <section className="panel dev-dashboard-card">
-    <div className="panel-head"><div><h2>RTK与融合定位</h2><p>RTK原始状态与采集首页相同的融合定位输出。</p></div><span className={`status-pill status-pill--${localization.tone}`}>{localization.statusText}</span></div>
-    <div className="dev-card-subhead"><strong>RTK</strong><span className={`dev-inline-state dev-inline-state--${rtkTone}`}>{rawFix}</span></div>
+    <div className="panel-head"><div><h2>RTK定位</h2><p>显示RTK接收机原始解算状态与坐标，不使用里程计融合回退。</p></div><span className={`status-pill status-pill--${rtkTone}`}>{rawFix}</span></div>
     <div className="dev-metric-grid dev-metric-grid--4">
       <Metric label="卫星" value={snapshot?.satellite_count ?? "--"} />
       <Metric label="HDOP" value={fixed(snapshot?.hdop, 2)} detail={`PDOP ${fixed(snapshot?.pdop, 2)}`} />
       <Metric label="串口" value={snapshot?.serial_connected === true ? "正常" : snapshot?.serial_connected === false ? "异常" : "等待"} detail={snapshot?.serial_message ?? rtk.detail} />
-      <Metric label="RTK数据年龄" value={secondsAge(snapshot?.localization_rtk_age_s)} />
+      <Metric label="航向" value={hasPosition && typeof snapshot?.track_degrees === "number" ? `${fixed(snapshot.track_degrees, 2)}°` : "--"} />
     </div>
     <div className="dev-card-divider" />
-    <div className="dev-card-subhead"><strong>融合定位</strong><span>{localization.modeText}</span></div>
+    <div className="dev-card-subhead"><strong>原始坐标</strong><span>{hasPosition ? "有效" : "等待有效定位"}</span></div>
     <div className="dev-position-grid">
-      <div><span>纬度</span><strong>{localization.valid ? fixed(snapshot?.localization_latitude, 7) : "--"}</strong></div>
-      <div><span>经度</span><strong>{localization.valid ? fixed(snapshot?.localization_longitude, 7) : "--"}</strong></div>
-      <div><span>高度</span><strong>{localization.valid ? `${fixed(snapshot?.localization_altitude, 2)} m` : "--"}</strong></div>
-      <div><span>方位</span><strong>{heading === null ? "--" : `${fixed(heading, 2)}°`}</strong></div>
-      <div><span>俯仰</span><strong>{attitudeValid ? `${fixed(snapshot?.localization_vehicle_pitch_deg, 2)}°` : "--"}</strong></div>
-      <div><span>横滚</span><strong>{attitudeValid ? `${fixed(snapshot?.localization_vehicle_roll_deg, 2)}°` : "--"}</strong></div>
+      <div><span>纬度</span><strong>{hasPosition ? fixed(snapshot?.latitude, 7) : "--"}</strong></div>
+      <div><span>经度</span><strong>{hasPosition ? fixed(snapshot?.longitude, 7) : "--"}</strong></div>
+      <div><span>高度</span><strong>{hasPosition ? `${fixed(snapshot?.altitude, 2)} m` : "--"}</strong></div>
     </div>
     <div className="dev-card-footnote">
-      <span>里程计年龄 {secondsAge(snapshot?.localization_odometry_age_s)}</span>
-      <span>距锚点 {snapshot?.localization_distance_from_anchor_m == null ? "--" : `${fixed(snapshot.localization_distance_from_anchor_m, 1)} m`}</span>
+      <span>速度 {hasPosition && typeof snapshot?.speed_knots === "number" ? `${fixed(snapshot.speed_knots * 0.514444, 2)} m/s` : "--"}</span>
+      <span>RMC {snapshot?.rmc_validity ? String.fromCharCode(snapshot.rmc_validity) : "--"}</span>
     </div>
   </section>;
 }
@@ -242,19 +230,19 @@ function ClearancePanel({ clearance }: { clearance: ClearanceConnectionState }) 
   const reason = !streaming ? "等待净空数据" : valid ? "当前帧通过质量检查" : snapshot?.invalid_reason || "当前帧无效";
 
   return <section className="panel dev-dashboard-card dev-clearance-card">
-    <div className="panel-head"><div><h2>净空算法</h2><p>显示算法原始雷达到顶距离和当前帧质量指标，不叠加任务安装高度。</p></div><span className={`status-pill status-pill--${tone}`}>{status}</span></div>
+    <div className="panel-head"><div><h2>净空算法</h2><p>显示原始雷达本体系最低可信簇距离和当前帧质量，不叠加任务安装高度。</p></div><span className={`status-pill status-pill--${tone}`}>{status}</span></div>
     <div className="dev-clearance-primary">
       <span>当前雷达到顶距离</span>
       <strong>{snapshot?.lidar_to_top_m == null ? "--" : `${fixed(snapshot.lidar_to_top_m, 3)} m`}</strong>
       <small className="dev-clearance-reason" title={reason}>{reason}</small>
     </div>
     <div className="dev-metric-grid dev-metric-grid--3">
-      <Metric label="RANSAC平面" value={snapshot?.ransac_plane_count ?? "--"} />
-      <Metric label="区域内点" value={snapshot?.selected_inlier_count ?? "--"} />
-      <Metric label="曲面数量" value={snapshot?.surface_count ?? "--"} />
+      <Metric label="可信点簇" value={snapshot?.candidate_count ?? "--"} />
+      <Metric label="最低簇点数" value={snapshot?.selected_inlier_count ?? "--"} />
+      <Metric label="有效点比例" value={snapshot?.valid_point_ratio == null ? "--" : `${fixed(snapshot.valid_point_ratio * 100, 1)}%`} />
       <Metric label="处理时间" value={snapshot?.processing_time_ms == null ? "--" : `${fixed(snapshot.processing_time_ms, 2)} ms`} />
-      <Metric label="覆盖面积" value={snapshot?.selected_area_m2 == null ? "--" : `${fixed(snapshot.selected_area_m2, 3)} m²`} />
-      <Metric label="平面倾角" value={snapshot?.selected_tilt_deg == null ? "--" : `${fixed(snapshot.selected_tilt_deg, 2)}°`} />
+      <Metric label="原始帧" value={snapshot?.frame_id || "--"} />
+      <Metric label="算法状态" value={snapshot?.valid ? "可信" : "无效"} />
     </div>
     <div className="dev-clearance-footnote" title={snapshot?.frame_id || "--"}>源帧 {snapshot?.frame_id || "--"}</div>
   </section>;
@@ -343,7 +331,6 @@ function OfflineReplayPanel({
   const progress = offline.status?.progress == null ? "--" : `${Math.round(offline.status.progress * 100)}%`;
   const replayState = offlineStateText(offline.status?.state);
   const replayTone = offline.status?.state === "completed" ? "ok" : offline.status?.state === "failed" ? "danger" : offlineActive ? "warn" : "";
-  const diagnostics = offline.status?.diagnostics ?? {};
   const lastClearanceDetail = offline.status?.latest_result_valid === false
     ? `最后有效值 · 当前帧无效${offline.status.invalid_reason ? ` · ${offline.status.invalid_reason}` : ""}`
     : offline.status?.invalid_reason && offline.status.lidar_to_top_last_m == null
@@ -351,7 +338,7 @@ function OfflineReplayPanel({
       : undefined;
 
   return <section className="panel dev-dashboard-card dev-offline-card">
-    <div className="panel-head"><div><h2>离线算法调试</h2><p>选中右侧保存的样本，以 1× 原记录时序运行正式时间适配、运动补偿和净空算法，全部 Topic 使用 `/capture/dev/offline/*` 隔离。</p></div><span className={`dev-inline-state${replayTone ? ` dev-inline-state--${replayTone}` : ""}`}>{replayState}</span></div>
+    <div className="panel-head"><div><h2>离线算法调试</h2><p>选中右侧保存的样本，以原记录时序直接回放原始点云并运行正式净空算法，全部 Topic 使用 `/capture/dev/offline/*` 隔离。</p></div><span className={`dev-inline-state${replayTone ? ` dev-inline-state--${replayTone}` : ""}`}>{replayState}</span></div>
     <div className="dev-record-actions">
       <button className="button" disabled={offline.busy || offlineActive || recordingActive || !selected?.replay_ready} onClick={() => selected && void offline.start(selected.recording_id)}>开始检测</button>
       <button className="button button--danger-outline" disabled={offline.busy || !offlineActive} onClick={() => void offline.stop()}>停止检测</button>
@@ -359,17 +346,10 @@ function OfflineReplayPanel({
     <div className="dev-metric-grid dev-metric-grid--3">
       <Metric label="进度" value={progress} detail={offline.status?.recording_id ?? selected?.recording_id ?? "--"} />
       <Metric label="处理帧" value={offline.status?.processed_frames ?? 0} detail={`有效 ${offline.status?.valid_frames ?? 0} · 无效 ${offline.status?.invalid_frames ?? 0}`} />
-      <Metric label="RANSAC平面" value={offline.status?.ransac_plane_last ?? "--"} detail={offline.status?.ransac_plane_mean == null ? "均值 --" : `均值 ${offline.status.ransac_plane_mean.toFixed(1)} · 最大 ${offline.status.ransac_plane_max ?? "--"}`} />
+      <Metric label="最低簇点数" value={offline.status?.cluster_point_count_last ?? "--"} detail={offline.status?.cluster_point_count_mean == null ? "均值 --" : `均值 ${offline.status.cluster_point_count_mean.toFixed(1)} · 最大 ${offline.status.cluster_point_count_max ?? "--"}`} />
       <Metric label="雷达到顶距离" value={offline.status?.lidar_to_top_last_m == null ? "--" : `${fixed(offline.status.lidar_to_top_last_m, 3)} m`} detail={lastClearanceDetail} />
       <Metric label="单帧处理时间" value={offline.status?.processing_time_ms_last == null ? "--" : `${fixed(offline.status.processing_time_ms_last, 2)} ms`} />
       <Metric label="参数来源" value={offline.status?.parameter_fallback_keys?.length ? "部分回退YAML" : offline.status?.recording_id ? "当前运行值" : "--"} detail={offline.status?.parameter_fallback_keys?.length ? offline.status.parameter_fallback_keys.join(", ") : undefined} />
-    </div>
-    <div className="dev-card-footnote">
-      <span>ENU接收 {String(diagnostics.clouds_received_total ?? "--")}</span>
-      <span>ENU处理 {String(diagnostics.clouds_processed_total ?? "--")}</span>
-      <span>丢帧 {String(diagnostics.clouds_dropped_total ?? "--")}</span>
-      <span>插值失败 {String(diagnostics.interpolation_failure_count ?? "--")}</span>
-      <span>队列 {String(diagnostics.pending_cloud_count ?? "--")}</span>
     </div>
     {offline.status?.state === "completed" && <div className="dev-card-footnote"><span>最低 {offline.status.lidar_to_top_min_m == null ? "--" : `${fixed(offline.status.lidar_to_top_min_m, 3)} m`}</span><span>平均 {offline.status.lidar_to_top_mean_m == null ? "--" : `${fixed(offline.status.lidar_to_top_mean_m, 3)} m`}</span><span>最高 {offline.status.lidar_to_top_max_m == null ? "--" : `${fixed(offline.status.lidar_to_top_max_m, 3)} m`}</span></div>}
     {offline.error && <div className="dev-message dev-message--error"><strong>{offline.error}</strong></div>}
@@ -384,12 +364,12 @@ const MOTION_PARAMETER_KEYS = [
 ] as const;
 
 const CLEARANCE_PARAMETER_KEYS = [
-  "clearance.distance_threshold_m",
-  "clearance.max_candidate_planes",
-  "clearance.min_inliers_absolute",
-  "clearance.region_grid_size_m",
-  "clearance.min_region_occupied_cells",
-  "clearance.max_residual_p95_m",
+  "clearance.detection_radius_m",
+  "clearance.support_height_band_m",
+  "clearance.min_support_points",
+  "clearance.spatial_grid_size_m",
+  "clearance.min_occupied_cells",
+  "clearance.min_spatial_span_m",
 ] as const;
 
 const formatParameterValue = (parameter: DevParameter, value: DevParameter["value"]) =>
@@ -503,7 +483,6 @@ export default function DevToolsWorkspace() {
   const clearance = useClearanceSocket();
   const recording = useRawCloudRecording();
   const offline = useOfflineReplay();
-  const localization = deriveLocalizationStatus(rtk.snapshot, rtk.connection === "connected" && rtk.streamState === "streaming");
   const clearanceStreaming = clearance.connection === "connected" && clearance.streamState === "streaming";
   const clearanceValid = clearanceStreaming && clearance.snapshot?.valid === true && clearance.snapshot.lidar_to_top_m !== null;
   const rawRecording = recording.status?.active === true && recording.status.profile === "raw_cloud";
@@ -518,7 +497,6 @@ export default function DevToolsWorkspace() {
     <section className="dev-banner"><div><strong>开发测试</strong><span>单页显示现场调试核心状态。客户版本不注册本页面和开发接口。</span></div></section>
     <section className="dev-status-strip" aria-label="开发测试核心状态">
       <StatusChip label="RTK" value={rtkSolutionLabel(rtk.snapshot?.gps_state)} tone={rtk.streamState !== "streaming" ? "idle" : rtk.snapshot?.gps_state === 4 ? "ok" : rtk.snapshot?.gps_state === 5 ? "warn" : "danger"} />
-      <StatusChip label="融合定位" value={localization.statusText} tone={localization.tone} />
       <StatusChip label="净空" value={clearanceValid ? "有效" : clearanceStreaming ? "无效" : "等待"} tone={clearanceValid ? "ok" : clearanceStreaming ? "danger" : "idle"} />
       <StatusChip label="原始点云录制" value={rawRecording ? `录制中 ${recording.status?.elapsed_seconds.toFixed(1)} s` : recording.status?.active ? "其他录制占用" : "空闲"} tone={rawRecording ? "ok" : recording.status?.active ? "warn" : "idle"} />
     </section>

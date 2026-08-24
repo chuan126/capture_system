@@ -204,7 +204,7 @@ def test_preview_and_txt_export_use_only_recorded_completed_task(tmp_path: Path)
     assert first_sample["雷达温度 °C"] == "0"
     assert first_sample["方位 deg"] == "0"
     assert first_sample["里程计位置z m"] == "0"
-    assert "insufficient_points" not in text
+    assert "insufficient_points" in text
     assert "attachment" in download_response.headers["content-disposition"]
 
 

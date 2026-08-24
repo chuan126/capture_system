@@ -7,7 +7,7 @@ import type { ClearanceSnapshot } from "@/components/clearance/clearanceProtocol
 import RealtimeAmap from "@/components/map/RealtimeAmap";
 import PointCloudViewer from "@/components/point-cloud/PointCloudViewer";
 import WifiControl from "@/components/network/WifiControl";
-import { deriveLocalizationStatus, rtkSolutionLabel } from "@/components/rtk/localizationView";
+import { rtkSolutionLabel } from "@/components/rtk/localizationView";
 import { useRtkSocket } from "@/components/rtk/useRtkSocket";
 import { useSystemStatusSocket } from "@/components/system-status/useSystemStatusSocket";
 import { isDeviceConnected } from "@/components/system-status/systemStatusProtocol";
@@ -593,13 +593,6 @@ function Dashboard({
     Number.isFinite(latitudeValue) &&
     typeof longitudeValue === "number" &&
     Number.isFinite(longitudeValue);
-  const localizationLatitudeValue = rtkSnapshot?.localization_latitude;
-  const localizationLongitudeValue = rtkSnapshot?.localization_longitude;
-  const localization = deriveLocalizationStatus(
-    rtkSnapshot,
-    rtk.connection === "connected" && rtk.streamState === "streaming",
-  );
-  const localizationValid = localization.valid;
   const rawLatitudeText = rawCoordinateAvailable && typeof latitudeValue === "number"
     ? latitudeValue.toFixed(7)
     : "--";
@@ -609,33 +602,6 @@ function Dashboard({
   const rawAltitudeText = rawCoordinateAvailable
     ? `${formatMetric(rtkSnapshot?.altitude, 2)} m`
     : "--";
-  const localizationLatitudeText = localizationValid && typeof localizationLatitudeValue === "number"
-    ? localizationLatitudeValue.toFixed(7)
-    : "--";
-  const localizationLongitudeText = localizationValid && typeof localizationLongitudeValue === "number"
-    ? localizationLongitudeValue.toFixed(7)
-    : "--";
-  const localizationAltitudeText = localizationValid
-    ? `${formatMetric(rtkSnapshot?.localization_altitude)} m`
-    : "--";
-  const localizationModeText = localization.modeText;
-  const localizationTone = localization.tone;
-  const localizationStatusText = localization.statusText;
-  const vehicleAttitudeValid = rtkSnapshot?.localization_vehicle_attitude_valid === true;
-  const vehiclePitchText = vehicleAttitudeValid ? `${formatMetric(rtkSnapshot?.localization_vehicle_pitch_deg, 2)}°` : "--";
-  const vehicleRollText = vehicleAttitudeValid ? `${formatMetric(rtkSnapshot?.localization_vehicle_roll_deg, 2)}°` : "--";
-  const rawTrackDeg = rtkSnapshot?.track_degrees;
-  const localizationHeadingDeg = rtkSnapshot?.localization_heading_deg;
-  const rawTrackValid = rawCoordinateAvailable && typeof rawTrackDeg === "number" && Number.isFinite(rawTrackDeg);
-  const localizationHeadingValid = localizationValid &&
-    rtkSnapshot?.localization_heading_source !== 0 &&
-    typeof localizationHeadingDeg === "number" && Number.isFinite(localizationHeadingDeg);
-  const displayedVehicleHeadingDeg = localizationHeadingValid
-    ? localizationHeadingDeg
-    : rawTrackValid ? rawTrackDeg : null;
-  const vehicleHeadingText = displayedVehicleHeadingDeg === null
-    ? "--"
-    : `${formatMetric(displayedVehicleHeadingDeg, 2)}°`;
   const monitorUnavailable = !systemStreamAvailable;
   const lidarConnected = !monitorUnavailable && isDeviceConnected("lidar", systemSnapshot?.lidar);
   const rtkConnected = !monitorUnavailable && isDeviceConnected("rtk", systemSnapshot?.rtk);
@@ -959,7 +925,6 @@ function Dashboard({
             <RealtimeAmap
               snapshot={rtkSnapshot}
               rawRtkValid={rawCoordinateAvailable}
-              fusionValid={localizationValid}
               connectionDetail={rtk.detail}
               expanded={expandedVisual === "map"}
               onToggleExpanded={() => setExpandedVisual((current) => current === "map" ? null : "map")}
@@ -984,26 +949,7 @@ function Dashboard({
           </article>
         </div>
 
-        <aside className="dashboard-side-stack" aria-label="定位与任务控制">
-          <article className="panel localization-panel">
-            <PanelHead
-              title="融合定位"
-              description="RTK失锁后ODIN航位推算输出"
-              trailing={<StatusPill tone={localizationTone}>{localizationStatusText}</StatusPill>}
-            />
-
-            <section className="fusion-position-grid" aria-label="融合定位经纬高">
-              <div><span>纬度</span><strong>{localizationLatitudeText}</strong></div>
-              <div><span>经度</span><strong>{localizationLongitudeText}</strong></div>
-              <div><span>高度</span><strong>{localizationAltitudeText}</strong></div>
-            </section>
-            <section className="fusion-attitude-grid" aria-label="车辆三轴姿态">
-              <div><span>俯仰</span><strong>{vehiclePitchText}</strong></div>
-              <div><span>横滚</span><strong>{vehicleRollText}</strong></div>
-              <div><span>方位</span><strong>{vehicleHeadingText}</strong></div>
-            </section>
-          </article>
-
+        <aside className="dashboard-side-stack" aria-label="任务控制">
           <article className="panel task-operation-panel">
             <PanelHead
               title="任务控制"

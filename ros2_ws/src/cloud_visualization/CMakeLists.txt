@@ -6,6 +6,7 @@ if(NOT CMAKE_CXX_STANDARD)
 endif()
 
 find_package(ament_cmake REQUIRED)
+find_package(interfaces REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 
@@ -28,6 +29,7 @@ target_link_libraries(cloud_visualization_node
   cloud_preview_converter
 )
 ament_target_dependencies(cloud_visualization_node
+  interfaces
   rclcpp
   sensor_msgs
 )
@@ -59,6 +61,7 @@ install(
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
+  find_package(launch_testing_ament_cmake REQUIRED)
 
   ament_add_gtest(
     test_cloud_preview_converter
@@ -71,6 +74,10 @@ if(BUILD_TESTING)
   ament_target_dependencies(
     test_cloud_preview_converter
     sensor_msgs
+  )
+  add_launch_test(
+    test/test_cloud_visualization_node.py
+    TIMEOUT 30
   )
 endif()
 

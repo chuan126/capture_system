@@ -3,19 +3,23 @@ cloud_visualization_node:
     # 首版只允许关闭预览，不影响雷达、核心计算或记录任务。
     enabled: true
 
-    # 与净空算法共用经过姿态补偿的局部东北天点云，XYZ分别表示东、北、天。
+    # 仅预览旁路使用经过姿态补偿的局部东北天点云，XYZ分别表示东、北、天。
     input_topic: /capture/lidar/points_compensated_enu
 
     # 拒绝误接原始雷达坐标，防止网页把未经转换的XYZ错误标成东北天。
     expected_frame_id: lidar_local_enu
 
-    # 输出是裁减RGB并限制点数后的轻量XYZ点云Topic。
+    # 输出是限制点数后的轻量XYZ+classification点云Topic，颜色由浏览器映射。
     output_topic: /capture/visualization/cloud_preview
+
+    # 以原始帧时间戳和点索引关联ROI/最低簇；有效最低簇始终标红。
+    diagnostics_topic: /capture/clearance/raw_diagnostics
+    preview_diagnostics_topic: /capture/visualization/diagnostics
 
     # 浏览器预览以5 Hz刷新，中间输入帧由最新帧覆盖。
     publish_rate_hz: 5.0
 
-    # PCV1负载最多允许10,000点，对应每帧最多120,000字节XYZ数据。
+    # PCV2负载最多允许10,000点，对应每帧最多160,000字节点数据。
     # 转换器先过滤非有限点和明确(0,0,0)占位点；有效点低于上限时全部显示。
     max_points: 10000
 

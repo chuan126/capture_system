@@ -77,9 +77,6 @@ def test_raw_cloud_recording_uses_fixed_mcap_profile(monkeypatch, tmp_path: Path
         "/capture/odometry/slam",
         "/capture/rtk/fix",
         "/capture/rtk/status",
-        "/capture/localization/fix",
-        "/capture/localization/status",
-        "/capture/localization/odometry",
         "/capture/lidar/points_compensated_enu",
         "/capture/debug/frame_context",
         "/capture/clearance/result",
@@ -91,6 +88,12 @@ def test_raw_cloud_recording_uses_fixed_mcap_profile(monkeypatch, tmp_path: Path
         "/diagnostics",
     ):
         assert topic in RAW_CLOUD_PROFILE.topics
+    for removed_topic in (
+        "/capture/localization/fix",
+        "/capture/localization/status",
+        "/capture/localization/odometry",
+    ):
+        assert removed_topic not in RAW_CLOUD_PROFILE.topics
     assert status["active"] is True
     assert status["profile"] == "raw_cloud"
     assert str(tmp_path / "dev-tests" / "raw-cloud") in str(status["path"])
@@ -147,7 +150,12 @@ def test_recording_writes_parameter_snapshot_and_source_hashes(monkeypatch, tmp_
     manager = RosbagRecordingManager(tmp_path, min_free_bytes=1, parameter_snapshot_provider=lambda: snapshot)
     status = manager.start(RAW_SENSOR_PROFILE, 5)
     path = Path(str(status["path"]))
-    manifest = json.loads((path / "capture_manifest.json").read_text(encoding="utf-8"))
+    manifest_path = path / "capture_manifest.json"
+    for _ in range(100):
+        if manifest_path.exists() and manifest_path.stat().st_size > 0:
+            break
+        threading.Event().wait(0.01)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     for _ in range(100):
         if manager.status()["parameter_snapshot_complete"] is True:
             break
@@ -254,7 +262,7 @@ def test_raw_cloud_recording_can_be_deleted_after_stop(monkeypatch, tmp_path: Pa
     assert not path.exists()
 
 
-def test_old_raw_cloud_sample_without_odometry_is_marked_not_replay_ready(tmp_path: Path) -> None:
+def test_old_raw_cloud_sample_without_odometry_is_replay_ready(tmp_path: Path) -> None:
     manager = RosbagRecordingManager(tmp_path, min_free_bytes=1)
     recording_id = "raw-cloud_20260817_120000_abcdef"
     path = tmp_path / "dev-tests" / "raw-cloud" / recording_id
@@ -269,5 +277,6 @@ def test_old_raw_cloud_sample_without_odometry_is_marked_not_replay_ready(tmp_pa
         encoding="utf-8",
     )
     record = manager.get_recording(recording_id)
-    assert record["replay_ready"] is False
+    assert record["replay_ready"] is True
+    assert record["replay_inputs"]["combined"] == str(path)
     assert record["duration_seconds"] is None

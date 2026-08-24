@@ -1,16 +1,7 @@
 #include "clearance_engine/clearance_estimator.hpp"
 
-#include <pcl/ModelCoefficients.h>
-#include <pcl/PointIndices.h>
-#include <pcl/filters/extract_indices.h>
-#include <pcl/filters/voxel_grid.h>
-#include <pcl/point_cloud.h>
-#include <pcl/point_types.h>
-#include <pcl/segmentation/sac_segmentation.h>
-
-#include <Eigen/Eigenvalues>
-
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <deque>
@@ -25,129 +16,64 @@ namespace clearance_engine
 namespace
 {
 
-constexpr double kPi = 3.14159265358979323846;
-constexpr double kGridBoundaryTolerance = 1.0e-6;
-
-std::int64_t gridCoordinate(const double coordinate, const double grid_size_m)
-{
-  // PointCloud2的float32坐标在负网格边界会产生微小负误差；直接floor会跳过一个网格，
-  // 进而把连续顶面拆成多个孤立区域。容差仅吸收浮点表示误差，不改变实际空间分区。
-  return static_cast<std::int64_t>(
-    std::floor(coordinate / grid_size_m + kGridBoundaryTolerance));
-}
-
 struct GridKey
 {
-  std::int64_t east;
-  std::int64_t north;
-
-  bool operator==(const GridKey & other) const noexcept
-  {
-    return east == other.east && north == other.north;
-  }
+  std::int64_t y;
+  std::int64_t z;
+  bool operator==(const GridKey & other) const noexcept {return y == other.y && z == other.z;}
 };
 
 struct GridKeyHash
 {
   std::size_t operator()(const GridKey & key) const noexcept
   {
-    const auto east_hash = std::hash<std::int64_t>{}(key.east);
-    const auto north_hash = std::hash<std::int64_t>{}(key.north);
-    return east_hash ^
-           (north_hash + 0x9e3779b97f4a7c15ULL + (east_hash << 6U) + (east_hash >> 2U));
+    const auto first = std::hash<std::int64_t>{}(key.y);
+    const auto second = std::hash<std::int64_t>{}(key.z);
+    return first ^ (second + 0x9e3779b97f4a7c15ULL + (first << 6U) + (first >> 2U));
   }
 };
 
-using CellPoints = std::unordered_map<GridKey, std::vector<std::size_t>, GridKeyHash>;
-
-struct RegionAnalysis
-{
-  std::vector<PlaneCandidate> candidates;
-  bool has_size_qualified_region{false};
-};
-
-double degreesToRadians(const double degrees)
-{
-  return degrees * kPi / 180.0;
-}
-
-double radiansToDegrees(const double radians)
-{
-  return radians * 180.0 / kPi;
-}
-
-double percentileFromSorted(const std::vector<double> & values, const double fraction)
-{
-  if (values.empty()) {
-    return std::numeric_limits<double>::quiet_NaN();
-  }
-  const double position = fraction * static_cast<double>(values.size() - 1U);
-  const auto lower = static_cast<std::size_t>(std::floor(position));
-  const auto upper = static_cast<std::size_t>(std::ceil(position));
-  const double weight = position - static_cast<double>(lower);
-  return values[lower] * (1.0 - weight) + values[upper] * weight;
-}
+using Cells = std::unordered_map<GridKey, std::vector<const Point3f *>, GridKeyHash>;
 
 void validateConfig(const ClearanceConfig & config)
 {
-  if (!(config.min_range_m > 0.0) || !(config.min_up_height_m > 0.0) ||
-    !(config.max_up_height_m > config.min_up_height_m))
+  if (!std::isfinite(config.min_detection_x_m) || config.min_detection_x_m < 0.0 ||
+    !std::isfinite(config.max_detection_x_m) ||
+    config.max_detection_x_m <= config.min_detection_x_m ||
+    !std::isfinite(config.detection_radius_m) || config.detection_radius_m <= 0.0 ||
+    !std::isfinite(config.support_height_band_m) || config.support_height_band_m <= 0.0 ||
+    config.min_support_points == 0U ||
+    !std::isfinite(config.spatial_grid_size_m) || config.spatial_grid_size_m <= 0.0 ||
+    config.min_occupied_cells == 0U ||
+    !std::isfinite(config.min_spatial_span_m) || config.min_spatial_span_m < 0.0)
   {
-    throw std::invalid_argument("净空高度和量程参数不合法");
-  }
-  if (!(config.east_half_angle_deg > 0.0 && config.east_half_angle_deg < 90.0) ||
-    !(config.north_half_angle_deg > 0.0 && config.north_half_angle_deg < 90.0))
-  {
-    throw std::invalid_argument("顶部角度ROI必须位于0至90度之间");
-  }
-  if (!(config.max_normal_angle_deg > 0.0 && config.max_normal_angle_deg < 90.0) ||
-    !(config.distance_threshold_m > 0.0) || !std::isfinite(config.voxel_size_m) ||
-    !(config.voxel_size_m >= 0.0) ||
-    config.max_iterations <= 0 ||
-    !(config.probability > 0.0 && config.probability < 1.0))
-  {
-    throw std::invalid_argument("RANSAC参数不合法");
-  }
-  if (config.max_candidate_planes <= 0 || config.min_remaining_points < 3U ||
-    config.min_inliers_absolute < 3U || !(config.min_inlier_ratio >= 0.0) ||
-    !(config.min_inlier_ratio <= 1.0))
-  {
-    throw std::invalid_argument("多平面提取停止参数不合法");
-  }
-  if (!(config.region_grid_size_m > 0.0) || config.min_region_span_cells == 0U ||
-    config.min_region_occupied_cells == 0U || !(config.max_residual_p95_m > 0.0))
-  {
-    throw std::invalid_argument("平面连通区域参数不合法");
+    throw std::invalid_argument("原始点簇净空参数不合法");
   }
 }
 
-std::vector<std::vector<GridKey>> connectedComponents(const CellPoints & cells)
+std::vector<std::vector<const Point3f *>> connectedComponents(const Cells & cells)
 {
   std::unordered_map<GridKey, bool, GridKeyHash> visited;
   visited.reserve(cells.size());
-  std::vector<std::vector<GridKey>> components;
-
+  std::vector<std::vector<const Point3f *>> components;
   for (const auto & entry : cells) {
     if (visited[entry.first]) {
       continue;
     }
-
-    std::vector<GridKey> component;
-    std::deque<GridKey> pending;
-    pending.push_back(entry.first);
+    std::deque<GridKey> pending{entry.first};
     visited[entry.first] = true;
-
+    std::vector<const Point3f *> component;
     while (!pending.empty()) {
       const GridKey current = pending.front();
       pending.pop_front();
-      component.push_back(current);
-
-      for (std::int64_t de = -1; de <= 1; ++de) {
-        for (std::int64_t dn = -1; dn <= 1; ++dn) {
-          if (de == 0 && dn == 0) {
+      const auto current_it = cells.find(current);
+      component.insert(component.end(), current_it->second.begin(), current_it->second.end());
+      for (std::int64_t dy = -1; dy <= 1; ++dy) {
+        for (std::int64_t dz = -1; dz <= 1; ++dz) {
+          if (dy == 0 && dz == 0) {
             continue;
           }
-          const GridKey neighbor{current.east + de, current.north + dn};
+          const GridKey neighbor{current.y + dy, current.z + dz};
           if (cells.find(neighbor) != cells.end() && !visited[neighbor]) {
             visited[neighbor] = true;
             pending.push_back(neighbor);
@@ -160,213 +86,16 @@ std::vector<std::vector<GridKey>> connectedComponents(const CellPoints & cells)
   return components;
 }
 
-pcl::PointCloud<pcl::PointXYZ>::Ptr makeRansacSearchCloud(
-  const pcl::PointCloud<pcl::PointXYZ>::ConstPtr & input, const double voxel_size_m)
+double medianX(std::vector<const Point3f *> points)
 {
-  if (!(voxel_size_m > 0.0)) {
-    return pcl::make_shared<pcl::PointCloud<pcl::PointXYZ>>(*input);
+  std::sort(points.begin(), points.end(), [](const Point3f * a, const Point3f * b) {
+    return a->x < b->x;
+  });
+  const std::size_t middle = points.size() / 2U;
+  if (points.size() % 2U != 0U) {
+    return points[middle]->x;
   }
-
-  auto output = pcl::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
-  pcl::VoxelGrid<pcl::PointXYZ> voxel;
-  voxel.setInputCloud(input);
-  const float leaf = static_cast<float>(voxel_size_m);
-  voxel.setLeafSize(leaf, leaf, leaf);
-  voxel.filter(*output);
-  return output;
-}
-
-pcl::PointIndices::Ptr collectOriginalResolutionInliers(
-  const pcl::PointCloud<pcl::PointXYZ> & cloud,
-  const std::array<double, 4> & coefficients,
-  const double distance_threshold_m)
-{
-  auto inliers = pcl::make_shared<pcl::PointIndices>();
-  const double normal_norm = std::sqrt(
-    coefficients[0] * coefficients[0] + coefficients[1] * coefficients[1] +
-    coefficients[2] * coefficients[2]);
-  if (!(normal_norm > std::numeric_limits<double>::epsilon())) {
-    return inliers;
-  }
-
-  inliers->indices.reserve(cloud.size());
-  for (std::size_t index = 0; index < cloud.size(); ++index) {
-    const auto & point = cloud[index];
-    const double distance = std::abs(
-      coefficients[0] * point.x + coefficients[1] * point.y +
-      coefficients[2] * point.z + coefficients[3]) / normal_norm;
-    if (distance <= distance_threshold_m) {
-      inliers->indices.push_back(static_cast<int>(index));
-    }
-  }
-  return inliers;
-}
-
-RegionAnalysis analyzeRegions(
-  const pcl::PointCloud<pcl::PointXYZ> & cloud,
-  const pcl::PointIndices & inliers,
-  std::array<double, 4> coefficients,
-  const ClearanceConfig & config)
-{
-  const double normal_norm = std::sqrt(
-    coefficients[0] * coefficients[0] + coefficients[1] * coefficients[1] +
-    coefficients[2] * coefficients[2]);
-  if (!(normal_norm > std::numeric_limits<double>::epsilon())) {
-    return {};
-  }
-  for (double & value : coefficients) {
-    value /= normal_norm;
-  }
-  if (coefficients[2] < 0.0) {
-    for (double & value : coefficients) {
-      value = -value;
-    }
-  }
-
-  const double tilt_deg = radiansToDegrees(
-    std::acos(std::clamp(coefficients[2], -1.0, 1.0)));
-  if (tilt_deg > config.max_normal_angle_deg ||
-    std::abs(coefficients[2]) <= std::numeric_limits<double>::epsilon())
-  {
-    return {};
-  }
-
-  CellPoints cells;
-  cells.reserve(inliers.indices.size());
-  for (const int raw_index : inliers.indices) {
-    if (raw_index < 0 || static_cast<std::size_t>(raw_index) >= cloud.size()) {
-      continue;
-    }
-    const auto & point = cloud[static_cast<std::size_t>(raw_index)];
-    const GridKey key{
-      gridCoordinate(point.x, config.region_grid_size_m),
-      gridCoordinate(point.y, config.region_grid_size_m)};
-    cells[key].push_back(static_cast<std::size_t>(raw_index));
-  }
-
-  RegionAnalysis analysis;
-  for (const auto & component : connectedComponents(cells)) {
-    if (component.empty()) {
-      continue;
-    }
-    std::int64_t min_east_cell = component.front().east;
-    std::int64_t max_east_cell = component.front().east;
-    std::int64_t min_north_cell = component.front().north;
-    std::int64_t max_north_cell = component.front().north;
-    std::size_t component_point_count = 0U;
-    Eigen::Vector3d centroid = Eigen::Vector3d::Zero();
-    std::vector<Eigen::Vector3d> component_points;
-
-    for (const GridKey & key : component) {
-      min_east_cell = std::min(min_east_cell, key.east);
-      max_east_cell = std::max(max_east_cell, key.east);
-      min_north_cell = std::min(min_north_cell, key.north);
-      max_north_cell = std::max(max_north_cell, key.north);
-      const auto cell_it = cells.find(key);
-      if (cell_it == cells.end()) {
-        continue;
-      }
-      component_point_count += cell_it->second.size();
-      for (const std::size_t index : cell_it->second) {
-        const auto & point = cloud[index];
-        const Eigen::Vector3d value(point.x, point.y, point.z);
-        component_points.push_back(value);
-        centroid += value;
-      }
-    }
-
-    const auto span_east = static_cast<std::size_t>(max_east_cell - min_east_cell + 1);
-    const auto span_north = static_cast<std::size_t>(max_north_cell - min_north_cell + 1);
-    if (span_east < config.min_region_span_cells ||
-      span_north < config.min_region_span_cells ||
-      component.size() < config.min_region_occupied_cells)
-    {
-      continue;
-    }
-    analysis.has_size_qualified_region = true;
-
-    // RANSAC可能把相距较远但近似共面的区域一起拟合；拆分后必须用本区域重拟合，
-    // 否则远处区域会把局部顶面拉斜并放大最低高度抖动。
-    if (component_points.size() < 3U) {
-      continue;
-    }
-    centroid /= static_cast<double>(component_points.size());
-    Eigen::Matrix3d covariance = Eigen::Matrix3d::Zero();
-    for (const auto & point : component_points) {
-      const Eigen::Vector3d centered = point - centroid;
-      covariance.noalias() += centered * centered.transpose();
-    }
-    Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> solver(covariance);
-    if (solver.info() != Eigen::Success) {
-      continue;
-    }
-    Eigen::Vector3d region_normal = solver.eigenvectors().col(0).normalized();
-    if (region_normal.z() < 0.0) {
-      region_normal = -region_normal;
-    }
-    const std::array<double, 4> region_coefficients{
-      region_normal.x(), region_normal.y(), region_normal.z(), -region_normal.dot(centroid)};
-    const double region_tilt_deg = radiansToDegrees(
-      std::acos(std::clamp(region_coefficients[2], -1.0, 1.0)));
-    if (region_tilt_deg > config.max_normal_angle_deg ||
-      std::abs(region_coefficients[2]) <= std::numeric_limits<double>::epsilon())
-    {
-      continue;
-    }
-
-    std::vector<double> residuals;
-    residuals.reserve(component_points.size());
-    for (const auto & point : component_points) {
-      residuals.push_back(
-        std::abs(
-          region_coefficients[0] * point.x() + region_coefficients[1] * point.y() +
-          region_coefficients[2] * point.z() + region_coefficients[3]));
-    }
-
-    std::sort(residuals.begin(), residuals.end());
-    const double residual_median = percentileFromSorted(residuals, 0.50);
-    const double residual_p95 = percentileFromSorted(residuals, 0.95);
-    if (!std::isfinite(residual_p95) || residual_p95 > config.max_residual_p95_m) {
-      continue;
-    }
-
-    double min_height = std::numeric_limits<double>::infinity();
-    double min_east = 0.0;
-    double min_north = 0.0;
-    for (const GridKey & key : component) {
-      const double east = (static_cast<double>(key.east) + 0.5) * config.region_grid_size_m;
-      const double north = (static_cast<double>(key.north) + 0.5) * config.region_grid_size_m;
-      const double height = -(
-        region_coefficients[0] * east + region_coefficients[1] * north +
-        region_coefficients[3]) / region_coefficients[2];
-      if (height < min_height) {
-        min_height = height;
-        min_east = east;
-        min_north = north;
-      }
-    }
-    if (!std::isfinite(min_height) || min_height < config.min_up_height_m ||
-      min_height > config.max_up_height_m)
-    {
-      continue;
-    }
-
-    PlaneCandidate candidate;
-    candidate.coefficients = region_coefficients;
-    candidate.inlier_count = component_point_count;
-    candidate.occupied_cell_count = component.size();
-    candidate.occupied_area_m2 = static_cast<double>(component.size()) *
-      config.region_grid_size_m * config.region_grid_size_m;
-    candidate.tilt_deg = region_tilt_deg;
-    candidate.residual_median_m = residual_median;
-    candidate.residual_p95_m = residual_p95;
-    candidate.min_height_m = min_height;
-    candidate.min_position_east_m = min_east;
-    candidate.min_position_north_m = min_north;
-    candidate.min_position_up_m = min_height;
-    analysis.candidates.push_back(candidate);
-  }
-  return analysis;
+  return (static_cast<double>(points[middle - 1U]->x) + points[middle]->x) * 0.5;
 }
 
 }  // namespace
@@ -377,145 +106,187 @@ ClearanceEstimator::ClearanceEstimator(ClearanceConfig config)
   validateConfig(config_);
 }
 
-const ClearanceConfig & ClearanceEstimator::config() const noexcept
-{
-  return config_;
-}
+const ClearanceConfig & ClearanceEstimator::config() const noexcept {return config_;}
 
 ClearanceEstimate ClearanceEstimator::estimate(const std::vector<Point3f> & points) const
 {
   ClearanceEstimate result;
   result.input_point_count = points.size();
-  if (points.empty()) {
-    result.invalid_reason = "TOO_FEW_VALID_POINTS";
-    return result;
-  }
-
-  const double east_limit = degreesToRadians(config_.east_half_angle_deg);
-  const double north_limit = degreesToRadians(config_.north_half_angle_deg);
-  auto filtered = pcl::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
-  filtered->reserve(points.size());
-  for (const Point3f & point : points) {
-    if (!std::isfinite(point.east) || !std::isfinite(point.north) ||
-      !std::isfinite(point.up))
+  result.detection_radius_m = config_.detection_radius_m;
+  std::vector<const Point3f *> valid_points;
+  valid_points.reserve(points.size());
+  std::vector<const Point3f *> roi;
+  roi.reserve(points.size());
+  const auto filtering_start = std::chrono::steady_clock::now();
+  for (const auto & point : points) {
+    if (!std::isfinite(point.x) || !std::isfinite(point.y) || !std::isfinite(point.z) ||
+      (point.x == 0.0F && point.y == 0.0F && point.z == 0.0F))
     {
       continue;
     }
-    const double range = std::sqrt(
-      static_cast<double>(point.east) * point.east +
-      static_cast<double>(point.north) * point.north +
-      static_cast<double>(point.up) * point.up);
-    if (range < config_.min_range_m || point.up < config_.min_up_height_m ||
-      point.up > config_.max_up_height_m)
-    {
-      continue;
-    }
-    if (std::abs(std::atan2(point.east, point.up)) > east_limit ||
-      std::abs(std::atan2(point.north, point.up)) > north_limit)
-    {
-      continue;
-    }
-    filtered->push_back(pcl::PointXYZ{point.east, point.north, point.up});
+    ++result.valid_point_count;
+    valid_points.push_back(&point);
   }
-
-  result.valid_point_count = filtered->size();
-  result.valid_point_ratio = static_cast<double>(result.valid_point_count) /
-    static_cast<double>(result.input_point_count);
-  if (filtered->size() < config_.min_remaining_points) {
-    result.invalid_reason = "TOO_FEW_VALID_POINTS";
+  result.filtering_time_ms = std::chrono::duration<double, std::milli>(
+    std::chrono::steady_clock::now() - filtering_start).count();
+  result.valid_point_ratio = points.empty() ? 0.0 :
+    static_cast<double>(result.valid_point_count) / static_cast<double>(points.size());
+  if (result.valid_point_count == 0U) {
+    result.invalid_reason = "NO_VALID_RAW_POINTS";
     return result;
   }
 
-  auto remaining = filtered;
-  const std::size_t min_inliers = std::max(
-    config_.min_inliers_absolute,
-    static_cast<std::size_t>(
-      std::ceil(config_.min_inlier_ratio * static_cast<double>(filtered->size()))));
-  bool plane_model_found = false;
-  bool region_too_small = false;
-
-  for (int plane_index = 0;
-    plane_index < config_.max_candidate_planes &&
-    remaining->size() >= config_.min_remaining_points;
-    ++plane_index)
-  {
-    // RANSAC只在体素降采样点云上搜索模型，减少60 km/h工况下的单帧计算时间。
-    // 候选模型随后回到原始ROI点云收集内点，区域拟合和最低高度仍使用原始分辨率。
-    const auto search_cloud = makeRansacSearchCloud(remaining, config_.voxel_size_m);
-    if (search_cloud->size() < 3U) {
-      break;
+  const auto roi_start = std::chrono::steady_clock::now();
+  const double radius_squared = config_.detection_radius_m * config_.detection_radius_m;
+  for (const auto * point : valid_points) {
+    const double radial_squared = static_cast<double>(point->y) * point->y +
+      static_cast<double>(point->z) * point->z;
+    if (point->x >= config_.min_detection_x_m && point->x <= config_.max_detection_x_m &&
+      radial_squared <= radius_squared)
+    {
+      roi.push_back(point);
+      result.roi_point_indices.push_back(point->original_index);
     }
-
-    pcl::SACSegmentation<pcl::PointXYZ> segmentation;
-    segmentation.setOptimizeCoefficients(true);
-    segmentation.setModelType(pcl::SACMODEL_PERPENDICULAR_PLANE);
-    segmentation.setMethodType(pcl::SAC_RANSAC);
-    segmentation.setAxis(Eigen::Vector3f::UnitZ());
-    segmentation.setEpsAngle(degreesToRadians(config_.max_normal_angle_deg));
-    segmentation.setDistanceThreshold(config_.distance_threshold_m);
-    segmentation.setMaxIterations(config_.max_iterations);
-    segmentation.setProbability(config_.probability);
-    segmentation.setInputCloud(search_cloud);
-
-    auto search_inliers = pcl::make_shared<pcl::PointIndices>();
-    auto coefficients = pcl::make_shared<pcl::ModelCoefficients>();
-    segmentation.segment(*search_inliers, *coefficients);
-    if (search_inliers->indices.size() < 3U || coefficients->values.size() != 4U) {
-      break;
-    }
-
-    const std::array<double, 4> plane_coefficients{
-      coefficients->values[0], coefficients->values[1], coefficients->values[2],
-      coefficients->values[3]};
-    auto inliers = collectOriginalResolutionInliers(
-      *remaining, plane_coefficients, config_.distance_threshold_m);
-    if (inliers->indices.size() < min_inliers) {
-      break;
-    }
-    plane_model_found = true;
-    ++result.ransac_plane_count;
-
-    auto region_analysis = analyzeRegions(*remaining, *inliers, plane_coefficients, config_);
-    if (!region_analysis.has_size_qualified_region) {
-      region_too_small = true;
-    }
-    result.candidates.insert(
-      result.candidates.end(), region_analysis.candidates.begin(),
-      region_analysis.candidates.end());
-
-    // 即使当前最大平面没有通过面积或残差检查，也删除其内点并继续寻找后续平面。
-    // 这样主体顶面、标志牌或碎片不会阻止后面的风机底层平面进入候选集。
-    pcl::ExtractIndices<pcl::PointXYZ> extractor;
-    extractor.setInputCloud(remaining);
-    extractor.setIndices(inliers);
-    extractor.setNegative(true);
-    auto next_remaining = pcl::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
-    extractor.filter(*next_remaining);
-    if (next_remaining->size() >= remaining->size()) {
-      break;
-    }
-    remaining = std::move(next_remaining);
   }
-
-  if (result.candidates.empty()) {
-    if (region_too_small) {
-      result.invalid_reason = "NO_PLANE_PASSED_REGION_SIZE";
-    } else if (plane_model_found) {
-      result.invalid_reason = "NO_PLANE_PASSED_QUALITY_CHECK";
-    } else {
-      result.invalid_reason = "NO_PLANE_FOUND";
-    }
+  result.roi_time_ms = std::chrono::duration<double, std::milli>(
+    std::chrono::steady_clock::now() - roi_start).count();
+  result.roi_point_count = roi.size();
+  if (roi.empty()) {
+    result.invalid_reason = "NO_POINTS_IN_CYLINDRICAL_ROI";
+    return result;
+  }
+  const auto sorting_start = std::chrono::steady_clock::now();
+  std::sort(roi.begin(), roi.end(), [](const Point3f * a, const Point3f * b) {
+    return a->x < b->x;
+  });
+  result.sorting_time_ms = std::chrono::duration<double, std::milli>(
+    std::chrono::steady_clock::now() - sorting_start).count();
+  result.lowest_raw_x = roi.front()->x;
+  if (roi.size() < config_.min_support_points) {
+    result.invalid_reason = "INSUFFICIENT_ROI_SUPPORT";
     return result;
   }
 
-  const auto selected = std::min_element(
-    result.candidates.begin(), result.candidates.end(),
-    [](const PlaneCandidate & lhs, const PlaneCandidate & rhs) {
-      return lhs.min_height_m < rhs.min_height_m;
-    });
-  result.selected = *selected;
-  result.valid = true;
-  result.invalid_reason = "NONE";
+  std::size_t upper = 0U;
+  std::chrono::steady_clock::duration support_band_duration{};
+  std::chrono::steady_clock::duration connectivity_duration{};
+  for (std::size_t lower = 0U; lower < roi.size(); ++lower) {
+    const auto support_start = std::chrono::steady_clock::now();
+    upper = std::max(upper, lower);
+    const double band_end = static_cast<double>(roi[lower]->x) + config_.support_height_band_m;
+    while (upper < roi.size() && roi[upper]->x <= band_end) {
+      ++upper;
+    }
+    support_band_duration += std::chrono::steady_clock::now() - support_start;
+    if (upper - lower < config_.min_support_points) {
+      continue;
+    }
+    const auto connectivity_start = std::chrono::steady_clock::now();
+    Cells cells;
+    cells.reserve(upper - lower);
+    for (std::size_t index = lower; index < upper; ++index) {
+      const auto * point = roi[index];
+      const GridKey key{
+        static_cast<std::int64_t>(std::floor(point->y / config_.spatial_grid_size_m)),
+        static_cast<std::int64_t>(std::floor(point->z / config_.spatial_grid_size_m))};
+      cells[key].push_back(point);
+    }
+    std::vector<const Point3f *> best_component;
+    double best_median = std::numeric_limits<double>::infinity();
+    double best_minimum = std::numeric_limits<double>::infinity();
+    std::uint32_t best_original_index = std::numeric_limits<std::uint32_t>::max();
+    for (auto & component : connectedComponents(cells)) {
+      if (component.size() < config_.min_support_points) {
+        continue;
+      }
+      double min_y = component.front()->y;
+      double max_y = component.front()->y;
+      double min_z = component.front()->z;
+      double max_z = component.front()->z;
+      std::unordered_map<GridKey, bool, GridKeyHash> component_cells;
+      for (const auto * point : component) {
+        min_y = std::min(min_y, static_cast<double>(point->y));
+        max_y = std::max(max_y, static_cast<double>(point->y));
+        min_z = std::min(min_z, static_cast<double>(point->z));
+        max_z = std::max(max_z, static_cast<double>(point->z));
+        component_cells[GridKey{
+          static_cast<std::int64_t>(std::floor(point->y / config_.spatial_grid_size_m)),
+          static_cast<std::int64_t>(std::floor(point->z / config_.spatial_grid_size_m))}] = true;
+      }
+      const double span = std::max(max_y - min_y, max_z - min_z);
+      if (component_cells.size() < config_.min_occupied_cells ||
+        span < config_.min_spatial_span_m)
+      {
+        continue;
+      }
+      const double median = medianX(component);
+      double component_minimum = std::numeric_limits<double>::infinity();
+      std::uint32_t component_first_index = std::numeric_limits<std::uint32_t>::max();
+      for (const auto * point : component) {
+        component_minimum = std::min(component_minimum, static_cast<double>(point->x));
+        component_first_index = std::min(component_first_index, point->original_index);
+      }
+      // 连通分量来自unordered_map，业务选择不能依赖遍历顺序。
+      if (median < best_median ||
+        (median == best_median && component_minimum < best_minimum) ||
+        (median == best_median && component_minimum == best_minimum &&
+        component_first_index < best_original_index))
+      {
+        best_component = std::move(component);
+        best_median = median;
+        best_minimum = component_minimum;
+        best_original_index = component_first_index;
+      }
+    }
+    if (!best_component.empty()) {
+      result.cluster_min_x = std::numeric_limits<double>::infinity();
+      result.cluster_max_x = -std::numeric_limits<double>::infinity();
+      const Point3f * representative = best_component.front();
+      for (const auto * point : best_component) {
+        result.cluster_min_x = std::min(result.cluster_min_x, static_cast<double>(point->x));
+        result.cluster_max_x = std::max(result.cluster_max_x, static_cast<double>(point->x));
+        const double distance = std::abs(static_cast<double>(point->x) - best_median);
+        const double current_distance =
+          std::abs(static_cast<double>(representative->x) - best_median);
+        if (distance < current_distance ||
+          (distance == current_distance && point->original_index < representative->original_index))
+        {
+          representative = point;
+        }
+        result.cluster_point_indices.push_back(point->original_index);
+      }
+      std::sort(result.cluster_point_indices.begin(), result.cluster_point_indices.end());
+      result.cluster_median_x = best_median;
+      result.representative = *representative;
+      result.valid = true;
+      result.invalid_reason = "NONE";
+      connectivity_duration += std::chrono::steady_clock::now() - connectivity_start;
+      result.support_band_time_ms =
+        std::chrono::duration<double, std::milli>(support_band_duration).count();
+      result.connectivity_time_ms =
+        std::chrono::duration<double, std::milli>(connectivity_duration).count();
+      return result;
+    }
+    connectivity_duration += std::chrono::steady_clock::now() - connectivity_start;
+    // upper不变时，删除窗口低端点只会让各连通分量的点数、占用格和跨度减小，
+    // 不可能从不合格变为合格；直接跳到下一个新点将进入窗口的起点，避免密集失败帧退化为O(N²)。
+    if (upper >= roi.size()) {
+      break;
+    }
+    const double next_start_x = static_cast<double>(roi[upper]->x) -
+      config_.support_height_band_m;
+    const auto next_lower_it = std::lower_bound(
+      roi.begin() + static_cast<std::ptrdiff_t>(lower + 1U), roi.end(), next_start_x,
+      [](const Point3f * point, const double value) {return point->x < value;});
+    if (next_lower_it != roi.end()) {
+      lower = static_cast<std::size_t>(std::distance(roi.begin(), next_lower_it)) - 1U;
+    }
+  }
+  result.support_band_time_ms =
+    std::chrono::duration<double, std::milli>(support_band_duration).count();
+  result.connectivity_time_ms =
+    std::chrono::duration<double, std::milli>(connectivity_duration).count();
+  result.invalid_reason = "NO_SPATIALLY_SUPPORTED_CLUSTER";
   return result;
 }
 

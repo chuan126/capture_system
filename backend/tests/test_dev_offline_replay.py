@@ -7,10 +7,7 @@ import pytest
 
 from backend.devtools.offline_replay import (
     OFFLINE_CLEARANCE_TOPIC,
-    OFFLINE_COMPENSATED_CLOUD_TOPIC,
-    OFFLINE_ODOMETRY_TOPIC,
     OFFLINE_RAW_CLOUD_TOPIC,
-    OFFLINE_RAW_ODOMETRY_TOPIC,
     OfflineReplayError,
     OfflineReplayManager,
 )
@@ -85,7 +82,7 @@ def snapshot() -> dict[str, object]:
     }
 
 
-def test_offline_commands_reuse_formal_nodes_with_isolated_topics(tmp_path: Path) -> None:
+def test_offline_commands_run_formal_raw_clearance_with_isolated_topic(tmp_path: Path) -> None:
     recording_manager, recording_path = make_record(tmp_path)
     manager = OfflineReplayManager(
         recording_manager, snapshot, project_root=PROJECT_ROOT,
@@ -97,20 +94,10 @@ def test_offline_commands_reuse_formal_nodes_with_isolated_topics(tmp_path: Path
     temp_dir.mkdir()
     commands = manager._build_commands(recording_path, temp_dir, overrides)
 
-    assert commands["odometry"][:4] == ["ros2", "run", "motion_compensation", "odometry_timestamp_adapter_node"]
-    assert commands["motion"][:4] == ["ros2", "run", "motion_compensation", "enu_cloud_transform_node"]
     assert commands["clearance"][:4] == ["ros2", "run", "clearance_engine", "clearance_engine_node"]
-    assert f"input_topic:={OFFLINE_RAW_ODOMETRY_TOPIC}" in commands["odometry"]
-    assert f"output_topic:={OFFLINE_ODOMETRY_TOPIC}" in commands["odometry"]
-    assert "sample_rate_hz:=400.0" in commands["odometry"]
-    assert "sample_rate_hz:=400" not in commands["odometry"]
-    assert f"input_cloud_topic:={OFFLINE_RAW_CLOUD_TOPIC}" in commands["motion"]
-    assert f"odometry_topic:={OFFLINE_ODOMETRY_TOPIC}" in commands["motion"]
-    assert f"output_cloud_topic:={OFFLINE_COMPENSATED_CLOUD_TOPIC}" in commands["motion"]
-    assert f"input_topic:={OFFLINE_COMPENSATED_CLOUD_TOPIC}" in commands["clearance"]
+    assert f"input_topic:={OFFLINE_RAW_CLOUD_TOPIC}" in commands["clearance"]
     assert f"output_topic:={OFFLINE_CLEARANCE_TOPIC}" in commands["clearance"]
     assert "ransac.max_candidate_planes:=2500" in commands["clearance"]
-    assert "processing_poll_interval_ms:=10" in commands["motion"]
 
     player = commands["player"]
     assert str(recording_path) in player
@@ -118,18 +105,13 @@ def test_offline_commands_reuse_formal_nodes_with_isolated_topics(tmp_path: Path
     remap_index = player.index("--remap")
     assert player[topics_index + 1:remap_index] == [
         "/capture/lidar/points_raw",
-        "/capture/odometry/high_rate_raw",
     ]
     assert "--remap" in player
     assert f"/capture/lidar/points_raw:={OFFLINE_RAW_CLOUD_TOPIC}" in player
-    assert f"/capture/odometry/high_rate_raw:={OFFLINE_RAW_ODOMETRY_TOPIC}" in player
-
-    assert (temp_dir / "odometry.yaml").read_text(encoding="utf-8").startswith("offline_odometry_timestamp_adapter_node:\n")
-    assert (temp_dir / "motion.yaml").read_text(encoding="utf-8").startswith("offline_enu_cloud_transform_node:\n")
     assert (temp_dir / "clearance.yaml").read_text(encoding="utf-8").startswith("offline_clearance_engine_node:\n")
 
 
-def test_offline_commands_play_split_state_before_pointcloud(tmp_path: Path) -> None:
+def test_offline_commands_play_only_split_raw_pointcloud(tmp_path: Path) -> None:
     recording_manager, recording_path = make_record(tmp_path)
     manager = OfflineReplayManager(
         recording_manager, snapshot, project_root=PROJECT_ROOT,
@@ -137,91 +119,22 @@ def test_offline_commands_play_split_state_before_pointcloud(tmp_path: Path) -> 
     )
     temp_dir = manager.temp_root / "split-command-test"
     temp_dir.mkdir()
-    state_path = recording_path / "radar_state_400hz.mcap"
     cloud_path = recording_path / "pointcloud_10hz.mcap"
     commands = manager._build_commands(
         recording_path,
         temp_dir,
         {},
         {
-            "radar_state_400hz": str(state_path),
             "pointcloud_10hz": str(cloud_path),
         },
     )
 
-    assert list(name for name in commands if name.startswith("player")) == [
-        "player_odometry",
-        "player_cloud",
-    ]
-    assert str(state_path) in commands["player_odometry"]
-    assert "/capture/odometry/high_rate_raw" in commands["player_odometry"]
-    assert "-d" not in commands["player_odometry"]
-    assert commands["player_odometry"][commands["player_odometry"].index("--rate") + 1] == "0.5"
-    assert str(cloud_path) in commands["player_cloud"]
-    assert "/capture/lidar/points_raw" in commands["player_cloud"]
-    assert "-d" not in commands["player_cloud"]
-    assert commands["player_cloud"][commands["player_cloud"].index("--rate") + 1] == "0.5"
-    assert "pose_cache_duration_s:=5.0" in commands["motion"]
-
-
-def test_split_replay_prefills_pose_cache_before_starting_cloud(monkeypatch, tmp_path: Path) -> None:
-    recording_manager, _ = make_record(tmp_path)
-    manager = OfflineReplayManager(
-        recording_manager,
-        snapshot,
-        project_root=PROJECT_ROOT,
-        startup_delay_seconds=0.0,
-        pose_prefill_seconds=0.1,
-        drain_delay_seconds=0.0,
-    )
-    events: list[str] = []
-    clock = {"value": 10.0}
-
-    class RunningProcess:
-        pid = 999999
-
-        @staticmethod
-        def poll():
-            return None
-
-    def spawn(command: list[str], log_path: Path):
-        events.append(log_path.stem)
-        return RunningProcess()
-
-    def sleep(seconds: float) -> None:
-        events.append("prefill_wait")
-        clock["value"] += seconds
-
-    monkeypatch.setattr(manager, "_spawn", spawn)
-    monkeypatch.setattr("backend.devtools.offline_replay.time.monotonic", lambda: clock["value"])
-    monkeypatch.setattr("backend.devtools.offline_replay.time.sleep", sleep)
-    players = manager._start_players(
-        {"player_odometry": ["odom"], "player_cloud": ["cloud"]},
-        tmp_path,
-    )
-
-    assert len(players) == 2
-    assert events[0] == "player_odometry"
-    assert "prefill_wait" in events[1:-1]
-    assert events[-1] == "player_cloud"
-
-
-def test_pose_prefill_is_released_by_actual_odometry_timestamp(tmp_path: Path) -> None:
-    recording_manager, _ = make_record(tmp_path)
-    manager = OfflineReplayManager(recording_manager, snapshot, project_root=PROJECT_ROOT)
-    with manager._lock:
-        manager._pose_prefill_target_ns = 12_500_000_000
-
-    manager._on_odometry(
-        SimpleNamespace(header=SimpleNamespace(stamp=SimpleNamespace(sec=12, nanosec=499_999_999)))
-    )
-    assert manager.status()["pose_prefill_ready"] is False
-    manager._on_odometry(
-        SimpleNamespace(header=SimpleNamespace(stamp=SimpleNamespace(sec=12, nanosec=500_000_000)))
-    )
-    status = manager.status()
-    assert status["pose_prefill_ready"] is True
-    assert status["pose_prefill_latest_ns"] == 12_500_000_000
+    assert list(name for name in commands if name.startswith("player")) == ["player"]
+    assert str(cloud_path) in commands["player"]
+    assert "/capture/lidar/points_raw" in commands["player"]
+    assert "/capture/odometry/high_rate_raw" not in commands["player"]
+    assert "-d" not in commands["player"]
+    assert commands["player"][commands["player"].index("--rate") + 1] == "0.5"
 
 
 
@@ -233,45 +146,45 @@ def test_offline_replay_rejects_while_any_dev_recording_is_active(monkeypatch, t
     with pytest.raises(OfflineReplayError, match="正在保存"):
         manager.start(str(recording_manager.record["recording_id"]))
 
-def test_offline_replay_rejects_old_raw_cloud_sample_without_auxiliary_odometry(monkeypatch, tmp_path: Path) -> None:
+def test_offline_replay_rejects_sample_without_raw_pointcloud(monkeypatch, tmp_path: Path) -> None:
     recording_manager, _ = make_record(tmp_path, replay_ready=False)
     monkeypatch.setattr("backend.devtools.offline_replay.shutil.which", lambda name: "/usr/bin/ros2")
     manager = OfflineReplayManager(recording_manager, snapshot, project_root=PROJECT_ROOT)
-    with pytest.raises(OfflineReplayError, match="缺少原始高频里程计"):
+    with pytest.raises(OfflineReplayError, match="缺少原始点云"):
         manager.start(str(recording_manager.record["recording_id"]))
 
 
-def test_offline_result_statistics_use_ransac_plane_count(tmp_path: Path) -> None:
+def test_offline_result_statistics_use_lowest_cluster_point_count(tmp_path: Path) -> None:
     recording_manager, _ = make_record(tmp_path)
     manager = OfflineReplayManager(recording_manager, snapshot, project_root=PROJECT_ROOT)
     with manager._lock:
         manager._state = "running"
 
-    def message(*, ransac: int, valid: bool, clearance: float, processing: float, reason: str = ""):
+    def message(*, cluster_points: int, valid: bool, clearance: float, processing: float, reason: str = ""):
         return SimpleNamespace(
             header=SimpleNamespace(stamp=SimpleNamespace(sec=7, nanosec=25)),
-            ransac_plane_count=ransac,
+            selected_inlier_count=cluster_points,
             valid=valid,
             lidar_to_top_m=clearance,
             processing_time_ms=processing,
             invalid_reason=reason,
         )
 
-    manager._on_result(message(ransac=4, valid=True, clearance=4.7, processing=8.1))
-    manager._on_result(message(ransac=9, valid=True, clearance=4.5, processing=8.4))
-    manager._on_result(message(ransac=2, valid=False, clearance=float("nan"), processing=7.9, reason="NO_PLANE"))
+    manager._on_result(message(cluster_points=12, valid=True, clearance=4.7, processing=8.1))
+    manager._on_result(message(cluster_points=18, valid=True, clearance=4.5, processing=8.4))
+    manager._on_result(message(cluster_points=0, valid=False, clearance=float("nan"), processing=7.9, reason="NO_CLUSTER"))
     status = manager.status()
 
     assert status["processed_frames"] == 3
     assert status["valid_frames"] == 2
     assert status["invalid_frames"] == 1
-    assert status["ransac_plane_last"] == 2
-    assert status["ransac_plane_mean"] == pytest.approx(5.0)
-    assert status["ransac_plane_max"] == 9
+    assert status["cluster_point_count_last"] == 0
+    assert status["cluster_point_count_mean"] == pytest.approx(10.0)
+    assert status["cluster_point_count_max"] == 18
     assert status["lidar_to_top_min_m"] == pytest.approx(4.5)
     assert status["lidar_to_top_mean_m"] == pytest.approx(4.6)
     assert status["lidar_to_top_max_m"] == pytest.approx(4.7)
-    assert status["invalid_reason"] == "NO_PLANE"
+    assert status["invalid_reason"] == "NO_CLUSTER"
     assert status["latest_stamp_ns"] == 7_000_000_025
 
 
@@ -287,22 +200,18 @@ def test_offline_completion_without_clearance_result_is_failure(tmp_path: Path) 
     assert "未收到净空结果" in str(status["last_error"])
 
 
-def test_offline_no_result_error_reports_motion_diagnostics(monkeypatch, tmp_path: Path) -> None:
+def test_offline_no_result_error_reports_raw_clearance_failure(monkeypatch, tmp_path: Path) -> None:
     recording_manager, _ = make_record(tmp_path)
     manager = OfflineReplayManager(recording_manager, snapshot, project_root=PROJECT_ROOT)
     monkeypatch.setattr(manager, "_cleanup_temp_locked", lambda: None)
     with manager._lock:
         manager._generation = 8
         manager._state = "running"
-        manager._diagnostics = {
-            "clouds_received_total": 117,
-            "clouds_processed_total": 0,
-        }
     manager._complete_generation(8, failed=None)
 
     error = str(manager.status()["last_error"])
-    assert "运动补偿收到117帧" in error
-    assert "成功处理0帧" in error
+    assert "未收到净空结果" in error
+    assert "原始点云布局" in error
 
 class _FakeProcess:
     def __init__(self, codes: list[int | None]) -> None:
@@ -397,24 +306,10 @@ def test_offline_monitor_reports_algorithm_exit_without_waiting_for_player(monke
     assert "17" in str(captured[0])
 
 
-def test_offline_diagnostics_are_exposed_in_status(tmp_path: Path) -> None:
+def test_raw_only_offline_status_has_no_motion_diagnostics(tmp_path: Path) -> None:
     recording_manager, _ = make_record(tmp_path)
     manager = OfflineReplayManager(recording_manager, snapshot, project_root=PROJECT_ROOT)
     with manager._lock:
         manager._state = "running"
-    diagnostic = SimpleNamespace(
-        status=[SimpleNamespace(values=[
-            SimpleNamespace(key="clouds_received_total", value="12"),
-            SimpleNamespace(key="clouds_processed_total", value="9"),
-            SimpleNamespace(key="interpolation_failure_count", value="2"),
-            SimpleNamespace(key="pending_cloud_count", value="1"),
-            SimpleNamespace(key="queue_wait_ms_mean", value="3.25"),
-        ])]
-    )
-    manager._on_diagnostics(diagnostic)
-    values = manager.status()["diagnostics"]
-    assert values["clouds_received_total"] == 12
-    assert values["clouds_processed_total"] == 9
-    assert values["interpolation_failure_count"] == 2
-    assert values["pending_cloud_count"] == 1
-    assert values["queue_wait_ms_mean"] == pytest.approx(3.25)
+    assert manager.status()["diagnostics"] == {}
+    assert not hasattr(manager, "_on_diagnostics")

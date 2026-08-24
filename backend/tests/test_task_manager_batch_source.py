@@ -12,7 +12,8 @@ def test_task_manager_does_not_use_legacy_batch_state_for_task_control() -> None
     ).read_text(encoding="utf-8")
 
     assert "COALESCE(tasks.batch_sequence,tasks.sequence)" in source
-    assert "FROM tasks WHERE tasks.task_id=? AND tasks.deleted_at IS NULL" in source
+    assert "LEFT JOIN task_parameters ON task_parameters.task_id=tasks.task_id" in source
+    assert "WHERE tasks.task_id=? AND tasks.deleted_at IS NULL" in source
     assert "JOIN operation_batches ON operation_batches.batch_id=tasks.batch_id" not in source
     assert "batch_status" not in source
     assert "batch_not_active" not in source
@@ -83,3 +84,31 @@ def test_task_manager_freezes_actual_direction_lane_and_height_range_on_start() 
     assert "recorder_request->travel_direction = request.travel_direction" in source
     assert "recorder_request->lane_side = lane_side" in source
     assert "recorder_request->clearance_upper_limit_m = request.clearance_upper_limit_m" in source
+
+
+def test_task_manager_publishes_frozen_clearance_parameters_separately() -> None:
+    source = (
+        Path(__file__).parents[2]
+        / "ros2_ws"
+        / "src"
+        / "task_manager"
+        / "src"
+        / "task_manager_node.cpp"
+    ).read_text(encoding="utf-8")
+
+    assert '#include "interfaces/msg/task_clearance_config.hpp"' in source
+    assert '"/capture/task/clearance_config"' in source
+    assert "rclcpp::KeepLast(1)).reliable().transient_local()" in source
+    assert "task_parameters.lidar_mount_height_m" in source
+    assert "task_parameters.clearance_threshold_m" in source
+    assert "task_parameters.clearance_upper_limit_m" in source
+    assert "clearance_config.task_id = task.task_id" in source
+    assert "clearance_config.active = task.active" in source
+    assert "clearance_config.parameters_valid = task.clearance_parameters_valid" in source
+    assert "clearance_config.lidar_mount_height_m = task.lidar_mount_height_m" in source
+    assert "clearance_config.clearance_threshold_m = task.clearance_threshold_m" in source
+    assert "clearance_config.clearance_upper_limit_m = task.clearance_upper_limit_m" in source
+    assert "clearance_config_publisher_->publish(clearance_config)" in source
+    assert "inactive_config.active = false" in source
+    assert "inactive_config.parameters_valid = false" in source
+    assert "clearance_config_publisher_->publish(inactive_config)" in source

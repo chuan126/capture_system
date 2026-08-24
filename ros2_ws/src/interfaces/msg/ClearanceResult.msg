@@ -1,16 +1,16 @@
-# 单帧可靠顶部视场内的最低可信平面或局部曲面测量结果。
+# 单帧原始雷达本体系最低可信空间点簇测量结果。
 std_msgs/Header header
 
 bool valid
 float64 lidar_to_top_m
-# 本帧RANSAC成功提取并达到原始分辨率最少内点要求的平面模型数量。
+# 旧平面算法兼容字段；原始点簇算法固定为0。
 uint32 ransac_plane_count
-# 本帧通过置信度检查的局部曲面候选数量；曲面检测关闭或失败时为0。
+# 旧曲面算法兼容字段；原始点簇算法固定为0。
 uint32 surface_count
-# 通过质量和置信度检查的统一平面/局部曲面候选数量。
+# 本帧最低可信空间点簇有效时为1，否则为0。
 uint32 candidate_count
 uint32 selected_inlier_count
-# 兼容字段名。实际表示选中平面或曲面区域的水平网格占用投影面积。
+# 旧算法兼容字段；原始点簇算法输出NaN。
 float64 selected_area_m2
 float64 selected_tilt_deg
 float64 residual_median_m

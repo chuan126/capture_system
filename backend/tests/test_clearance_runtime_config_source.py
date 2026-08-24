@@ -27,9 +27,14 @@ def test_bringup_default_clearance_profile_is_the_documented_tunnel_profile() ->
     assert config_name in binding_source
     assert "clearance_engine_small_board_1cm.yaml" not in offline_source
     assert "clearance_engine_small_board_1cm.yaml" not in binding_source
-    assert "ransac.voxel_size_m: 0.04" in config_source
-    assert "ransac.max_candidate_planes: 200" in config_source
-    assert "ransac.min_inliers_absolute: 50" in config_source
-    assert "region.grid_size_m: 0.040" in config_source
-    assert "region.min_span_cells: 8" in config_source
-    assert "region.min_occupied_cells: 50" in config_source
+    assert "input_topic: /capture/lidar/points_raw" in config_source
+    assert "raw_cluster.min_detection_x_m: 1.0" in config_source
+    assert "raw_cluster.max_detection_x_m: 10.0" in config_source
+    assert "raw_cluster.detection_radius_m: 1.0" in config_source
+    assert "raw_cluster.support_height_band_m: 0.05" in config_source
+    assert "raw_cluster.min_support_points: 10" in config_source
+    assert "raw_cluster.spatial_grid_size_m: 0.10" in config_source
+    assert "raw_cluster.min_occupied_cells: 3" in config_source
+    assert "raw_cluster.min_spatial_span_m: 0.10" in config_source
+    assert "ransac." not in config_source
+    assert "region." not in config_source

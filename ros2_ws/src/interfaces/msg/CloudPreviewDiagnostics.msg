@@ -1,0 +1,8 @@
+# 预览旁路逐帧处理耗时；不得用于正式净空判断。
+std_msgs/Header header
+uint32 input_point_count
+uint32 output_point_count
+bool classification_matched
+float64 classification_time_ms
+float64 conversion_time_ms
+float64 total_processing_time_ms

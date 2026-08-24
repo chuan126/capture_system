@@ -20,14 +20,14 @@ class FakeBridge:
         if node == self.unavailable_node:
             raise RuntimeError(f"ROS图中未发现参数Service：{node}")
         values = {
-            "ransac.distance_threshold_m": 0.04,
-            "region.grid_size_m": 0.01,
-            "region.min_span_cells": 5,
-            "region.min_occupied_cells": 15,
-            "region.max_residual_p95_m": 0.05,
-            "ransac.min_inliers_absolute": 50,
-            "ransac.max_candidate_planes": 2500,
-            "ransac.min_remaining_points": 100,
+            "raw_cluster.min_detection_x_m": 0.2,
+            "raw_cluster.max_detection_x_m": 10.0,
+            "raw_cluster.detection_radius_m": 1.0,
+            "raw_cluster.support_height_band_m": 0.05,
+            "raw_cluster.min_support_points": 10,
+            "raw_cluster.spatial_grid_size_m": 0.1,
+            "raw_cluster.min_occupied_cells": 3,
+            "raw_cluster.min_spatial_span_m": 0.1,
         }
         return {name: values.get(name, 1.0) for name in names}
 
@@ -41,9 +41,9 @@ def test_core_parameter_bindings_are_centralized_in_bringup_config() -> None:
     keys = {item["key"] for item in payload["parameters"]}
     assert "motion.odometry_time_offset_s" in keys
     assert "odometry.sample_rate_hz" in keys
-    assert "clearance.distance_threshold_m" in keys
-    assert "clearance.min_remaining_points" in keys
-    assert "clearance.min_region_span_cells" in keys
+    assert "clearance.detection_radius_m" in keys
+    assert "clearance.min_support_points" in keys
+    assert "clearance.min_spatial_span_m" in keys
     for item in payload["parameters"]:
         source = PROJECT_ROOT / item["source_config"]
         assert source.exists(), item["source_config"]
@@ -59,8 +59,8 @@ def test_parameter_refresh_batches_each_ros_node_once() -> None:
     assert {node for node, _names in bridge.calls} == expected_nodes
     assert len(bridge.calls) == len(expected_nodes)
     clearance_call = next(names for node, names in bridge.calls if node == "/clearance_engine_node")
-    assert "ransac.distance_threshold_m" in clearance_call
-    assert "ransac.min_remaining_points" in clearance_call
+    assert "raw_cluster.detection_radius_m" in clearance_call
+    assert "raw_cluster.min_support_points" in clearance_call
 
 
 def test_parameter_snapshot_uses_cached_runtime_values_and_source_hashes() -> None:
@@ -88,18 +88,19 @@ def test_dashboard_exposes_only_requested_core_parameters() -> None:
         "motion.processing_poll_interval_ms",
         "motion.max_interpolation_gap_s",
         "motion.minimum_valid_pose_ratio",
-        "clearance.distance_threshold_m",
-        "clearance.max_candidate_planes",
-        "clearance.min_inliers_absolute",
-        "clearance.region_grid_size_m",
-        "clearance.min_region_occupied_cells",
-        "clearance.max_residual_p95_m",
+        "clearance.min_detection_x_m",
+        "clearance.detection_radius_m",
+        "clearance.support_height_band_m",
+        "clearance.min_support_points",
+        "clearance.spatial_grid_size_m",
+        "clearance.min_occupied_cells",
+        "clearance.min_spatial_span_m",
     ]
     assert next(item for item in parameters if item["key"] == "motion.processing_poll_interval_ms")["writable"] is False
-    assert next(item for item in parameters if item["key"] == "clearance.distance_threshold_m")["writable"] is True
-    max_planes = next(item for item in parameters if item["key"] == "clearance.max_candidate_planes")
-    assert max_planes["configured_value"] == 2500
-    assert max_planes["maximum"] == 2500.0
+    radius = next(item for item in parameters if item["key"] == "clearance.detection_radius_m")
+    assert radius["writable"] is True
+    assert radius["configured_value"] == 1.0
+    assert radius["maximum"] == 5.0
 
 
 def test_parameter_page_keeps_yaml_value_when_ros_bridge_is_unavailable() -> None:
@@ -108,14 +109,14 @@ def test_parameter_page_keeps_yaml_value_when_ros_bridge_is_unavailable() -> Non
     bridge.error = "ROS桥不可用"
     service = DevParameterService(bridge=bridge, bindings_path=BINDINGS)
     parameters = service.list_parameters(ui_only=True)
-    assert len(parameters) == 9
+    assert len(parameters) == 10
     poll = next(item for item in parameters if item["key"] == "motion.processing_poll_interval_ms")
-    distance = next(item for item in parameters if item["parameter"] == "ransac.distance_threshold_m")
+    radius = next(item for item in parameters if item["parameter"] == "raw_cluster.detection_radius_m")
     assert poll["configured_value"] == 10
     assert poll["available"] is False
-    assert distance["configured_value"] == 0.04
-    assert distance["available"] is False
-    assert distance["value"] is None
+    assert radius["configured_value"] == 1.0
+    assert radius["available"] is False
+    assert radius["value"] is None
 
 
 def test_one_node_failure_does_not_hide_other_nodes() -> None:

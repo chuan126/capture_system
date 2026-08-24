@@ -108,9 +108,9 @@ export type DevOfflineReplayStatus = {
   processed_frames: number;
   valid_frames: number;
   invalid_frames: number;
-  ransac_plane_last: number | null;
-  ransac_plane_mean: number | null;
-  ransac_plane_max: number | null;
+  cluster_point_count_last: number | null;
+  cluster_point_count_mean: number | null;
+  cluster_point_count_max: number | null;
   lidar_to_top_last_m: number | null;
   latest_result_valid: boolean | null;
   lidar_to_top_min_m: number | null;

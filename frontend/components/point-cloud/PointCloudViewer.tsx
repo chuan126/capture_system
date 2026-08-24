@@ -15,6 +15,7 @@ type ViewerResources = {
   controls: OrbitControls;
   geometry: THREE.BufferGeometry;
   positionAttribute: THREE.BufferAttribute;
+  colorAttribute: THREE.BufferAttribute;
   requestRender: () => void;
   fitView: () => void;
   resize: () => void;
@@ -71,6 +72,12 @@ export default function PointCloudViewer({
     const target = resources.positionAttribute.array as Float32Array;
     target.set(frame.positions, 0);
     resources.positionAttribute.needsUpdate = true;
+    const colors = resources.colorAttribute.array as Float32Array;
+    if (frame.colors) colors.set(frame.colors, 0);
+    else {
+      for (let index = 0; index < frame.pointCount; index += 1) colors.set([0x3b / 255, 0x82 / 255, 0xf6 / 255], index * 3);
+    }
+    resources.colorAttribute.needsUpdate = true;
     resources.geometry.setDrawRange(0, frame.pointCount);
     resources.geometry.computeBoundingBox();
     resources.geometry.computeBoundingSphere();
@@ -118,10 +125,13 @@ export default function PointCloudViewer({
       positionAttribute.setUsage(THREE.DynamicDrawUsage);
       const geometry = new THREE.BufferGeometry();
       geometry.setAttribute("position", positionAttribute);
+      const colorAttribute = new THREE.BufferAttribute(new Float32Array(PCV1_MAX_POINTS * 3), 3);
+      colorAttribute.setUsage(THREE.DynamicDrawUsage);
+      geometry.setAttribute("color", colorAttribute);
       geometry.setDrawRange(0, 0);
 
       const material = new THREE.PointsMaterial({
-        color: 0x1769ee,
+        vertexColors: true,
         size: 0.045,
         sizeAttenuation: true,
         transparent: true,
@@ -202,6 +212,7 @@ export default function PointCloudViewer({
         controls,
         geometry,
         positionAttribute,
+        colorAttribute,
         requestRender,
         fitView,
         resize,
@@ -252,6 +263,11 @@ export default function PointCloudViewer({
       <div className={`cloud-live-badge cloud-live-badge--${connection.streamState}`}>
         <i />
         {isStreaming ? liveLabel : "预览状态"}
+      </div>
+      <div className="cloud-color-legend" aria-label="点云颜色图例">
+        <span><i style={{ background: "#3B82F6" }} />仅预览</span>
+        <span><i style={{ background: "#22C55E" }} />计算范围</span>
+        <span><i style={{ background: "#FF4D4F" }} />阈值异常簇</span>
       </div>
       {showStatusOverlay && (
         <div className="cloud-overlay-status" role="status">

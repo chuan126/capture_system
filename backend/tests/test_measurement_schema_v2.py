@@ -189,18 +189,19 @@ def test_schema_v2_history_and_txt_preserve_repeated_source_provenance(tmp_path:
     assert export_response.status_code == 200
     text = download_response.content.decode("utf-8-sig")
     header = text.splitlines()[2].split("    ")
-    assert len(header) == 24
+    assert len(header) == 48
     assert "\t" not in text
     assert header[:8] == [
-        "采样序号", "记录时间（RTK时间）", "隧道编号", "检测车道",
-        "实时高度 m", "最低高度 m", "隧道入口 RTK", "隧道出口 RTK",
+        "采样序号", "源帧序号", "源帧时间", "记录时间",
+        "源帧年龄 ms", "重复源帧", "重复序号", "隧道编号",
     ]
-    assert header[-6:] == [
+    assert header[-10:] == [
         "俯仰 deg", "横滚 deg", "方位 deg",
         "里程计位置x m", "里程计位置y m", "里程计位置z m",
+        "里程计四元数x", "里程计四元数y", "里程计四元数z", "里程计四元数w",
     ]
-    assert "源帧序号" not in text
-    assert "source_timeout" not in text
+    assert "无效原因" in header
+    assert "source_timeout" in text
 
 
 def test_measurement_reader_accepts_v3_mount_adjusted_clearance(tmp_path: Path) -> None:

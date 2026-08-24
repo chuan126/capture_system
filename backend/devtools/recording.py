@@ -59,9 +59,6 @@ RAW_CLOUD_GROUPS = (
             "/capture/lidar/points_compensated_enu",
             "/capture/debug/frame_context",
             "/capture/clearance/result",
-            "/capture/localization/fix",
-            "/capture/localization/status",
-            "/capture/localization/odometry",
         ),
     ),
     RecordingGroup(
@@ -91,9 +88,6 @@ RAW_CLOUD_PROFILE = RecordingProfile(
         "/capture/odometry/slam",
         "/capture/rtk/fix",
         "/capture/rtk/status",
-        "/capture/localization/fix",
-        "/capture/localization/status",
-        "/capture/localization/odometry",
         "/capture/lidar/points_compensated_enu",
         "/capture/debug/frame_context",
         "/capture/clearance/result",
@@ -114,9 +108,6 @@ DIAGNOSTIC_PROFILE = RecordingProfile(
         "/capture/clearance/result",
         "/capture/rtk/fix",
         "/capture/rtk/status",
-        "/capture/localization/fix",
-        "/capture/localization/status",
-        "/capture/localization/odometry",
         "/capture/task/status",
         "/capture/system/diagnostics",
         "/diagnostics",
@@ -148,9 +139,6 @@ ALGORITHM_DEBUG_PROFILE = RecordingProfile(
         "/capture/clearance/result",
         "/capture/rtk/fix",
         "/capture/rtk/status",
-        "/capture/localization/fix",
-        "/capture/localization/status",
-        "/capture/localization/odometry",
         "/capture/task/status",
         "/capture/recording/status",
         "/capture/system/diagnostics",
@@ -342,15 +330,11 @@ class RosbagRecordingManager:
                     replay_ready = (
                         manifest.get("finalized") is True
                         and "pointcloud_10hz" in replay_inputs
-                        and "radar_state_400hz" in replay_inputs
                     )
                 else:
-                    replay_ready = isinstance(topics, list) and all(
-                        topic in topics
-                        for topic in (
-                            "/capture/lidar/points_raw",
-                            "/capture/odometry/high_rate_raw",
-                        )
+                    replay_ready = (
+                        isinstance(topics, list)
+                        and "/capture/lidar/points_raw" in topics
                     )
                     if replay_ready:
                         replay_inputs["combined"] = str(path)

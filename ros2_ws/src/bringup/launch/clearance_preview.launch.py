@@ -31,12 +31,12 @@ def generate_launch_description() -> LaunchDescription:
             DeclareLaunchArgument(
                 "parameters_file",
                 default_value=str(default_parameters),
-                description="平面与局部曲面净空算法参数文件绝对路径",
+                description="原始本体系最低可信点簇净空算法参数文件绝对路径",
             ),
             DeclareLaunchArgument(
                 "clearance_cpu_affinity",
                 default_value="6,7",
-                description="净空平面/曲面并行线程使用的RK3588大核编号",
+                description="原始点簇净空节点使用的RK3588大核编号",
             ),
             Node(
                 package="motion_compensation",

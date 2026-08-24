@@ -17,7 +17,7 @@ namespace cloud_visualization
 namespace
 {
 
-constexpr std::size_t kOutputPointStep = 12U;
+constexpr std::size_t kOutputPointStep = 16U;
 
 struct PreviewPoint
 {
@@ -25,6 +25,7 @@ struct PreviewPoint
   float x;
   float y;
   float z;
+  std::uint8_t classification;
 };
 
 struct VoxelKey
@@ -203,7 +204,8 @@ std::vector<PreviewPoint> spatial_limit(
 sensor_msgs::msg::PointCloud2 CloudPreviewConverter::convert(
   const sensor_msgs::msg::PointCloud2 & input,
   const std::size_t max_points,
-  const double voxel_size_m) const
+  const double voxel_size_m,
+  const std::vector<std::uint8_t> & classifications) const
 {
   if (max_points == 0U) {
     throw std::invalid_argument("max_points必须大于0");
@@ -220,6 +222,9 @@ sensor_msgs::msg::PointCloud2 CloudPreviewConverter::convert(
   const auto z_offset = find_float32_field_offset(input, "z");
   const std::size_t input_point_count =
     static_cast<std::size_t>(input.width) * static_cast<std::size_t>(input.height);
+  if (!classifications.empty() && classifications.size() != input_point_count) {
+    throw std::invalid_argument("预览分类数量与输入点数不一致");
+  }
   const std::size_t minimum_data_size =
     input.height == 0U ? 0U :
     (static_cast<std::size_t>(input.height) - 1U) * input.row_step +
@@ -240,13 +245,34 @@ sensor_msgs::msg::PointCloud2 CloudPreviewConverter::convert(
       read_float(input_point, x_offset),
       read_float(input_point, y_offset),
       read_float(input_point, z_offset),
+      static_cast<std::uint8_t>(
+        classifications.empty() || classifications[input_index] > 2U ?
+        0U : classifications[input_index]),
     };
     if (is_preview_point(point)) {
       valid_points.push_back(point);
     }
   }
 
-  const auto selected_points = spatial_limit(valid_points, max_points, voxel_size_m);
+  // 按红、绿、蓝优先级分配限点预算，确保报警簇不会被环境点降采样淹没。
+  std::vector<PreviewPoint> selected_points;
+  selected_points.reserve(std::min(valid_points.size(), max_points));
+  for (int classification = 2; classification >= 0 && selected_points.size() < max_points;
+    --classification)
+  {
+    std::vector<PreviewPoint> group;
+    for (const auto & point : valid_points) {
+      if (point.classification == static_cast<std::uint8_t>(classification)) {
+        group.push_back(point);
+      }
+    }
+    const auto limited = spatial_limit(
+      group, max_points - selected_points.size(), voxel_size_m);
+    selected_points.insert(selected_points.end(), limited.begin(), limited.end());
+  }
+  std::sort(selected_points.begin(), selected_points.end(), [](const auto & left, const auto & right) {
+    return left.input_index < right.input_index;
+  });
 
   sensor_msgs::msg::PointCloud2 output;
   output.header = input.header;
@@ -257,6 +283,12 @@ sensor_msgs::msg::PointCloud2 CloudPreviewConverter::convert(
     make_xyz_field("y", 4U),
     make_xyz_field("z", 8U),
   };
+  sensor_msgs::msg::PointField classification_field;
+  classification_field.name = "classification";
+  classification_field.offset = 12U;
+  classification_field.datatype = sensor_msgs::msg::PointField::UINT8;
+  classification_field.count = 1U;
+  output.fields.push_back(classification_field);
   output.is_bigendian = false;
   output.point_step = static_cast<std::uint32_t>(kOutputPointStep);
   output.row_step = output.width * output.point_step;
@@ -269,6 +301,7 @@ sensor_msgs::msg::PointCloud2 CloudPreviewConverter::convert(
     std::memcpy(output_point, &point.x, sizeof(float));
     std::memcpy(output_point + sizeof(float), &point.y, sizeof(float));
     std::memcpy(output_point + 2U * sizeof(float), &point.z, sizeof(float));
+    output_point[12U] = point.classification;
   }
 
   return output;

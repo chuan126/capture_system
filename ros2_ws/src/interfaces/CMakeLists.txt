@@ -7,9 +7,12 @@ find_package(std_msgs REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/ClearanceResult.msg"
+  "msg/CloudPreviewDiagnostics.msg"
   "msg/DebugFrameContext.msg"
   "msg/LocalizationStatus.msg"
+  "msg/RawClearanceDiagnostics.msg"
   "msg/RtkStatus.msg"
+  "msg/TaskClearanceConfig.msg"
   "msg/TaskStatus.msg"
   "msg/RecordingStatus.msg"
   "srv/StartTask.srv"

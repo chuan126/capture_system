@@ -10,6 +10,18 @@ def make_static_site(directory: Path) -> None:
     (directory / "index.html").write_text("<html><body>ok</body></html>", encoding="utf-8")
 
 
+def route_paths(application: object) -> set[str | None]:
+    paths: set[str | None] = set()
+    pending = list(getattr(application, "routes", ()))
+    while pending:
+        route = pending.pop()
+        paths.add(getattr(route, "path", None))
+        pending.extend(getattr(route, "routes", ()))
+        original_router = getattr(route, "original_router", None)
+        pending.extend(getattr(original_router, "routes", ()))
+    return paths
+
+
 def test_customer_app_does_not_register_devtools_routes(tmp_path: Path) -> None:
     static_dir = tmp_path / "site"
     make_static_site(static_dir)
@@ -46,8 +58,8 @@ def test_devtools_websocket_route_only_exists_in_development(tmp_path: Path) -> 
     make_static_site(static_dir)
     customer = create_app(static_dir, data_root=tmp_path / "customer", start_ros_bridge=False, devtools_enabled=False)
     development = create_app(static_dir, data_root=tmp_path / "development", start_ros_bridge=False, devtools_enabled=True)
-    customer_paths = {getattr(route, "path", None) for route in customer.routes}
-    development_paths = {getattr(route, "path", None) for route in development.routes}
+    customer_paths = route_paths(customer)
+    development_paths = route_paths(development)
     assert "/ws/dev/raw-cloud-preview" not in customer_paths
     assert "/ws/dev/raw-cloud-preview" in development_paths
     assert "/api/dev/recordings/raw-sensor/start" not in customer_paths

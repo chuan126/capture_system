@@ -68,7 +68,9 @@ ros2 launch sensor_adapter odin_driver.launch.py \
 `enable_slam_odom_sync` 是独立的厂商 SDK 行为参数，默认为 `false`。当前
 ODIN1 Lite 固件的两类帧号不能持续一一匹配，预览和业务启动
 入口不得开启该同步器，否则 SLAM 点云会等待里程计并产生队列满警告。
-当前网页预览和净空计算均以原始点云为源，并先经过逐点运动补偿后使用 `/capture/lidar/points_compensated_enu`。开发入口关闭SLAM点云通道，IMU和里程计继续开启。
+当前正式净空直接使用 `/capture/lidar/points_raw`；逐点运动补偿后的
+`/capture/lidar/points_compensated_enu` 只供网页预览。开发入口关闭 SLAM 点云通道，IMU和
+里程计继续为预览及定位旁路开启，但其漂移不会进入净空计算。
 
 同时启动雷达驱动和 RViz2 预览：
 

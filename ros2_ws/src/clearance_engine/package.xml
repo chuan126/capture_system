@@ -2,7 +2,7 @@
 <package format="3">
   <name>clearance_engine</name>
   <version>0.1.0</version>
-  <description>可靠顶部视场内的平面、局部曲面提取与最低顶面高度计算。</description>
+  <description>使用原始雷达本体系圆柱ROI和最低可信空间点簇计算净空。</description>
 
   <maintainer email="todo@example.com">capture_system maintainers</maintainer>
   <license>Proprietary</license>
@@ -10,7 +10,6 @@
   <buildtool_depend>ament_cmake</buildtool_depend>
 
   <depend>interfaces</depend>
-  <depend>libpcl-all-dev</depend>
   <depend>rclcpp</depend>
   <depend>rcl_interfaces</depend>
   <depend>sensor_msgs</depend>

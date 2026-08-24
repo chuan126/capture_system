@@ -4,9 +4,6 @@ data_recorder_node:
     clearance_topic: "/capture/clearance/result"
     rtk_fix_topic: "/capture/rtk/fix"
     rtk_status_topic: "/capture/rtk/status"
-    localization_fix_topic: "/capture/localization/fix"
-    localization_status_topic: "/capture/localization/status"
-    localization_odometry_topic: "/capture/localization/odometry"
     imu_topic: "/capture/imu/data"
     odometry_topic: "/capture/odometry/high_rate"
     # 标准sensor_msgs/Temperature输入；当前厂商驱动未发布时导出列留空。

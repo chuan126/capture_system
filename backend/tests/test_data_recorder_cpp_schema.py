@@ -74,7 +74,9 @@ def test_data_recorder_cpp_schema_executes_without_duplicate_columns() -> None:
         "odin_qw",
     }.issubset(sample_columns)
     assert "imu_accumulator_ = ImuAccumulator{};" in source
-    assert "message->vehicle_pitch_deg" in source
+    assert "bind_nullable_double(statement, 36, std::nullopt);" in source
+    assert "bind_nullable_double(statement, 37, std::nullopt);" in source
+    assert "bind_nullable_double(statement, 38, std::nullopt);" in source
     assert "q2att(" not in source
     assert "insert_source_frame(source);" in source
     assert "DELETE FROM clearance_samples WHERE recorded_timestamp_ns > ?" in source
@@ -104,56 +106,24 @@ def test_data_recorder_stores_mount_adjusted_clearance_and_keeps_raw_algorithm_v
     assert "latest.source_timestamp_ns == last_received_clearance_timestamp_ns_" in source
 
 
-def test_vehicle_attitude_and_direction_use_expected_sources_without_position_side_effects() -> None:
+def test_recorder_keeps_raw_sensor_snapshots_without_fusion_localization_dependencies() -> None:
     project_root = Path(__file__).resolve().parents[2]
     recorder = (project_root / "ros2_ws/src/data_recorder/src/data_recorder_node.cpp").read_text(
         encoding="utf-8"
     )
-    localization_node = (
-        project_root / "ros2_ws/src/localization/src/dead_reckoning_node.cpp"
-    ).read_text(encoding="utf-8")
     page = (project_root / "frontend/app/page.tsx").read_text(encoding="utf-8")
     exporter = (project_root / "backend/exports/service.py").read_text(encoding="utf-8")
 
-    assert localization_node.count("vehicleAttitudeFromOdinQuaternion(") == 1
-    assert "message.vehicle_pitch_deg" in localization_node
-    assert "message->vehicle_pitch_deg" in recorder
-    assert "latest_localization_heading_.heading_deg = message->heading_deg" in recorder
-    assert "localization_vehicle_pitch_deg" in page
-    assert "localization_heading_deg" in page
-    assert "formatMetric(rtkSnapshot?.localization_vehicle_heading_deg" not in page
+    assert "bind_nullable_double(statement, 36, std::nullopt);" in recorder
+    assert "bind_nullable_double(statement, 37, std::nullopt);" in recorder
+    assert "bind_nullable_double(statement, 38, std::nullopt);" in recorder
+    assert "latest_localization_heading_" not in recorder
+    assert "localization_status_subscription_" not in recorder
+    assert "localization_odometry_subscription_" not in recorder
+    assert "deriveLocalizationStatus" not in page
     assert "sample.vehicle_pitch_deg" in exporter
     assert "q2att(" not in recorder
-    assert "fitHeadingRigid2d" in (
-        project_root / "ros2_ws/src/localization/src/heading_rigid_alignment.cpp"
-    ).read_text(encoding="utf-8")
-    assert "steadyNowNanoseconds()" in localization_node
-    assert "latest_fix_.stamp_ns = steadyNowNanoseconds()" in localization_node
-    assert "latest_rtk_status_.stamp_ns = steadyNowNanoseconds()" in localization_node
-    assert "sample.stamp_ns = source_stamp_ns" in localization_node
-    assert "mapReceiptTimeToSensorTimeNs(" in localization_node
-    assert "latest_odom_received_ns_ = received_ns" in localization_node
-    assert "heading_estimate_available_" in localization_node
-
-    rtk_heading = re.search(
-        r"std::uint8_t currentHeadingSourceForRtk\(.*?\n  std::optional<Output>",
-        localization_node,
-        re.DOTALL,
-    )
-    assert rtk_heading is not None
-    assert "heading_estimate_available_" in rtk_heading.group(0)
-    assert "latest_rtk_status_.track_degrees" in rtk_heading.group(0)
-    assert "HEADING_RTK_TRACK" in rtk_heading.group(0)
-
-    calibration = re.search(
-        r"void updateCalibrationFromLatestRtk\(.*?\n  void trimCalibrationPairs",
-        localization_node,
-        re.DOTALL,
-    )
-    assert calibration is not None
-    assert "heading_fit_estimator_.addSample" in calibration.group(0)
-    assert "latest_rtk_status_.track_degrees" not in calibration.group(0)
-    assert "orientation_xyzw" not in calibration.group(0)
+    assert not (project_root / "ros2_ws/src/localization/src/dead_reckoning_node.cpp").exists()
 
     odometry_handler = re.search(
         r"void on_odometry\(.*?\n  void on_radar_temperature", recorder, re.DOTALL

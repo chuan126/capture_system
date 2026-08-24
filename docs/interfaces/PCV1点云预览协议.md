@@ -1,220 +1,60 @@
-# PCV1 点云预览 WebSocket 协议
+# PCV1/PCV2 点云预览协议
 
-核对日期：2026-08-06
+核对日期：2026-08-24
 
+FastAPI 将 `/capture/visualization/cloud_preview` 封装为同源 WebSocket
+`/ws/v1/cloud-preview`。当前生产端发送 PCV2；解析器继续接受 PCV1 单色帧，便于旧录制和协议
+测试兼容。浏览器只显示，不计算净空。
 
-文档状态：首版已实现并完成雷达端到端短时实机验证
+## 1. 流描述
 
-关联数据流：[数据流设计](../architecture/数据流设计.md)
+服务器在二进制帧前发送 JSON：
 
-## 1. 适用范围
+| 字段 | PCV1 | PCV2 |
+| --- | --- | --- |
+| `protocol` / `version` | `PCV1` / `1` | `PCV2` / `2` |
+| `header_bytes` | 24 | 24 |
+| `point_stride` | 12 | 16 |
+| `point_format` | `xyz_float32_le` | `xyz_float32_class_uint8_le` |
+| `color_mode` | `single` | `classification` |
+| `coordinate_mode` | `local_enu` | `local_enu` |
 
-PCV1用于FastAPI向局域网浏览器发送受控XYZ预览点云。正式 `/ws/v1/cloud-preview`
-发送ROS 2侧已经完成姿态补偿、限频并限制最大点数的当前帧局部东北天点云，点坐标
-固定为`x=East`、`y=North`、`z=Up`，单位米，`frame_id`固定为`lidar_local_enu`。
-development 构建的 `/ws/dev/raw-cloud-preview` 复用同一二进制帧头和XYZ负载，但
-`stream_info.coordinate_mode=sensor`，表示原始雷达传感器坐标。该接口保留给直接开发诊断，
-当前测试工作台不再自动连接它。
+`frame_id`、`max_points` 和 `sensor_clock=device_boot` 同时发送。流描述与二进制布局不一致时，
+前端必须拒绝该帧，不能猜测步长。
 
-PCV1不是ROS 2消息，不用于净空计算、记录、坐标转换或跨设备传感器同步。
+## 2. 二进制头
 
-连接地址使用当前页面同源地址：
+24 字节小端头布局不变：
 
-```text
-ws://<host>/ws/v1/cloud-preview
-wss://<host>/ws/v1/cloud-preview
-```
+| 偏移 | 类型 | 字段 |
+| ---: | --- | --- |
+| 0 | 4 bytes | ASCII `PCV1` 或 `PCV2` |
+| 4 | uint16 | 版本 1 或 2 |
+| 6 | uint16 | flags，当前 bit1 表示传感器时间有效 |
+| 8 | uint32 | 帧序号 |
+| 12 | uint64 | 源点云时间戳 ns |
+| 20 | uint32 | 点数 N |
 
-前端根据当前页面协议和主机名选择WS或WSS，不写死设备IP和端口。
+总长度必须严格等于 `24 + N × point_stride`。
 
-## 2. 传输原则
+## 3. 点布局与颜色
 
-- 文本帧只传输流描述和状态；
-- 二进制帧只传输固定头和连续XYZ数据；
-- 服务端不发送历史帧；
-- 每客户端最多保留一帧待发送数据，新帧覆盖旧帧；
-- 点云浮点负载不启用 `permessage-deflate`；
-- 服务端最多允许四个点云客户端；
-- 当前协议只允许服务端推送。
+PCV1 每点是连续的 `x/y/z` FLOAT32 小端，共 12 字节。PCV2 每点 16 字节：XYZ 位于偏移
+0/4/8，偏移 12 为 UINT8 `classification`，偏移 13–15 为填充。
 
-FastAPI依赖ROS预览Topic符合固定输出契约，不检查PointCloud2字段、偏移、步长、
-大小端或数据长度，不逐点解析和修复XYZ负载。
+| classification | 颜色 | 语义 |
+| ---: | --- | --- |
+| 0 | 蓝 `#3B82F6` | 全部扫描到的有效点，或标签安全退化 |
+| 1 | 绿 `#22C55E` | 当前圆柱 ROI |
+| 2 | 红 `#FF4D4F` | 当前帧检测到的最低可信点簇 |
 
-当前正式上游 `cloud_visualization` 在 PCV1 之前完成显示旁路处理：剔除 x/y/z 非有限点和明确
-`(0,0,0)` 占位点；有效点不超过 10000 时全部保留，超过后以 5 cm 体素优先保留空间代表点，
-再补足或限点到最多 10000。该处理只生成预览 Topic，不修改正式运动补偿点云和净空算法输入。
+未知分类按蓝色显示。优先级为红 > 绿 > 蓝。PCV1 没有分类字段，整帧按蓝色显示。
 
-## 3. 流描述消息
+## 4. ROS 上游契约
 
-服务端收到第一帧ROS预览点云后发送：
+PCV2 上游必须是 little-endian、高度 1 的连续 PointCloud2，包含 XYZ FLOAT32 和偏移 12 的
+UINT8 `classification`，`point_step=16`。FastAPI 校验点步长与负载长度后只添加协议头，不
+改写分类。预览节点保留补偿点云的 `frame_id` 和源时间戳，最多 10,000 点、默认 5 Hz。
 
-```json
-{
-  "type": "stream_info",
-  "protocol": "PCV1",
-  "version": 1,
-  "header_bytes": 24,
-  "point_format": "xyz_float32_le",
-  "point_stride": 12,
-  "max_points": 10000,
-  "frame_id": "lidar_local_enu",
-  "coordinate_mode": "local_enu",
-  "sensor_clock": "device_boot",
-  "color_mode": "single"
-}
-```
-
-`frame_id` 来自当前ROS预览消息，示例值不是业务代码固定常量。
-
-正式接口的 `coordinate_mode` 固定为 `local_enu`，表示点坐标是以雷达为局部原点的
-东北天坐标，不表示已获得经纬度或全局地图原点。开发原始点云预览使用 `sensor`，
-不改变正式接口语义。如果 `frame_id`、点格式或点数
-上限变化，服务端
-必须先发送新的 `stream_info`，再发送新语义二进制帧。
-
-## 4. 状态消息
-
-状态消息格式：
-
-```json
-{
-  "type": "status",
-  "state": "waiting",
-  "reason": "NONE",
-  "detail": "点云预览服务已连接"
-}
-```
-
-`state` 枚举：
-
-| 状态 | 含义 |
-| --- | --- |
-| `waiting` | WebSocket已连接，等待第一帧 |
-| `streaming` | 正常发送点云 |
-| `paused` | 预览主动暂停，核心测量继续 |
-| `ros_unavailable` | FastAPI可用，但ROS桥不可用 |
-
-首版不检测“未收到点云”和点云接收超时，也不向浏览器显示此类提示。
-
-`reason` 首版枚举：
-
-```text
-NONE
-ROS_BRIDGE_START_FAILED
-PREVIEW_DISABLED
-CLIENT_LIMIT_REACHED
-```
-
-首版不定义PointCloud2布局错误、位姿缺失、坐标转换失败、ROI或体素降级原因。
-
-## 5. PCV1二进制帧
-
-固定帧头为24字节：
-
-| 偏移 | 类型 | 字段 | 语义 |
-| ---: | --- | --- | --- |
-| 0 | 4 bytes | magic | ASCII `PCV1` |
-| 4 | uint16 LE | version | 固定为1 |
-| 6 | uint16 LE | flags | 坐标和时间戳标志 |
-| 8 | uint32 LE | sequence | 后端发送序号，按无符号32位自然回绕 |
-| 12 | uint64 LE | sensor_stamp_ns | ROS消息原始设备时间戳，单位ns |
-| 20 | uint32 LE | point_count | 点数量，0～10,000 |
-| 24 | bytes | payload | 连续XYZ FLOAT32 Little Endian |
-
-总长度：
-
-```text
-24 + point_count × 12
-```
-
-每点负载布局：
-
-```text
-float32_le x
-float32_le y
-float32_le z
-```
-
-坐标单位为米，坐标语义由最近一条 `stream_info` 确定。
-
-## 6. flags
-
-| 位 | 掩码 | 含义 |
-| ---: | ---: | --- |
-| 0 | `0x0001` | 点坐标是车辆局部坐标 |
-| 1 | `0x0002` | `sensor_stamp_ns`有效 |
-| 2～15 |  | 保留 |
-
-当前运行版发送雷达原点下的局部东北天坐标，并未转换为车辆`base_link`，因此位0仍为0。
-设备时间戳有效时位1为1。发送端将其他位全部置0，接收端忽略未知位。
-
-局部东北天坐标语义由`stream_info.coordinate_mode=local_enu`表达；位0保留是
-为了兼容未来车辆`base_link`坐标转换，不表示当前已完成车辆外参转换。
-
-## 7. 时间戳语义
-
-当前ODIN1 Lite实测 `header.stamp` 是设备启动后的时间，不是Unix时间。PCV1原样
-保留该值，仅用于：
-
-- 帧顺序诊断；
-- 与同一设备时间域的ROS消息关联；
-- 发现时间戳重复、倒退或跳变。
-
-浏览器不得使用系统当前时间减去 `sensor_stamp_ns` 显示端到端延迟。当前浏览器仅使用序号和连接状态进行内部诊断，不在点云卡片底部显示旧版帧统计栏。
-
-服务端判断ROS输入是否静默时使用消息到达时记录的单调时钟，不使用设备时间戳。
-
-## 8. 服务端行为
-
-FastAPI桥从ROS预览消息读取 `header.stamp`、`header.frame_id`、`width` 和
-`data`，生成一次PCV1头并连接XYZ负载。
-
-首版不在FastAPI中：
-
-- 检查PointCloud2布局；
-- 逐点读取XYZ；
-- 过滤或裁剪点；
-- 坐标转换；
-- 体素降采样；
-- 修复ROS消息。
-
-ROS预览Topic必须由 `cloud_visualization` 保证符合固定契约。该约束属于同一
-设备内受控模块之间的首版接口约定。
-
-服务端仍执行WebSocket层的连接数、帧大小和发送超时限制，避免网络客户端影响
-ROS线程。
-
-## 9. 客户端校验
-
-浏览器收到二进制网络帧后依次验证：
-
-1. 总长度至少24字节；
-2. magic和version受支持；
-3. `point_count <= 10000`；
-4. 总长度严格等于 `24 + point_count × 12`；
-5. 按Little Endian读取头和XYZ；
-6. 序号变化用于更新连续性状态。
-
-这是对不可信网络输入的PCV1边界校验，不是对ROS PointCloud2布局的检查。
-
-浏览器平台为Little Endian时可以在对齐后的payload上建立 `Float32Array` 视图；
-其他平台使用 `DataView` 逐值读取。
-
-## 10. 连接和关闭
-
-- 来源不符合允许的同源策略：关闭码1008；
-- 超过客户端上限：关闭码1013；
-- 收到无法继续解析的协议数据：关闭码1002；
-- 服务正常停止：关闭码1001；
-- 网络异常断开：前端按1、2、4、8、10秒上限并带随机抖动重连。
-
-稳定连接超过10秒后，重连退避恢复为1秒。组件卸载或用户离开采集页面时主动
-关闭连接。
-
-## 11. 兼容策略
-
-PCV1发布后保持24字节帧头和XYZ负载不变。新增可选语义优先使用保留flags和新的
-文本字段，客户端必须忽略未知文本字段。
-
-需要改变头长度、点布局、压缩方式或每帧增加车辆位姿时发布PCV2，不得在PCV1中
-静默改变偏移。
+诊断或任务阈值缺失属于允许的旁路降级，应输出蓝色，而不是阻塞帧或反压净空算法。浏览器
+断开只停止预览租约，不影响 ROS 2 采集、计算和记录。

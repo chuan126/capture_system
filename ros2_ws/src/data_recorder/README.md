@@ -15,18 +15,16 @@
 - 暂停期间不写入正式样本
 - 开始和停止时保存 RTK 事件快照；只有最近 2 s 内收到的有效 Fix 才确认入口或出口坐标
 - RTK缺失只标记为 `unconfirmed`，不会阻塞任务
-- 原始RTK保存到 `rtk_samples`，融合定位另外保存到
-  `localization_fix_samples`、`localization_status_samples` 和
-  `localization_odometry_samples`
+- 原始RTK保存到 `rtk_samples`；旧三张融合定位表保留schema兼容，新任务不写伪数据
 - 正式文件先写入 `measurements.db.tmp`，正常或异常收尾后重命名为 `measurements.db`
 
 记录器保留 `lidar_to_top_m` 作为算法原始输出，并将正式字段 `clearance_height_m` 写为 `lidar_to_top_m + lidar_mount_height_m`。算法 Topic 不改写。记录格式 schema version 5 在 `clearance_source_frames` 使用 `candidate_region_count`、`selected_grid_area_m2`、`selected_residual_median_m` 和 `selected_residual_p95_m` 保存明确的算法诊断语义，并在 `recording_metadata` 中保存实际 `travel_direction` 和 `lane_side`；兼容字段 `lane` 继续保留。schema version 6 增加融合定位三张表，version 7 增加IMU区间平均值、RTK时间、雷达温度、最低点、ODIN姿态和位置，version 8明确车辆姿态转换，version 9将方位统一为定位节点的车辆朝向，version 10 在任务元数据中增加冻结的 `clearance_upper_limit_m`，version 11曾采用真实净空事件驱动记录，version 12恢复可追溯的50 Hz最近源帧保持序列，并增加逐样本RTK完整质量字段和ODIN四元数。后端兼容 version 1 至 12。
 
 TXT正式明细输出48列，列间使用4个ASCII空格。除净空、入口/出口RTK、IMU、温度、最低点、车辆姿态和里程计位置外，还包含源帧追溯字段、逐样本RTK完整快照及里程计四元数。旧schema中不存在的字段保持空值或兼容占位，不修改正式SQLite数据。
 
-融合定位表只记录 `/capture/localization/...` 的实时输出，不反写、不覆盖原始
-`/capture/rtk/...` 历史数据。出洞后可用 `localization_status_samples.position_difference_to_rtk_m`
-评价ODIN航位推算误差。
+历史 `localization_fix_samples`、`localization_status_samples` 和
+`localization_odometry_samples` 仍可读取旧任务数据。当前节点不订阅已删除的融合 Topic；新记录
+保留旧表和TXT列为空值，不写0坐标或单位四元数冒充有效融合结果。
 
 
 RTK 端点新鲜度由 `endpoint_rtk_max_age_ms` 控制，当前默认 `2000 ms`。新鲜度按本机单调时钟的接收时间计算，不使用 GNSS 消息时间戳与系统时钟直接比较。

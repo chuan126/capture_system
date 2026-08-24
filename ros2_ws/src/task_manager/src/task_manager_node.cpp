@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "interfaces/msg/recording_status.hpp"
+#include "interfaces/msg/task_clearance_config.hpp"
 #include "interfaces/msg/task_status.hpp"
 #include "interfaces/srv/prepare_recording.hpp"
 #include "interfaces/srv/recording_command.hpp"
@@ -145,6 +146,9 @@ public:
     status_publisher_ = create_publisher<interfaces::msg::TaskStatus>(
       "/capture/task/status",
       rclcpp::QoS(rclcpp::KeepLast(10)).reliable().transient_local());
+    clearance_config_publisher_ = create_publisher<interfaces::msg::TaskClearanceConfig>(
+      "/capture/task/clearance_config",
+      rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local());
     prepare_client_ = create_client<interfaces::srv::PrepareRecording>(
       recorder_prepare_service_, rmw_qos_profile_services_default, callback_group_);
     recorder_control_client_ = create_client<interfaces::srv::RecordingCommand>(
@@ -177,6 +181,12 @@ public:
       std::bind(&TaskManagerNode::on_recording_status, this, std::placeholders::_1));
 
     recover_interrupted_tasks();
+    // 启动恢复会清除活动槽；覆盖DDS中可能残留的旧任务阈值，避免预览误标红色。
+    interfaces::msg::TaskClearanceConfig inactive_config;
+    inactive_config.header.stamp = now();
+    inactive_config.active = false;
+    inactive_config.parameters_valid = false;
+    clearance_config_publisher_->publish(inactive_config);
     if (!recovered_task_ids_.empty()) {
       recovery_timer_ = create_wall_timer(
         500ms, std::bind(&TaskManagerNode::recover_recording_files, this), callback_group_);
@@ -206,6 +216,10 @@ private:
     std::int64_t updated_at_ns{0};
     std::int64_t transition_deadline_ns{0};
     bool active{false};
+    bool clearance_parameters_valid{false};
+    double lidar_mount_height_m{0.0};
+    double clearance_threshold_m{0.0};
+    double clearance_upper_limit_m{0.0};
   };
 
   struct TransitionResult
@@ -1053,8 +1067,11 @@ private:
         "COALESCE(tasks.recording_path,''), COALESCE(tasks.start_requested_at,''), "
         "COALESCE(tasks.started_at,''), COALESCE(tasks.stop_requested_at,''), "
         "COALESCE(tasks.completed_at,''), tasks.active_slot, "
-        "COALESCE(tasks.updated_at,''), COALESCE(tasks.transition_deadline_at,'') "
-        "FROM tasks WHERE tasks.task_id=? AND tasks.deleted_at IS NULL",
+        "COALESCE(tasks.updated_at,''), COALESCE(tasks.transition_deadline_at,''), "
+        "task_parameters.lidar_mount_height_m, task_parameters.clearance_threshold_m, "
+        "task_parameters.clearance_upper_limit_m "
+        "FROM tasks LEFT JOIN task_parameters ON task_parameters.task_id=tasks.task_id "
+        "WHERE tasks.task_id=? AND tasks.deleted_at IS NULL",
         -1, &statement, nullptr), database, "准备读取任务失败");
     bind_text(statement, 1, task_id);
     const int result = sqlite3_step(statement);
@@ -1082,6 +1099,15 @@ private:
     row.active = sqlite3_column_type(statement, 15) != SQLITE_NULL;
     row.updated_at_ns = parse_iso_ns(column_text(statement, 16));
     row.transition_deadline_ns = parse_iso_ns(column_text(statement, 17));
+    row.clearance_parameters_valid =
+      sqlite3_column_type(statement, 18) != SQLITE_NULL &&
+      sqlite3_column_type(statement, 19) != SQLITE_NULL &&
+      sqlite3_column_type(statement, 20) != SQLITE_NULL;
+    if (row.clearance_parameters_valid) {
+      row.lidar_mount_height_m = sqlite3_column_double(statement, 18);
+      row.clearance_threshold_m = sqlite3_column_double(statement, 19);
+      row.clearance_upper_limit_m = sqlite3_column_double(statement, 20);
+    }
     sqlite3_finalize(statement);
     return row;
   }
@@ -1276,6 +1302,16 @@ private:
     status.started_at_ns = task.started_at_ns;
     status.completed_at_ns = task.completed_at_ns;
     status_publisher_->publish(status);
+
+    interfaces::msg::TaskClearanceConfig clearance_config;
+    clearance_config.header.stamp = status.header.stamp;
+    clearance_config.task_id = task.task_id;
+    clearance_config.active = task.active;
+    clearance_config.parameters_valid = task.clearance_parameters_valid;
+    clearance_config.lidar_mount_height_m = task.lidar_mount_height_m;
+    clearance_config.clearance_threshold_m = task.clearance_threshold_m;
+    clearance_config.clearance_upper_limit_m = task.clearance_upper_limit_m;
+    clearance_config_publisher_->publish(clearance_config);
   }
 
   template<typename ResponseT>
@@ -1704,6 +1740,8 @@ private:
   int stop_transition_timeout_ms_{20000};
   rclcpp::CallbackGroup::SharedPtr callback_group_;
   rclcpp::Publisher<interfaces::msg::TaskStatus>::SharedPtr status_publisher_;
+  rclcpp::Publisher<interfaces::msg::TaskClearanceConfig>::SharedPtr
+    clearance_config_publisher_;
   rclcpp::Client<interfaces::srv::PrepareRecording>::SharedPtr prepare_client_;
   rclcpp::Client<interfaces::srv::RecordingCommand>::SharedPtr recorder_control_client_;
   rclcpp::Service<interfaces::srv::StartTask>::SharedPtr start_service_;

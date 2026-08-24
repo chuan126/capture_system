@@ -2,8 +2,11 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
+#include <stdexcept>
 #include <vector>
 
 namespace clearance_engine
@@ -11,164 +14,238 @@ namespace clearance_engine
 namespace
 {
 
-std::vector<Point3f> makePlane(
-  const double center_height, const double slope_east = 0.0, const double slope_north = 0.0,
-  const double half_extent_m = 1.0, const double step_m = 0.03)
+ClearanceConfig testConfig()
+{
+  ClearanceConfig config;
+  config.min_detection_x_m = 0.2;
+  config.max_detection_x_m = 10.0;
+  config.detection_radius_m = 1.0;
+  config.support_height_band_m = 0.05;
+  config.min_support_points = 4U;
+  config.spatial_grid_size_m = 0.1;
+  config.min_occupied_cells = 3U;
+  config.min_spatial_span_m = 0.2;
+  return config;
+}
+
+void appendCluster(
+  std::vector<Point3f> & points, const std::vector<float> & heights,
+  const float y_offset = 0.0F, const float z_offset = 0.0F)
+{
+  const std::array<std::array<float, 2U>, 6U> support{{
+    {{0.01F, 0.01F}}, {{0.12F, 0.01F}}, {{0.23F, 0.01F}},
+    {{0.01F, 0.12F}}, {{0.12F, 0.12F}}, {{0.23F, 0.12F}},
+  }};
+  for (std::size_t index = 0U; index < support.size(); ++index) {
+    points.push_back(Point3f{
+      heights[index % heights.size()], support[index][0] + y_offset,
+      support[index][1] + z_offset, static_cast<std::uint32_t>(points.size())});
+  }
+}
+
+TEST(ClearanceEstimatorTest, FindsNormalLowestSupportedCluster)
 {
   std::vector<Point3f> points;
-  for (double east = -half_extent_m; east <= half_extent_m + 1e-9; east += step_m) {
-    for (double north = -half_extent_m; north <= half_extent_m + 1e-9; north += step_m) {
-      const double up = center_height + slope_east * east + slope_north * north;
-      points.push_back(
-        Point3f{
-            static_cast<float>(east), static_cast<float>(north), static_cast<float>(up)});
+  appendCluster(points, {2.00F, 2.01F, 2.02F});
+
+  const auto result = ClearanceEstimator(testConfig()).estimate(points);
+
+  ASSERT_TRUE(result.valid) << result.invalid_reason;
+  EXPECT_EQ(result.invalid_reason, "NONE");
+  EXPECT_EQ(result.input_point_count, 6U);
+  EXPECT_EQ(result.valid_point_count, 6U);
+  EXPECT_EQ(result.roi_point_count, 6U);
+  EXPECT_EQ(result.cluster_point_indices.size(), 6U);
+  EXPECT_NEAR(result.cluster_median_x, 2.01, 1e-6);
+}
+
+TEST(ClearanceEstimatorTest, RejectsSingleFlyingPointBelowRealCluster)
+{
+  std::vector<Point3f> points{{1.0F, 0.0F, 0.0F, 42U}};
+  appendCluster(points, {2.00F, 2.01F, 2.02F});
+
+  const auto result = ClearanceEstimator(testConfig()).estimate(points);
+
+  ASSERT_TRUE(result.valid) << result.invalid_reason;
+  EXPECT_NEAR(result.lowest_raw_x, 1.0, 1e-6);
+  EXPECT_NEAR(result.cluster_median_x, 2.01, 1e-6);
+  EXPECT_EQ(result.cluster_point_indices.size(), 6U);
+  EXPECT_EQ(
+    std::find(result.cluster_point_indices.begin(), result.cluster_point_indices.end(), 42U),
+    result.cluster_point_indices.end());
+}
+
+TEST(ClearanceEstimatorTest, DoesNotCombineSpatiallySeparatedNoise)
+{
+  auto config = testConfig();
+  config.min_support_points = 4U;
+  config.min_occupied_cells = 1U;
+  config.min_spatial_span_m = 0.0;
+  std::vector<Point3f> points{
+    {2.00F, -0.8F, 0.0F, 0U}, {2.01F, -0.8F, 0.0F, 1U},
+    {2.02F, 0.8F, 0.0F, 2U}, {2.03F, 0.8F, 0.0F, 3U},
+  };
+
+  const auto result = ClearanceEstimator(config).estimate(points);
+
+  EXPECT_FALSE(result.valid);
+  EXPECT_EQ(result.invalid_reason, "NO_SPATIALLY_SUPPORTED_CLUSTER");
+}
+
+TEST(ClearanceEstimatorTest, SelectsLowerOfTwoValidClusters)
+{
+  std::vector<Point3f> points;
+  appendCluster(points, {3.00F, 3.01F, 3.02F}, 0.45F);
+  appendCluster(points, {2.00F, 2.01F, 2.02F}, -0.45F);
+
+  const auto result = ClearanceEstimator(testConfig()).estimate(points);
+
+  ASSERT_TRUE(result.valid) << result.invalid_reason;
+  EXPECT_NEAR(result.cluster_median_x, 2.01, 1e-6);
+}
+
+TEST(ClearanceEstimatorTest, SelectsLowestComponentInsideSameHeightBand)
+{
+  std::vector<Point3f> points;
+  appendCluster(points, {2.04F}, 0.45F);
+  appendCluster(points, {2.00F}, -0.45F);
+
+  const auto result = ClearanceEstimator(testConfig()).estimate(points);
+
+  ASSERT_TRUE(result.valid) << result.invalid_reason;
+  EXPECT_NEAR(result.cluster_median_x, 2.00, 1e-6);
+}
+
+TEST(ClearanceEstimatorTest, IgnoresLowerPointsOutsideCylindricalRoi)
+{
+  std::vector<Point3f> points{
+    {0.1F, 0.0F, 0.0F, 100U}, {1.0F, 1.01F, 0.0F, 101U},
+    {1.0F, 0.0F, 1.01F, 102U}, {10.01F, 0.0F, 0.0F, 103U},
+  };
+  appendCluster(points, {2.00F, 2.01F, 2.02F});
+
+  const auto result = ClearanceEstimator(testConfig()).estimate(points);
+
+  ASSERT_TRUE(result.valid) << result.invalid_reason;
+  EXPECT_EQ(result.roi_point_count, 6U);
+  EXPECT_NEAR(result.cluster_median_x, 2.01, 1e-6);
+}
+
+TEST(ClearanceEstimatorTest, IncludesHeightAndRadiusBoundaries)
+{
+  auto config = testConfig();
+  config.min_support_points = 1U;
+  config.min_occupied_cells = 1U;
+  config.min_spatial_span_m = 0.0;
+  const std::vector<Point3f> points{
+    {0.2F, 1.0F, 0.0F, 7U}, {10.0F, 0.0F, 1.0F, 8U},
+  };
+
+  const auto result = ClearanceEstimator(config).estimate(points);
+
+  ASSERT_TRUE(result.valid) << result.invalid_reason;
+  EXPECT_EQ(result.roi_point_count, 2U);
+  EXPECT_EQ(result.roi_point_indices, (std::vector<std::uint32_t>{7U, 8U}));
+  EXPECT_NEAR(result.cluster_median_x, 0.2, 1e-6);
+}
+
+TEST(ClearanceEstimatorTest, RadiusParameterChangesMembershipDeterministically)
+{
+  std::vector<Point3f> points;
+  appendCluster(points, {2.0F}, 0.60F);
+  for (const double radius : {0.5, 1.0, 1.5, 2.0}) {
+    auto config = testConfig();
+    config.detection_radius_m = radius;
+    const auto result = ClearanceEstimator(config).estimate(points);
+    if (radius == 0.5) {
+      EXPECT_FALSE(result.valid);
+      EXPECT_EQ(result.invalid_reason, "NO_POINTS_IN_CYLINDRICAL_ROI");
+    } else {
+      EXPECT_TRUE(result.valid) << "r=" << radius << ": " << result.invalid_reason;
     }
   }
-  return points;
 }
 
-void append(std::vector<Point3f> & destination, const std::vector<Point3f> & source)
+TEST(ClearanceEstimatorTest, RequiresPointCellAndSpanSupport)
 {
-  destination.insert(destination.end(), source.begin(), source.end());
-}
+  auto config = testConfig();
+  std::vector<Point3f> too_few{{2.0F, 0.0F, 0.0F, 0U}};
+  EXPECT_EQ(
+    ClearanceEstimator(config).estimate(too_few).invalid_reason,
+    "INSUFFICIENT_ROI_SUPPORT");
 
-TEST(ClearanceEstimatorTest, SelectsLowestOfMultiplePlanes)
-{
-  std::vector<Point3f> points;
-  append(points, makePlane(1.5));
-  append(points, makePlane(2.5));
-  append(points, makePlane(3.5));
-
-  ClearanceEstimator estimator(ClearanceConfig{});
-  const auto result = estimator.estimate(points);
-
-  ASSERT_TRUE(result.valid) << result.invalid_reason;
-  EXPECT_GE(result.ransac_plane_count, 3U);
-  EXPECT_GE(result.candidates.size(), 3U);
-  EXPECT_NEAR(result.selected.min_height_m, 1.5, 0.03);
-}
-
-TEST(ClearanceEstimatorTest, DetectsOffAxisFanBottomBelowTunnelRoof)
-{
-  std::vector<Point3f> points = makePlane(6.2, 0.0, 0.0, 3.0, 0.08);
-  auto fan = makePlane(5.0, 0.0, 0.0, 0.35, 0.025);
-  for (auto & point : fan) {
-    point.east += 2.5F;
+  std::vector<Point3f> one_cell;
+  for (std::uint32_t index = 0U; index < 6U; ++index) {
+    one_cell.push_back(Point3f{2.0F, 0.01F, 0.01F, index});
   }
-  append(points, fan);
-
-  ClearanceConfig config;
-  // 屋顶合成点间距为8 cm，测试网格与其匹配，风机细点仍保持连通。
-  config.region_grid_size_m = 0.08;
-  ClearanceEstimator estimator(config);
-  const auto result = estimator.estimate(points);
-
-  ASSERT_TRUE(result.valid) << result.invalid_reason;
-  EXPECT_GE(result.candidates.size(), 2U);
-  EXPECT_NEAR(result.selected.min_height_m, 5.0, 0.05);
-  EXPECT_GT(result.selected.min_position_east_m, 2.0);
+  const auto unsupported = ClearanceEstimator(config).estimate(one_cell);
+  EXPECT_FALSE(unsupported.valid);
+  EXPECT_EQ(unsupported.invalid_reason, "NO_SPATIALLY_SUPPORTED_CLUSTER");
 }
 
-TEST(ClearanceEstimatorTest, UsesLowestHeightInsideObservedTiltedRegion)
+TEST(ClearanceEstimatorTest, UsesMedianAndRepresentativeIsAnOriginalPoint)
 {
-  ClearanceConfig config;
-  config.max_normal_angle_deg = 15.0;
-  ClearanceEstimator estimator(config);
-  const auto result = estimator.estimate(makePlane(2.0, 0.10, 0.05));
-
-  ASSERT_TRUE(result.valid) << result.invalid_reason;
-  EXPECT_LT(result.selected.min_height_m, 1.87);
-  EXPECT_GT(result.selected.min_height_m, 1.80);
-  EXPECT_GT(result.selected.tilt_deg, 5.0);
-  EXPECT_LT(result.selected.tilt_deg, 10.0);
-}
-
-TEST(ClearanceEstimatorTest, RejectsPlaneBeyondNormalAngle)
-{
-  ClearanceEstimator estimator(ClearanceConfig{});
-  const auto result = estimator.estimate(makePlane(3.0, std::tan(25.0 * M_PI / 180.0)));
-
-  EXPECT_FALSE(result.valid);
-  EXPECT_EQ(result.invalid_reason, "NO_PLANE_FOUND");
-}
-
-TEST(ClearanceEstimatorTest, RejectsRegionSmallerThanConfiguredGrid)
-{
-  ClearanceConfig config;
-  config.min_region_span_cells = 8;
-  config.min_region_occupied_cells = 64;
-  ClearanceEstimator estimator(config);
-  const auto result = estimator.estimate(makePlane(2.0, 0.0, 0.0, 0.08, 0.01));
-
-  EXPECT_FALSE(result.valid);
-  EXPECT_EQ(result.invalid_reason, "NO_PLANE_PASSED_REGION_SIZE");
-}
-
-TEST(ClearanceEstimatorTest, FiltersInvalidAndOutsideRoiPoints)
-{
-  auto points = makePlane(2.0);
-  points.push_back(Point3f{0.0F, 0.0F, 0.0F});
-  points.push_back(
-    Point3f{
-        std::numeric_limits<float>::quiet_NaN(), 0.0F, 0.0F});
-  points.push_back(Point3f{20.0F, 0.0F, 2.0F});
-
-  ClearanceEstimator estimator(ClearanceConfig{});
-  const auto result = estimator.estimate(points);
-
-  ASSERT_TRUE(result.valid) << result.invalid_reason;
-  EXPECT_LT(result.valid_point_count, result.input_point_count);
-  EXPECT_NEAR(result.selected.min_height_m, 2.0, 0.03);
-}
-
-
-TEST(ClearanceEstimatorTest, OneRansacPlaneCanProduceMultipleConnectedRegions)
-{
-  ClearanceConfig config;
-  config.max_candidate_planes = 1;
-  config.min_inliers_absolute = 20;
-  config.min_region_span_cells = 4;
-  config.min_region_occupied_cells = 12;
-  config.region_grid_size_m = 0.03;
-
-  auto left = makePlane(2.0, 0.0, 0.0, 0.24, 0.03);
-  auto right = makePlane(2.0, 0.0, 0.0, 0.24, 0.03);
-  for (auto & point : left) point.east -= 0.8F;
-  for (auto & point : right) point.east += 0.8F;
   std::vector<Point3f> points;
-  append(points, left);
-  append(points, right);
+  appendCluster(points, {2.00F, 2.01F, 2.02F, 2.03F, 2.04F, 2.05F});
 
-  ClearanceEstimator estimator(config);
-  const auto result = estimator.estimate(points);
+  const auto result = ClearanceEstimator(testConfig()).estimate(points);
 
   ASSERT_TRUE(result.valid) << result.invalid_reason;
-  EXPECT_EQ(config.max_candidate_planes, 1);
-  EXPECT_EQ(result.ransac_plane_count, 1U);
-  EXPECT_GE(result.candidates.size(), 2U);
+  EXPECT_NEAR(result.cluster_median_x, 2.025, 1e-6);
+  const auto representative = std::find_if(
+    points.begin(), points.end(), [&result](const Point3f & point) {
+      return point.original_index == result.representative.original_index;
+    });
+  ASSERT_NE(representative, points.end());
+  EXPECT_FLOAT_EQ(result.representative.x, representative->x);
+  EXPECT_FLOAT_EQ(result.representative.y, representative->y);
+  EXPECT_FLOAT_EQ(result.representative.z, representative->z);
+  EXPECT_TRUE(result.representative.x == 2.02F || result.representative.x == 2.03F);
 }
 
-TEST(ClearanceEstimatorTest, OccupiedAreaMatchesGridCoverageDefinition)
+TEST(ClearanceEstimatorTest, FiltersNonFiniteAndZeroPlaceholders)
 {
-  ClearanceConfig config;
-  config.region_grid_size_m = 0.02;
-  config.min_region_span_cells = 4;
-  config.min_region_occupied_cells = 12;
-  ClearanceEstimator estimator(config);
-  const auto result = estimator.estimate(makePlane(2.0, 0.0, 0.0, 0.3, 0.02));
+  const float nan = std::numeric_limits<float>::quiet_NaN();
+  const float inf = std::numeric_limits<float>::infinity();
+  std::vector<Point3f> points{
+    {0.0F, 0.0F, 0.0F, 100U}, {nan, 0.0F, 0.0F, 101U},
+    {2.0F, inf, 0.0F, 102U}, {2.0F, 0.0F, -inf, 103U},
+  };
+  appendCluster(points, {2.00F, 2.01F, 2.02F});
+
+  const auto result = ClearanceEstimator(testConfig()).estimate(points);
 
   ASSERT_TRUE(result.valid) << result.invalid_reason;
-  EXPECT_NEAR(
-    result.selected.occupied_area_m2,
-    static_cast<double>(result.selected.occupied_cell_count) *
-      config.region_grid_size_m * config.region_grid_size_m,
-    1e-12);
+  EXPECT_EQ(result.input_point_count, 10U);
+  EXPECT_EQ(result.valid_point_count, 6U);
+  EXPECT_DOUBLE_EQ(result.valid_point_ratio, 0.6);
+}
+
+TEST(ClearanceEstimatorTest, InvalidFrameNeverReusesPreviousResult)
+{
+  ClearanceEstimator estimator(testConfig());
+  std::vector<Point3f> valid_points;
+  appendCluster(valid_points, {2.0F});
+  ASSERT_TRUE(estimator.estimate(valid_points).valid);
+
+  const auto invalid = estimator.estimate({});
+
+  EXPECT_FALSE(invalid.valid);
+  EXPECT_EQ(invalid.invalid_reason, "NO_VALID_RAW_POINTS");
+  EXPECT_TRUE(invalid.cluster_point_indices.empty());
+  EXPECT_DOUBLE_EQ(invalid.cluster_median_x, 0.0);
 }
 
 TEST(ClearanceEstimatorTest, RejectsInvalidConfiguration)
 {
-  ClearanceConfig config;
-  config.region_grid_size_m = 0.0;
+  auto config = testConfig();
+  config.detection_radius_m = 0.0;
+  EXPECT_THROW(ClearanceEstimator estimator(config), std::invalid_argument);
+  config = testConfig();
+  config.max_detection_x_m = config.min_detection_x_m;
+  EXPECT_THROW(ClearanceEstimator estimator(config), std::invalid_argument);
+  config = testConfig();
+  config.min_support_points = 0U;
   EXPECT_THROW(ClearanceEstimator estimator(config), std::invalid_argument);
 }
 

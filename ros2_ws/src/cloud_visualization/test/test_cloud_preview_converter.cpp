@@ -67,8 +67,15 @@ std::array<float, 3U> read_xyz(
   std::memcpy(
     xyz.data(),
     cloud.data.data() + point_index * cloud.point_step,
-    cloud.point_step);
+    xyz.size() * sizeof(float));
   return xyz;
+}
+
+std::uint8_t read_classification(
+  const sensor_msgs::msg::PointCloud2 & cloud,
+  const std::size_t point_index)
+{
+  return cloud.data.at(point_index * cloud.point_step + 12U);
 }
 
 void write_xyz(
@@ -82,7 +89,7 @@ void write_xyz(
     xyz.size() * sizeof(float));
 }
 
-TEST(CloudPreviewConverterTest, PreservesAllPointsBelowLimitAndRemovesRgb)
+TEST(CloudPreviewConverterTest, PreservesAllPointsBelowLimitAndAddsBlueClassification)
 {
   const auto input = make_fixed_layout_cloud(3U, false);
   const auto output = CloudPreviewConverter{}.convert(input, 10U);
@@ -91,21 +98,92 @@ TEST(CloudPreviewConverterTest, PreservesAllPointsBelowLimitAndRemovesRgb)
   EXPECT_EQ(output.header.frame_id, input.header.frame_id);
   EXPECT_EQ(output.height, 1U);
   EXPECT_EQ(output.width, 3U);
-  ASSERT_EQ(output.fields.size(), 3U);
+  ASSERT_EQ(output.fields.size(), 4U);
   EXPECT_EQ(output.fields[0].name, "x");
   EXPECT_EQ(output.fields[0].offset, 0U);
   EXPECT_EQ(output.fields[1].name, "y");
   EXPECT_EQ(output.fields[1].offset, 4U);
   EXPECT_EQ(output.fields[2].name, "z");
   EXPECT_EQ(output.fields[2].offset, 8U);
-  EXPECT_EQ(output.point_step, 12U);
-  EXPECT_EQ(output.row_step, 36U);
+  EXPECT_EQ(output.fields[3].name, "classification");
+  EXPECT_EQ(output.fields[3].offset, 12U);
+  EXPECT_EQ(output.fields[3].datatype, sensor_msgs::msg::PointField::UINT8);
+  EXPECT_EQ(output.point_step, 16U);
+  EXPECT_EQ(output.row_step, 48U);
   EXPECT_FALSE(output.is_bigendian);
   EXPECT_TRUE(output.is_dense);
-  EXPECT_EQ(output.data.size(), 36U);
+  EXPECT_EQ(output.data.size(), 48U);
 
   EXPECT_EQ(read_xyz(output, 0U), (std::array<float, 3U>{0.0F, 0.25F, 0.0F}));
   EXPECT_EQ(read_xyz(output, 2U), (std::array<float, 3U>{2.0F, 2.25F, -2.0F}));
+  EXPECT_EQ(read_classification(output, 0U), 0U);
+  EXPECT_EQ(read_classification(output, 2U), 0U);
+}
+
+TEST(CloudPreviewConverterTest, PreservesBlueGreenRedClassifications)
+{
+  const auto input = make_fixed_layout_cloud(3U);
+  const auto output = CloudPreviewConverter{}.convert(input, 10U, 0.05, {0U, 1U, 2U});
+
+  ASSERT_EQ(output.width, 3U);
+  EXPECT_EQ(read_classification(output, 0U), 0U);
+  EXPECT_EQ(read_classification(output, 1U), 1U);
+  EXPECT_EQ(read_classification(output, 2U), 2U);
+}
+
+TEST(CloudPreviewConverterTest, FallsBackUnknownClassificationToBlue)
+{
+  const auto input = make_fixed_layout_cloud(1U);
+  const auto output = CloudPreviewConverter{}.convert(input, 10U, 0.05, {255U});
+
+  ASSERT_EQ(output.width, 1U);
+  EXPECT_EQ(read_classification(output, 0U), 0U);
+}
+
+TEST(CloudPreviewConverterTest, RejectsClassificationCountMismatch)
+{
+  const auto input = make_fixed_layout_cloud(3U);
+
+  EXPECT_THROW(
+    CloudPreviewConverter{}.convert(input, 10U, 0.05, {0U, 1U}),
+    std::invalid_argument);
+}
+
+TEST(CloudPreviewConverterTest, RetainsRedThenGreenBeforeBlueWhenLimited)
+{
+  auto input = make_fixed_layout_cloud(8U);
+  for (std::size_t index = 0U; index < 8U; ++index) {
+    write_xyz(input, index, {
+      static_cast<float>(index + 1U), 0.0F, static_cast<float>(index % 2U)});
+  }
+  const std::vector<std::uint8_t> classifications{0U, 0U, 0U, 0U, 1U, 1U, 2U, 2U};
+
+  const auto output = CloudPreviewConverter{}.convert(input, 4U, 0.05, classifications);
+
+  ASSERT_EQ(output.width, 4U);
+  std::array<std::size_t, 3U> counts{};
+  for (std::size_t index = 0U; index < output.width; ++index) {
+    ++counts[read_classification(output, index)];
+  }
+  EXPECT_EQ(counts[2], 2U);
+  EXPECT_EQ(counts[1], 2U);
+  EXPECT_EQ(counts[0], 0U);
+}
+
+TEST(CloudPreviewConverterTest, RetainsAlarmClusterEvenWhenItAloneExceedsLimit)
+{
+  auto input = make_fixed_layout_cloud(8U);
+  for (std::size_t index = 0U; index < 8U; ++index) {
+    write_xyz(input, index, {static_cast<float>(index + 1U), 0.0F, 0.0F});
+  }
+  const std::vector<std::uint8_t> classifications{0U, 0U, 2U, 2U, 2U, 2U, 2U, 2U};
+
+  const auto output = CloudPreviewConverter{}.convert(input, 4U, 0.05, classifications);
+
+  ASSERT_EQ(output.width, 4U);
+  for (std::size_t index = 0U; index < output.width; ++index) {
+    EXPECT_EQ(read_classification(output, index), 2U);
+  }
 }
 
 TEST(CloudPreviewConverterTest, FiltersZeroPlaceholdersAndNonFinitePointsBeforeLimiting)

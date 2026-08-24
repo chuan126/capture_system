@@ -12,7 +12,6 @@ const taskCard = taskCardStart >= 0 && taskCardEnd > taskCardStart
   ? page.slice(taskCardStart, taskCardEnd)
   : "";
 const rtkSummary = page.match(/<article className="health-kpi-card health-kpi-card--rtk">([\s\S]*?)<\/article>/)?.[1] ?? "";
-const localizationCard = page.match(/<article className="panel localization-panel">([\s\S]*?)<\/article>\r?\n\r?\n          <article className="panel task-operation-panel">/)?.[1] ?? "";
 const taskDialog = page.match(/function TaskCreateDialog\([\s\S]*?\nconst navigation:/)?.[0] ?? "";
 
 test("system overview uses the revised labels and removes diagnostic helper copy", () => {
@@ -59,32 +58,20 @@ test("current coordinate requires a valid streaming RTK fix", () => {
   assert.match(page, /longitudeValue\.toFixed\(7\)/);
 });
 
-test("capture sidebar is split into fusion localization and task control cards", () => {
+test("capture sidebar dedicates the full column to task control", () => {
   assert.match(page, /dashboard-side-stack/);
-  assert.match(page, /className="panel localization-panel"/);
+  assert.doesNotMatch(page, /className="panel localization-panel"/);
   assert.doesNotMatch(page, /className="panel rtk-control-panel"/);
   assert.match(page, /className="panel task-operation-panel"/);
-  assert.match(css, /dashboard-side-stack[\s\S]*grid-template-rows:\s*auto minmax\(0, 1fr\)/);
-  assert.match(css, /localization-panel \{ flex:\s*0 0 auto/);
+  assert.match(css, /dashboard-side-stack[\s\S]*grid-template-rows:\s*minmax\(0, 1fr\)/);
 });
 
-test("fusion card shows derived LLH and vehicle attitude only", () => {
-  assert.match(localizationCard, /fusion-position-grid/);
-  assert.match(localizationCard, /\{localizationLatitudeText\}/);
-  assert.match(localizationCard, /\{localizationLongitudeText\}/);
-  assert.match(localizationCard, /fusion-attitude-grid/);
-  assert.match(localizationCard, />俯仰</);
-  assert.match(localizationCard, />横滚</);
-  assert.match(localizationCard, />方位</);
-  assert.match(localizationCard, /\{vehiclePitchText\}/);
-  assert.match(localizationCard, /\{vehicleRollText\}/);
-  assert.match(localizationCard, /\{vehicleHeadingText\}/);
-  assert.match(page, /rawCoordinateAvailable[\s\S]*rawTrackDeg[\s\S]*localizationHeadingDeg/);
-  assert.match(page, /localization_heading_deg/);
-  assert.match(page, /displayedVehicleHeadingDeg = localizationHeadingValid/);
-  assert.doesNotMatch(page, /formatMetric\(rtkSnapshot\?\.localization_vehicle_heading_deg/);
-  assert.doesNotMatch(localizationCard, /车辆航向|模式 \/ 航向源|DR时间 \/ 锚点距|水平尺度 \/ 状态|航向偏差|恢复误差/);
-  assert.match(css, /fusion-attitude-grid[\s\S]*grid-template-columns:\s*repeat\(3/);
+test("capture home consumes raw RTK only and exposes no fusion localization card", () => {
+  assert.match(page, /rawCoordinateAvailable/);
+  assert.match(page, /snapshot=\{rtkSnapshot\}/);
+  assert.match(page, /rawRtkValid=\{rawCoordinateAvailable\}/);
+  assert.doesNotMatch(page, /deriveLocalizationStatus|localizationLatitudeText|localizationLongitudeText/);
+  assert.doesNotMatch(page, /localization_heading_deg|displayedVehicleHeadingDeg|fusion-position-grid|fusion-attitude-grid/);
 });
 
 test("live clearance chart exposes independent vertical zoom controls", () => {
@@ -279,7 +266,7 @@ test("capture dashboard keeps notebook text, icons and controls readable", () =>
   assert.match(css, /\.health-device-card__identity b \{[^}]*font-size:\s*12px/i);
   assert.match(css, /\.dashboard-page \.panel-expand-button \{[^}]*width:\s*38px[^}]*height:\s*38px/i);
   assert.match(css, /\.dashboard-clearance-panel \.chart__axis \{[^}]*font-size:\s*10px/i);
-  assert.match(css, /\.fusion-position-grid span,[\s\S]*?font-size:\s*11px/i);
+  assert.doesNotMatch(css, /\.fusion-position-grid|\.fusion-attitude-grid/i);
   assert.match(css, /\.task-section-heading h3 \{[^}]*font-size:\s*12px/i);
   assert.match(css, /\.task-parameter-grid input,[\s\S]*?\.task-parameter-grid select \{[^}]*height:\s*40px[^}]*font-size:\s*12px/i);
   assert.match(css, /@media \(max-width:\s*1600px\) and \(min-width:\s*761px\)[\s\S]*?\.task-parameter-grid \{[^}]*gap:\s*10px/i);

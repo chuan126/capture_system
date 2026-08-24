@@ -80,7 +80,7 @@ type AmapDeviceConfig = {
   service_host: string | null;
 };
 
-type TrackSource = "rtk" | "fusion";
+type TrackSource = "rtk";
 
 type TrackPoint = {
   lng: number;
@@ -208,7 +208,6 @@ function vehicleMarkerMarkup(): string {
 type RealtimeAmapProps = {
   snapshot: RtkSnapshot | null;
   rawRtkValid: boolean;
-  fusionValid: boolean;
   connectionDetail: string;
   laneLabel?: string;
   expanded?: boolean;
@@ -247,7 +246,6 @@ function MapExpandButton({
 export default function RealtimeAmap({
   snapshot,
   rawRtkValid,
-  fusionValid,
   connectionDetail,
   laneLabel = "待任务接入",
   expanded = false,
@@ -391,27 +389,16 @@ export default function RealtimeAmap({
       | undefined;
     if (!map || !AMap) return;
 
-    const fusedFix = !rawRtkValid && fusionValid &&
-      snapshot?.localization_valid === true &&
-      snapshot.localization_latitude !== null &&
-      snapshot.localization_latitude !== undefined &&
-      snapshot.localization_longitude !== null &&
-      snapshot.localization_longitude !== undefined;
-    const source: TrackSource = fusedFix ? "fusion" : "rtk";
-    const latitude = fusedFix ? snapshot.localization_latitude : snapshot?.latitude;
-    const longitude = fusedFix ? snapshot.localization_longitude : snapshot?.longitude;
-    const localizationHeading = snapshot?.localization_heading_deg;
-    const headingDeg = snapshot?.localization_valid === true &&
-      snapshot.localization_heading_source !== 0 &&
-      typeof localizationHeading === "number" && Number.isFinite(localizationHeading)
-      ? localizationHeading
-      : rawRtkValid && typeof snapshot?.track_degrees === "number" && Number.isFinite(snapshot.track_degrees)
-        ? snapshot.track_degrees
-        : null;
-    const hasPosition = fusedFix || rawRtkValid;
+    const source: TrackSource = "rtk";
+    const latitude = snapshot?.latitude;
+    const longitude = snapshot?.longitude;
+    const headingDeg = rawRtkValid &&
+      typeof snapshot?.track_degrees === "number" && Number.isFinite(snapshot.track_degrees)
+      ? snapshot.track_degrees
+      : null;
 
     if (
-      !hasPosition ||
+      !rawRtkValid ||
       latitude === null ||
       latitude === undefined ||
       longitude === null ||
@@ -479,9 +466,9 @@ export default function RealtimeAmap({
       if (!Polyline) return;
       const polyline = new Polyline({
         path: segment.path,
-        strokeColor: segment.source === "fusion" ? "#f2c94c" : "#176bff",
+        strokeColor: "#176bff",
         strokeWeight: 5,
-        strokeOpacity: segment.source === "fusion" ? 0.94 : 0.88,
+        strokeOpacity: 0.88,
         lineJoin: "round",
         lineCap: "round",
         zIndex: 90,
@@ -495,7 +482,7 @@ export default function RealtimeAmap({
     } else {
       map.setCenter?.(gcj);
     }
-  }, [fusionValid, mapState, rawRtkValid, snapshot]);
+  }, [mapState, rawRtkValid, snapshot]);
 
   useEffect(() => {
     const resize = () => mapRef.current?.resize?.();
@@ -522,20 +509,14 @@ export default function RealtimeAmap({
     };
   }, [expanded, mapState]);
 
-  const usingFusion = !rawRtkValid && fusionValid && snapshot?.localization_valid === true;
-  const hasPosition = rawRtkValid || usingFusion;
+  const hasPosition = rawRtkValid;
   const coordinateText =
-    usingFusion &&
-      snapshot.localization_latitude != null && snapshot.localization_longitude != null
-      ? `${snapshot.localization_latitude.toFixed(8)}°, ${snapshot.localization_longitude.toFixed(8)}°`
-      : rawRtkValid && snapshot?.latitude != null && snapshot.longitude != null
+    rawRtkValid && snapshot?.latitude != null && snapshot.longitude != null
         ? `${snapshot.latitude.toFixed(8)}°, ${snapshot.longitude.toFixed(8)}°`
         : lastPositionRef.current
           ? "保留最后有效位置"
           : "等待有效定位坐标";
-  const positionModeText = usingFusion
-    ? "当前为融合定位结果"
-    : rawRtkValid ? "当前为RTK定位结果" : "定位无效";
+  const positionModeText = rawRtkValid ? "当前为RTK定位结果" : "定位无效";
   const trackStateText =
     mapState !== "ready"
       ? "等待地图配置"
@@ -544,16 +525,12 @@ export default function RealtimeAmap({
           ? `实时绘制 · ${trackPointCount} 点`
           : "等待定位"
         : "轨迹已暂停";
-  const mapSubtitle = usingFusion
-    ? "RTK失锁，使用融合定位继续绘制轨迹"
-    : rawRtkValid
+  const mapSubtitle = rawRtkValid
       ? "使用RTK坐标绘制绝对轨迹"
     : "保留最后有效位置，暂停轨迹更新";
-  const mapTip = usingFusion
-    ? "当前为融合定位结果，浅黄色轨迹由RTK锚点和ODIN航位推算得到。"
-    : rawRtkValid
+  const mapTip = rawRtkValid
       ? "当前为RTK定位结果，蓝色轨迹由有效RTK坐标绘制。"
-      : "当前没有有效RTK或融合定位结果，地图保留最后位置和已有轨迹。";
+      : "当前没有有效RTK结果，地图保留最后位置和已有轨迹。";
 
   return (
     <article className={`panel dashboard-map-panel${expanded ? " visual-panel--expanded" : ""}`}>

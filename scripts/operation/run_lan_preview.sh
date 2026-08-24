@@ -189,7 +189,7 @@ echo "正在启动实时点云预览节点……"
 setsid --wait ros2 launch bringup cloud_preview.launch.py &
 child_pids+=("$!")
 
-echo "正在启动单帧RANSAC风机底面检测节点……"
+echo "正在启动原始雷达本体系最低可信点簇净空节点……"
 setsid --wait ros2 launch bringup clearance_preview.launch.py &
 child_pids+=("$!")
 
