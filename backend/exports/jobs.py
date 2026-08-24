@@ -16,6 +16,7 @@ from typing import Callable, Literal
 
 
 ExportJobState = Literal["queued", "running", "completed", "failed", "cancelled"]
+ExportFormat = Literal["txt", "pdf", "deepseek_pdf"]
 
 
 class ExportJobError(RuntimeError):
@@ -25,7 +26,7 @@ class ExportJobError(RuntimeError):
 @dataclass(frozen=True, slots=True)
 class ExportJobRecord:
     job_id: str
-    export_format: Literal["txt", "pdf"]
+    export_format: ExportFormat
     task_ids: tuple[str, ...]
     state: ExportJobState
     phase: str
@@ -152,6 +153,7 @@ class ExportJobManager:
                             error="Web服务重启导致导出进程中断，请重新提交",
                             updated_at=utc_now_text(),
                         )
+                        payload.pop("deepseek_api_key", None)
                         write_job_payload(path, payload)
                     elif state == "queued":
                         self._queue.put(str(payload["job_id"]))
@@ -181,16 +183,33 @@ class ExportJobManager:
 
     def submit(
         self,
-        export_format: Literal["txt", "pdf"],
+        export_format: ExportFormat,
         task_ids: list[str],
+        *,
+        deepseek_api_key: str | None = None,
+        deepseek_model: str | None = None,
     ) -> ExportJobRecord:
         identifiers = list(dict.fromkeys(task_ids))
         if not identifiers:
             raise ExportJobError("导出任务至少需要一个任务ID")
         if export_format == "txt" and len(identifiers) != 1:
             raise ExportJobError("TXT导出只能包含一个任务")
+        if export_format == "deepseek_pdf" and len(identifiers) != 1:
+            raise ExportJobError("大模型报告导出只能包含一个任务")
         if len(identifiers) > 500:
             raise ExportJobError("一次导出最多包含500个任务")
+        if export_format == "deepseek_pdf":
+            normalized_key = (deepseek_api_key or "").strip()
+            normalized_model = (deepseek_model or "deepseek-v4-flash").strip()
+            if not normalized_key:
+                raise ExportJobError("DeepSeek API Key不能为空")
+            if len(normalized_key) > 2048 or any(ord(char) < 32 for char in normalized_key):
+                raise ExportJobError("DeepSeek API Key格式无效")
+            if normalized_model not in {"deepseek-v4-flash", "deepseek-v4-pro"}:
+                raise ExportJobError("DeepSeek模型配置无效")
+        else:
+            normalized_key = ""
+            normalized_model = ""
 
         request_key = json.dumps(
             {"export_format": export_format, "task_ids": identifiers},
@@ -198,7 +217,8 @@ class ExportJobManager:
             sort_keys=True,
         )
         with self._lock:
-            existing = self._find_active_request(request_key)
+            # 大模型报告每次点击都必须创建独立请求和全新模型上下文，不做作业去重。
+            existing = None if export_format == "deepseek_pdf" else self._find_active_request(request_key)
             if existing is not None:
                 return existing
             job_id = str(uuid.uuid4())
@@ -216,6 +236,9 @@ class ExportJobManager:
                 "updated_at": now,
                 "error": None,
             }
+            if export_format == "deepseek_pdf":
+                payload["deepseek_api_key"] = normalized_key
+                payload["deepseek_model"] = normalized_model
             write_job_payload(self._job_path(job_id), payload)
             self._queue.put(job_id)
         return ExportJobRecord.from_payload(payload)
@@ -236,6 +259,7 @@ class ExportJobManager:
                 progress=float(payload.get("progress", 0.0)),
                 updated_at=utc_now_text(),
             )
+            payload.pop("deepseek_api_key", None)
             write_job_payload(path, payload)
             if self._current_job_id == job_id and self._current_process is not None:
                 self._terminate_process(self._current_process)
@@ -372,6 +396,7 @@ class ExportJobManager:
                 error=message,
                 updated_at=utc_now_text(),
             )
+            payload.pop("deepseek_api_key", None)
             write_job_payload(path, payload)
         except ExportJobError:
             return

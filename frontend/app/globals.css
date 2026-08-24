@@ -2271,6 +2271,47 @@ table {
   font-size: 11px;
   line-height: 1.65;
 }
+.deepseek-report-config {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid #cddceb;
+  border-radius: 10px;
+  background: linear-gradient(145deg, #f7faff, #f2f7fc);
+}
+.deepseek-report-config > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.deepseek-report-config > header > div { display: grid; gap: 4px; }
+.deepseek-report-config > header strong { color: #244e79; font-size: 13px; }
+.deepseek-report-config > header span,
+.deepseek-report-config > small { color: #66778c; font-size: 10px; line-height: 1.55; }
+.deepseek-report-config > header > span { flex: 0 0 auto; padding: 5px 8px; border-radius: 6px; background: #e7f0f9; }
+.deepseek-report-config__fields {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(190px, .42fr);
+  gap: 12px;
+}
+.deepseek-report-config__fields label { display: grid; gap: 6px; }
+.deepseek-report-config__fields label > span { color: #50647c; font-size: 10px; font-weight: 750; }
+.deepseek-report-config__fields input,
+.deepseek-report-config__fields select {
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 10px;
+  color: #24374e;
+  border: 1px solid #bdcee0;
+  border-radius: 8px;
+  background: #fff;
+  font-size: 12px;
+}
+.deepseek-report-config > p { margin: 0; overflow-wrap: anywhere; font-size: 10px; line-height: 1.5; }
+.deepseek-report-config > p.is-success { color: var(--green); }
+.deepseek-report-config > p.is-error { color: var(--red); }
 .report-export-card__footer {
   display: flex;
   align-items: center;
@@ -2287,6 +2328,7 @@ table {
 .report-export-card__footer small.is-success { color: var(--green); }
 .report-export-card__footer small.is-error { color: var(--red); }
 .report-export-card__footer .button { min-width: 124px; min-height: 42px; font-size: 13px; }
+.report-export-card__actions { display: flex; flex: 0 0 auto; gap: 10px; }
 
 @media (max-width: 1700px) {
   .report-export-grid { grid-template-columns: 1fr; }
@@ -2309,6 +2351,10 @@ table {
   .report-export-card__head > strong { grid-column: 1 / -1; justify-self: start; }
   .report-export-card__footer { align-items: stretch; flex-direction: column; }
   .report-export-card__footer .button { width: 100%; }
+  .report-export-card__actions,
+  .deepseek-report-config__fields { grid-template-columns: 1fr; }
+  .report-export-card__actions { display: grid; }
+  .deepseek-report-config > header { flex-direction: column; }
   .report-export-blocker { grid-template-columns: 1fr; }
 }
 

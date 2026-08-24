@@ -44,6 +44,7 @@ FastAPI 是浏览器访问 RK3588 的唯一 HTTP 和 WebSocket 入口。当前�
 | `/api/v1/tasks/{task_id}/exports/txt/download` | HTTP TXT | 下载已生成的任务明细 |
 | `/api/v1/reports/clearance-summary` | HTTP POST JSON | 汇总所选任务中满足条件的正式记录并生成 PDF |
 | `/api/v1/reports/{report_id}/download` | HTTP PDF | 下载已生成的汇总报告 |
+| `/api/v1/tasks/{task_id}/export-jobs/deepseek-report` | HTTP POST JSON | 使用显示端提交的 API Key，为单任务创建一次独立 DeepSeek 大模型报告作业 |
 
 旧的模拟报告测试接口已经移除。正式导出只接受 `data_origin=recorded`、任务正常完成、记录完整且至少含一个有效高度样本的任务。
 
@@ -126,6 +127,10 @@ WebSocket 实际存在客户端时运行。
 PDF 报告由客户端显式提交任务 ID 集合，后端只汇总其中满足正式记录条件的任务，不再依赖作业批次。TXT 面向单个任务生成48列明细；同时生成可追溯的异常分析JSON。报告最低净空只排除`HIGH_CONFIDENCE_OUTLIER`，`REVIEW_REQUIRED`仍保守计入，真实单个结构和周期性结构受到保护。距离不可用时使用有界样本窗口并禁止自动排除，周期候选过多时同样保守降级。分析结果按数据库身份和算法版本原子缓存。
 
 正式TXT和PDF导出使用持久化单并发作业：创建接口立即返回作业ID，前端显示阶段与进度、支持取消，并在刷新后从`localStorage`恢复轮询。工作负载在独立低优先级进程执行；正式任务运行或暂停时保持排队，不与采集链路争用CPU。同步导出接口暂时保留用于兼容。
+
+大模型辅助报告同样通过该队列运行，但每次提交都新建作业，不按任务去重。工作进程只读打开任务 `measurements.db`，把已知记录表连同列名和全部行转换为一份 JSON，在配置的字节上限内通过一次 DeepSeek `/chat/completions` 非流式请求发送；第一版不分块、不截断。DeepSeek 返回严格 JSON 分析，后端把设备端确定的任务字段、有效最低净空和可信度写入固定表格，再把模型分析写在表格后。API Key 在作业排队或运行时暂存于作业索引，完成、失败、取消和服务重启恢复时删除，且不进入报告 manifest。
+
+现有汇总 PDF 与大模型 PDF 共用混合字体模块：中文使用 `CAPTURE_PDF_FONT_PATH` 指定的宋体，ASCII 使用 `CAPTURE_PDF_LATIN_FONT_PATH` 指定的 Times New Roman。因字体授权不随仓库分发；未配置 Times New Roman 时回退为 PDF 标准 Times-Roman。
 
 旧 `/api/v1/batches...` 接口和数据库批次字段暂时保留用于历史数据兼容，不作为当前前端工作流。
 

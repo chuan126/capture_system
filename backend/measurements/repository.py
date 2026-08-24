@@ -222,6 +222,10 @@ class MeasurementRepository:
         self._analysis_locks_guard = Lock()
         self._analysis_locks: dict[str, Lock] = {}
 
+    def resolve_recording_database(self, task: TaskRecord) -> Path:
+        """返回已完成任务的测量数据库路径，并保持既有目录越界检查。"""
+        return self._resolve_recording_database(task)
+
     def load_summary(
         self,
         task: TaskRecord,

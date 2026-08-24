@@ -10,7 +10,6 @@ import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from threading import Lock
 from typing import Iterable, TextIO
 
 from reportlab.lib import colors
@@ -18,10 +17,16 @@ from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
+from backend.exports.pdf_fonts import (
+    PdfFontError,
+    PdfFontSet,
+    draw_mixed_text,
+    mixed_paragraph,
+    mixed_text_width,
+    register_report_fonts,
+)
 from backend.measurements.clearance_anomaly import (
     DEFAULT_CLEARANCE_ANOMALY_CONFIG,
     ClearanceAnalysisResult,
@@ -75,14 +80,7 @@ class GeneratedExport:
 
 _CHINA_TIMEZONE = timezone(timedelta(hours=8))
 _SAFE_FILE_COMPONENT = re.compile(r"[^0-9A-Za-z._-]+")
-_PDF_FONT_NAME = "CaptureSystemCJK"
-_PDF_FONT_LOCK = Lock()
 _TXT_FIELD_SEPARATOR = "    "
-_DEFAULT_PDF_FONT_CANDIDATES = (
-    Path("/usr/share/fonts/truetype/arphic-gbsn00lp/gbsn00lp.ttf"),
-    Path("/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"),
-    Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
-)
 
 
 class ReportExportService:
@@ -229,8 +227,8 @@ class ReportExportService:
         destination = report_directory / file_name
         temporary_path = report_directory / ".report.tmp.pdf"
         try:
-            font_name = self._register_pdf_font()
-            self._write_pdf(temporary_path, eligible, report_id, generated_at, font_name)
+            fonts = self._register_pdf_fonts()
+            self._write_pdf(temporary_path, eligible, report_id, generated_at, fonts)
             os.replace(temporary_path, destination)
             report_sha256 = _sha256_file(destination)
             manifest = {
@@ -432,35 +430,11 @@ class ReportExportService:
                 ]
             )
 
-    def _register_pdf_font(self) -> str:
-        with _PDF_FONT_LOCK:
-            if _PDF_FONT_NAME in pdfmetrics.getRegisteredFontNames():
-                return _PDF_FONT_NAME
-            candidates: Iterable[Path]
-            if self.pdf_font_path is not None:
-                candidates = (self.pdf_font_path,)
-            else:
-                configured = os.getenv("CAPTURE_PDF_FONT_PATH")
-                candidates = (
-                    (Path(configured).expanduser().resolve(),)
-                    if configured
-                    else _DEFAULT_PDF_FONT_CANDIDATES
-                )
-            errors: list[str] = []
-            for candidate in candidates:
-                if not candidate.is_file():
-                    errors.append(f"{candidate} 不存在")
-                    continue
-                try:
-                    pdfmetrics.registerFont(TTFont(_PDF_FONT_NAME, str(candidate)))
-                    return _PDF_FONT_NAME
-                except Exception as error:
-                    errors.append(f"{candidate} 无法加载：{error}")
-            detail = "；".join(errors) or "未配置可用中文字体"
-            raise ExportStorageError(
-                "PDF 中文字体不可用。请设置 CAPTURE_PDF_FONT_PATH 指向可读取的 TTF/TTC 字体。"
-                f" 当前检查结果：{detail}"
-            )
+    def _register_pdf_fonts(self) -> PdfFontSet:
+        try:
+            return register_report_fonts(self.pdf_font_path)
+        except PdfFontError as error:
+            raise ExportStorageError(str(error)) from error
 
     @staticmethod
     def _write_pdf(
@@ -468,7 +442,7 @@ class ReportExportService:
         eligible: list[TaskExportAssessment],
         report_id: str,
         generated_at: str,
-        font_name: str,
+        fonts: PdfFontSet,
     ) -> None:
         page_size = landscape(A4)
         document = SimpleDocTemplate(
@@ -485,7 +459,7 @@ class ReportExportService:
         title_style = ParagraphStyle(
             "CaptureTitle",
             parent=styles["Title"],
-            fontName=font_name,
+            fontName=fonts.chinese,
             fontSize=18,
             leading=23,
             alignment=TA_CENTER,
@@ -494,7 +468,7 @@ class ReportExportService:
         body_style = ParagraphStyle(
             "CaptureBody",
             parent=styles["BodyText"],
-            fontName=font_name,
+            fontName=fonts.chinese,
             fontSize=8,
             leading=11,
         )
@@ -507,12 +481,12 @@ class ReportExportService:
             spaceAfter=3 * mm,
         )
         story = [
-            Paragraph("隧道净空检测汇总报告", title_style),
-            Paragraph(f"报告编号　{report_id}", body_style),
-            Paragraph(f"生成时间　{_format_iso_text(generated_at)}", body_style),
-            Paragraph(f"汇总任务数　{len(eligible)}", body_style),
+            mixed_paragraph("隧道净空检测汇总报告", title_style, fonts),
+            mixed_paragraph(f"报告编号　{report_id}", body_style, fonts),
+            mixed_paragraph(f"生成时间　{_format_iso_text(generated_at)}", body_style, fonts),
+            mixed_paragraph(f"汇总任务数　{len(eligible)}", body_style, fonts),
             Spacer(1, 5 * mm),
-            Paragraph("任务汇总", heading_style),
+            mixed_paragraph("任务汇总", heading_style, fonts),
         ]
         headers = [
             "任务序号",
@@ -526,7 +500,7 @@ class ReportExportService:
             "隧道出口 RTK",
         ]
         rows: list[list[Paragraph]] = [
-            [Paragraph(header, body_style) for header in headers]
+            [mixed_paragraph(header, body_style, fonts) for header in headers]
         ]
         for assessment in eligible:
             summary = assessment.summary
@@ -535,21 +509,22 @@ class ReportExportService:
             analysis = assessment.clearance_analysis
             if analysis is None:
                 continue
-            time_text = f"{_format_iso_text(summary.started_at)}<br/>{_format_iso_text(summary.ended_at)}"
+            time_text = f"{_format_iso_text(summary.started_at)}\n{_format_iso_text(summary.ended_at)}"
             rows.append(
                 [
-                    Paragraph(assessment.task.display_id, body_style),
-                    Paragraph(_escape_pdf_text(assessment.task.tunnel_code), body_style),
-                    Paragraph(_lane_text(summary.lane, summary.travel_direction, summary.lane_side), body_style),
-                    Paragraph(_format_number(analysis.raw_min_clearance_m, 3), body_style),
-                    Paragraph(
+                    mixed_paragraph(assessment.task.display_id, body_style, fonts),
+                    mixed_paragraph(assessment.task.tunnel_code, body_style, fonts),
+                    mixed_paragraph(_lane_text(summary.lane, summary.travel_direction, summary.lane_side), body_style, fonts),
+                    mixed_paragraph(_format_number(analysis.raw_min_clearance_m, 3), body_style, fonts),
+                    mixed_paragraph(
                         _format_number(analysis.recommended_min_clearance_m, 3) or "—",
                         body_style,
+                        fonts,
                     ),
-                    Paragraph(_format_confidence(analysis.confidence_score, analysis.confidence_level), body_style),
-                    Paragraph(time_text, body_style),
-                    Paragraph(_escape_pdf_text(_format_rtk(summary.entry_rtk)), body_style),
-                    Paragraph(_escape_pdf_text(_format_rtk(summary.exit_rtk)), body_style),
+                    mixed_paragraph(_format_confidence(analysis.confidence_score, analysis.confidence_level), body_style, fonts),
+                    mixed_paragraph(time_text, body_style, fonts),
+                    mixed_paragraph(_format_rtk(summary.entry_rtk), body_style, fonts),
+                    mixed_paragraph(_format_rtk(summary.exit_rtk), body_style, fonts),
                 ]
             )
         table = Table(
@@ -560,7 +535,7 @@ class ReportExportService:
         table.setStyle(
             TableStyle(
                 [
-                    ("FONTNAME", (0, 0), (-1, -1), font_name),
+                    ("FONTNAME", (0, 0), (-1, -1), fonts.chinese),
                     ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E8EDF3")),
                     ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#202833")),
                     ("ALIGN", (0, 0), (0, -1), "CENTER"),
@@ -578,21 +553,30 @@ class ReportExportService:
         story.extend(
             [
                 Spacer(1, 5 * mm),
-                Paragraph(
+                mixed_paragraph(
                     "说明　原始单帧最低值不做异常剔除；建议最低可信净空由单任务证据算法计算。"
                     "少于5个几何合格独立源帧时建议值显示为—，不会复制原始最低值。"
                     "可信度为0–100的证据评分，不是统计概率；待复核低值仍保守计入。"
                     "周期性设施和具有空间连续性的单个结构不会因高度低而自动排除。"
                     "无有效 RTK 端点时对应字段标记为未记录。",
                     body_style,
+                    fonts,
                 ),
             ]
         )
 
         def draw_footer(canvas: object, doc: object) -> None:
             canvas.saveState()
-            canvas.setFont(font_name, 8)
-            canvas.drawRightString(page_size[0] - 14 * mm, 8 * mm, f"第 {doc.page} 页")
+            footer = f"第 {doc.page} 页"
+            width = mixed_text_width(footer, fonts, 8)
+            draw_mixed_text(
+                canvas,
+                page_size[0] - 14 * mm - width,
+                8 * mm,
+                footer,
+                fonts,
+                8,
+            )
             canvas.restoreState()
 
         document.build(story, onFirstPage=draw_footer, onLaterPages=draw_footer)
@@ -685,10 +669,6 @@ def _format_iso_text(value: str | None) -> str:
 def _format_timestamp_ms(timestamp_ms: int) -> str:
     value = datetime.fromtimestamp(timestamp_ms / 1000.0, timezone.utc)
     return value.astimezone(_CHINA_TIMEZONE).isoformat(timespec="milliseconds")
-
-
-def _escape_pdf_text(value: str) -> str:
-    return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 def _utc_now_text() -> str:

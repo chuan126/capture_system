@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import FileResponse
 
 from backend.exports.models import (
+    DeepSeekReportRequest,
     ExportFileResponse,
     ExportJobResponse,
     ReportPreviewResponse,
@@ -194,6 +195,32 @@ def create_clearance_pdf_job(
         raise _export_http_error(error) from error
 
 
+@router.post(
+    "/tasks/{task_id}/export-jobs/deepseek-report",
+    response_model=ExportJobResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def create_deepseek_report_job(
+    task_id: str,
+    payload: DeepSeekReportRequest,
+    request: Request,
+) -> ExportJobResponse:
+    try:
+        _task_repository(request).get_task(task_id)
+        return _job_response(
+            _job_manager(request).submit(
+                "deepseek_pdf",
+                [task_id],
+                deepseek_api_key=payload.api_key,
+                deepseek_model=payload.model,
+            )
+        )
+    except TaskNotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务不存在") from error
+    except (TaskStorageError, ExportJobError) as error:
+        raise _export_http_error(error) from error
+
+
 @router.get("/export-jobs/{job_id}", response_model=ExportJobResponse)
 def get_export_job(job_id: str, request: Request) -> ExportJobResponse:
     try:
@@ -215,7 +242,11 @@ def download_export_job(job_id: str, request: Request) -> FileResponse:
     try:
         record = _job_manager(request).get(job_id)
         path = _job_manager(request).resolve_download(job_id)
-        media_type = "application/pdf" if record.export_format == "pdf" else "text/plain; charset=utf-8"
+        media_type = (
+            "application/pdf"
+            if record.export_format in {"pdf", "deepseek_pdf"}
+            else "text/plain; charset=utf-8"
+        )
         return FileResponse(path, media_type=media_type, filename=path.name)
     except ExportJobError as error:
         raise _export_http_error(error) from error

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { downloadGeneratedFile, generateSummaryPdf, generateTaskTxt, loadReportPreview } from "../components/report/reportExportApi.ts";
+import { downloadGeneratedFile, generateSummaryPdf, generateTaskTxt, loadReportPreview, startDeepSeekReportJob } from "../components/report/reportExportApi.ts";
 
 const originalFetch = globalThis.fetch;
 const originalDocument = globalThis.document;
@@ -78,6 +78,40 @@ test("creates TXT and selected-task PDF through FastAPI HTTP endpoints", async (
   assert.deepEqual(calls, [
     ["/api/v1/tasks/task-1/exports/txt", "POST", null],
     ["/api/v1/reports/clearance-summary", "POST", { task_ids: ["task-1"] }],
+  ]);
+});
+
+test("creates a fresh DeepSeek report job with the display-side key", async () => {
+  let request = null;
+  globalThis.fetch = async (url, init) => {
+    request = [url, init.method, JSON.parse(init.body)];
+    return new Response(JSON.stringify({
+      job_id: "job-deepseek-1",
+      export_format: "deepseek_pdf",
+      task_ids: ["task-1"],
+      state: "queued",
+      phase: "等待导出资源",
+      progress: 0,
+      created_at: "2026-08-24T01:00:00Z",
+      updated_at: "2026-08-24T01:00:00Z",
+      error: null,
+      file_name: null,
+      file_size_bytes: null,
+      generated_at: null,
+      download_url: null,
+      report_id: null,
+      task_id: null,
+      included_task_count: null,
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+
+  const job = await startDeepSeekReportJob("task-1", "sk-entered-on-display", "deepseek-v4-pro");
+
+  assert.equal(job.exportFormat, "deepseek_pdf");
+  assert.deepEqual(request, [
+    "/api/v1/tasks/task-1/export-jobs/deepseek-report",
+    "POST",
+    { api_key: "sk-entered-on-display", model: "deepseek-v4-pro" },
   ]);
 });
 

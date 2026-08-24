@@ -54,6 +54,13 @@ class ReportSelectionRequest(BaseModel):
     task_ids: list[str] = Field(min_length=1, max_length=500)
 
 
+class DeepSeekReportRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    api_key: str = Field(min_length=1, max_length=2048)
+    model: Literal["deepseek-v4-flash", "deepseek-v4-pro"] = "deepseek-v4-flash"
+
+
 class ReportPreviewResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -66,7 +73,7 @@ class ReportPreviewResponse(BaseModel):
 class ExportFileResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    export_format: Literal["txt", "pdf"]
+    export_format: Literal["txt", "pdf", "deepseek_pdf"]
     file_name: str
     file_size_bytes: int
     generated_at: datetime
@@ -83,7 +90,7 @@ class ExportJobResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     job_id: str
-    export_format: Literal["txt", "pdf"]
+    export_format: Literal["txt", "pdf", "deepseek_pdf"]
     task_ids: list[str]
     state: Literal["queued", "running", "completed", "failed", "cancelled"]
     phase: str

@@ -5,16 +5,24 @@ import os
 import traceback
 from pathlib import Path
 
+from backend.exports.deepseek_report import DeepSeekReportService
 from backend.exports.jobs import read_job_payload, utc_now_text, write_job_payload
 from backend.exports.service import ReportExportService
 from backend.measurements.repository import MeasurementRepository
 from backend.tasks.repository import TaskRepository
 
 
-def _update(job_file: Path, **changes: object) -> dict[str, object]:
+def _update(
+    job_file: Path,
+    *,
+    clear_deepseek_api_key: bool = False,
+    **changes: object,
+) -> dict[str, object]:
     payload = read_job_payload(job_file)
     if payload.get("state") == "cancelled":
         raise RuntimeError("导出任务已取消")
+    if clear_deepseek_api_key:
+        payload.pop("deepseek_api_key", None)
     payload.update(changes, updated_at=utc_now_text())
     write_job_payload(job_file, payload)
     return payload
@@ -39,16 +47,38 @@ def run(data_root: Path, job_file: Path, pdf_font: Path | None) -> int:
             measurement_repository,
             pdf_font_path=pdf_font,
         )
+        deepseek_service = DeepSeekReportService(
+            data_root,
+            service,
+            measurement_repository,
+            pdf_font_path=pdf_font,
+        )
         export_format = str(payload.get("export_format"))
         _update(job_file, phase="生成导出文件", progress=0.65)
         if export_format == "txt":
             generated = service.generate_txt(task_repository.get_task(task_ids[0]))
         elif export_format == "pdf":
             generated = service.generate_pdf(task_ids)
+        elif export_format == "deepseek_pdf":
+            api_key = payload.get("deepseek_api_key")
+            model = payload.get("deepseek_model")
+            if not isinstance(api_key, str) or not isinstance(model, str):
+                raise RuntimeError("大模型报告任务缺少DeepSeek API配置")
+            generated = deepseek_service.generate(
+                task_repository.get_task(task_ids[0]),
+                api_key,
+                model,
+                progress=lambda phase, progress: _update(
+                    job_file,
+                    phase=phase,
+                    progress=progress,
+                ),
+            )
         else:
             raise RuntimeError(f"不支持的导出格式：{export_format}")
         _update(
             job_file,
+            clear_deepseek_api_key=True,
             state="completed",
             phase="导出完成",
             progress=1.0,
@@ -66,6 +96,7 @@ def run(data_root: Path, job_file: Path, pdf_font: Path | None) -> int:
         try:
             _update(
                 job_file,
+                clear_deepseek_api_key=True,
                 state="failed",
                 phase="导出失败",
                 error=str(error),

@@ -207,7 +207,7 @@ test("report removes task-name fields and aggregates only user-selected tasks", 
 });
 
 test("report enables formal exports only for eligible recorded selected data", () => {
-  assert.match(report, /loadReportPreview\(selectedIds,controller\.signal\)/);
+  assert.match(report, /loadReportPreview\(previewIds,controller\.signal\)/);
   assert.match(report, /startTaskTxtJob\(selectedTask\.taskId\)/);
   assert.match(report, /startSummaryPdfJob\(selectedIds\)/);
   assert.match(report, /downloadExportJob/);
@@ -222,6 +222,20 @@ test("report enables formal exports only for eligible recorded selected data", (
   assert.match(report, /证据不足时显示“--”，不会复制原始最低值/);
   assert.match(report, /真实连续结构和周期性设施受到保护/);
   assert.match(reportApi, /task_ids:taskIds/);
+});
+
+test("report adds one-shot DeepSeek export beside the existing PDF export", () => {
+  assert.match(report, /"导出 PDF"/);
+  assert.match(report, /"大模型报告导出"/);
+  assert.match(report, /startDeepSeekReportJob\(selectedTask\.taskId,deepseekApiKey,deepseekModel\)/);
+  assert.match(report, /previewIds=useMemo/);
+  assert.match(report, /checked\.has\(t\.taskId\)&&t\.pdfExportable/);
+  assert.match(report, /capture-deepseek-api-key/);
+  assert.match(report, /localStorage\.setItem\(DEEPSEEK_API_KEY_STORAGE,value\)/);
+  assert.match(report, /每次点击都创建一个新的模型任务窗口/);
+  assert.match(report, /完整measurements\.db并使用单次请求，不进行长任务分块/);
+  assert.match(reportApi, /export-jobs\/deepseek-report/);
+  assert.match(reportApi, /api_key:apiKey,model/);
 });
 
 test("task browser searches time identifiers and tunnel metadata and groups by date", () => {
