@@ -59,7 +59,7 @@ test("keeps playback and report pages on real task context without simulated rep
   assert.match(page, /PlaybackWorkspace/);
   assert.match(page, /ReportWorkspace/);
   assert.match(playback, /净空高度曲线/);
-  assert.match(report, /50 Hz 测量明细/);
+  assert.match(report, /原始数据保存/);
   assert.match(report, /隧道净空检测汇总报告/);
   assert.doesNotMatch(`${page}${playback}${report}`, /browser-download-test|report-export-test|模拟数据/);
 });

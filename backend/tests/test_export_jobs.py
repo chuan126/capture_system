@@ -48,12 +48,16 @@ def test_deepseek_job_always_creates_new_window_and_scrubs_key_on_cancel(tmp_pat
         ["task-1"],
         deepseek_api_key="sk-test-one",
         deepseek_model="deepseek-v4-flash",
+        deepseek_api_url="https://api.deepseek.com/chat/completions",
+        deepseek_skill_prompt="审计当前任务",
     )
     second = manager.submit(
         "deepseek_pdf",
         ["task-1"],
         deepseek_api_key="sk-test-one",
         deepseek_model="deepseek-v4-flash",
+        deepseek_api_url="https://api.deepseek.com/chat/completions",
+        deepseek_skill_prompt="审计当前任务",
     )
 
     assert first.job_id != second.job_id

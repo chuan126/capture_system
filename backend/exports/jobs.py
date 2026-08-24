@@ -188,6 +188,8 @@ class ExportJobManager:
         *,
         deepseek_api_key: str | None = None,
         deepseek_model: str | None = None,
+        deepseek_api_url: str | None = None,
+        deepseek_skill_prompt: str | None = None,
     ) -> ExportJobRecord:
         identifiers = list(dict.fromkeys(task_ids))
         if not identifiers:
@@ -195,21 +197,29 @@ class ExportJobManager:
         if export_format == "txt" and len(identifiers) != 1:
             raise ExportJobError("TXT导出只能包含一个任务")
         if export_format == "deepseek_pdf" and len(identifiers) != 1:
-            raise ExportJobError("大模型报告导出只能包含一个任务")
+            raise ExportJobError("AI报告生成只能包含一个任务")
         if len(identifiers) > 500:
             raise ExportJobError("一次导出最多包含500个任务")
         if export_format == "deepseek_pdf":
             normalized_key = (deepseek_api_key or "").strip()
             normalized_model = (deepseek_model or "deepseek-v4-flash").strip()
+            normalized_url = (deepseek_api_url or "").strip()
+            normalized_skill = (deepseek_skill_prompt or "").strip()
             if not normalized_key:
                 raise ExportJobError("DeepSeek API Key不能为空")
             if len(normalized_key) > 2048 or any(ord(char) < 32 for char in normalized_key):
                 raise ExportJobError("DeepSeek API Key格式无效")
             if normalized_model not in {"deepseek-v4-flash", "deepseek-v4-pro"}:
                 raise ExportJobError("DeepSeek模型配置无效")
+            if not normalized_url.startswith(("https://", "http://")) or len(normalized_url) > 2048:
+                raise ExportJobError("DeepSeek API地址无效")
+            if not normalized_skill or len(normalized_skill) > 20_000:
+                raise ExportJobError("大模型Skill长度无效")
         else:
             normalized_key = ""
             normalized_model = ""
+            normalized_url = ""
+            normalized_skill = ""
 
         request_key = json.dumps(
             {"export_format": export_format, "task_ids": identifiers},
@@ -239,6 +249,8 @@ class ExportJobManager:
             if export_format == "deepseek_pdf":
                 payload["deepseek_api_key"] = normalized_key
                 payload["deepseek_model"] = normalized_model
+                payload["deepseek_api_url"] = normalized_url
+                payload["deepseek_skill_prompt"] = normalized_skill
             write_job_payload(self._job_path(job_id), payload)
             self._queue.put(job_id)
         return ExportJobRecord.from_payload(payload)

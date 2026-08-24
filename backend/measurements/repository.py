@@ -97,6 +97,44 @@ class MeasurementExportSampleRecord:
 
 
 @dataclass(frozen=True)
+class ImuExportSampleRecord:
+    sample_index: int
+    recorded_timestamp_ms: int
+    height_m: float | None
+    minimum_height_m: float | None
+    rtk_timestamp_ms: int | None
+    rtk_latitude_deg: float | None
+    rtk_longitude_deg: float | None
+    rtk_altitude_m: float | None
+    rtk_valid: bool | None
+    rtk_satellite_count: int | None
+    rtk_hdop: float | None
+    rtk_pdop: float | None
+    rtk_speed_knots: float | None
+    rtk_track_degrees: float | None
+    gyro_x_rad_s: float | None
+    gyro_y_rad_s: float | None
+    gyro_z_rad_s: float | None
+    accel_x_m_s2: float | None
+    accel_y_m_s2: float | None
+    accel_z_m_s2: float | None
+    radar_temperature_c: float | None
+    minimum_point_x_m: float | None
+    minimum_point_y_m: float | None
+    minimum_point_z_m: float | None
+    vehicle_pitch_deg: float | None
+    vehicle_roll_deg: float | None
+    vehicle_heading_deg: float | None
+    odin_position_x_m: float | None
+    odin_position_y_m: float | None
+    odin_position_z_m: float | None
+    odin_qx: float | None
+    odin_qy: float | None
+    odin_qz: float | None
+    odin_qw: float | None
+
+
+@dataclass(frozen=True)
 class RtkEndpointRecord:
     timestamp_ms: int
     latitude_deg: float
@@ -212,7 +250,7 @@ class MeasurementHistoryRecord:
     samples: list[ClearanceHistorySampleRecord]
 
 
-_SUPPORTED_SCHEMA_VERSIONS = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}
+_SUPPORTED_SCHEMA_VERSIONS = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13}
 _MAX_HISTORY_SAMPLES = 500_000
 
 
@@ -744,6 +782,157 @@ class MeasurementRepository:
             raise MeasurementStorageError(f"读取任务测量明细失败：{error}") from error
         finally:
             connection.close()
+
+    def iter_imu_export_samples(self, task: TaskRecord) -> Iterator[ImuExportSampleRecord]:
+        """按IMU实际接收顺序导出原始样本；旧数据库回退到既有保持序列。"""
+        database_path = self._resolve_recording_database(task)
+        connection = self._open_readonly(database_path)
+        try:
+            self._load_metadata(connection, task)
+            table_exists = connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='imu_samples'"
+            ).fetchone()
+            if table_exists is None:
+                connection.close()
+                running_minimum: float | None = None
+                for sample in self.iter_export_samples(task):
+                    if sample.valid and sample.height_m is not None:
+                        running_minimum = (
+                            sample.height_m
+                            if running_minimum is None
+                            else min(running_minimum, sample.height_m)
+                        )
+                    yield ImuExportSampleRecord(
+                        sample_index=sample.sample_index,
+                        recorded_timestamp_ms=sample.recorded_timestamp_ms,
+                        height_m=sample.height_m if sample.valid else None,
+                        minimum_height_m=running_minimum,
+                        rtk_timestamp_ms=sample.rtk_timestamp_ms,
+                        rtk_latitude_deg=sample.rtk_latitude_deg,
+                        rtk_longitude_deg=sample.rtk_longitude_deg,
+                        rtk_altitude_m=sample.rtk_altitude_m,
+                        rtk_valid=sample.rtk_valid,
+                        rtk_satellite_count=sample.rtk_satellite_count,
+                        rtk_hdop=sample.rtk_hdop,
+                        rtk_pdop=sample.rtk_pdop,
+                        rtk_speed_knots=sample.rtk_speed_knots,
+                        rtk_track_degrees=sample.rtk_track_degrees,
+                        gyro_x_rad_s=sample.gyro_x_rad_s,
+                        gyro_y_rad_s=sample.gyro_y_rad_s,
+                        gyro_z_rad_s=sample.gyro_z_rad_s,
+                        accel_x_m_s2=sample.accel_x_m_s2,
+                        accel_y_m_s2=sample.accel_y_m_s2,
+                        accel_z_m_s2=sample.accel_z_m_s2,
+                        radar_temperature_c=sample.radar_temperature_c,
+                        minimum_point_x_m=sample.minimum_point_x_m,
+                        minimum_point_y_m=sample.minimum_point_y_m,
+                        minimum_point_z_m=sample.minimum_point_z_m,
+                        vehicle_pitch_deg=sample.vehicle_pitch_deg,
+                        vehicle_roll_deg=sample.vehicle_roll_deg,
+                        vehicle_heading_deg=sample.vehicle_heading_deg,
+                        odin_position_x_m=sample.odin_position_x_m,
+                        odin_position_y_m=sample.odin_position_y_m,
+                        odin_position_z_m=sample.odin_position_z_m,
+                        odin_qx=sample.odin_qx,
+                        odin_qy=sample.odin_qy,
+                        odin_qz=sample.odin_qz,
+                        odin_qw=sample.odin_qw,
+                    )
+                return
+
+            cursor = connection.execute(
+                """
+                SELECT
+                    sample_index,
+                    recorded_timestamp_ns,
+                    clearance_height_m,
+                    minimum_clearance_height_m,
+                    rtk_timestamp_ns,
+                    rtk_latitude_deg,
+                    rtk_longitude_deg,
+                    rtk_altitude_m,
+                    rtk_valid,
+                    rtk_satellite_count,
+                    rtk_hdop,
+                    rtk_pdop,
+                    rtk_speed_knots,
+                    rtk_track_degrees,
+                    gyro_x_rad_s,
+                    gyro_y_rad_s,
+                    gyro_z_rad_s,
+                    accel_x_m_s2,
+                    accel_y_m_s2,
+                    accel_z_m_s2,
+                    radar_temperature_c,
+                    minimum_point_x_m,
+                    minimum_point_y_m,
+                    minimum_point_z_m,
+                    vehicle_pitch_deg,
+                    vehicle_roll_deg,
+                    vehicle_heading_deg,
+                    odin_position_x_m,
+                    odin_position_y_m,
+                    odin_position_z_m,
+                    odin_qx,
+                    odin_qy,
+                    odin_qz,
+                    odin_qw
+                FROM imu_samples
+                ORDER BY sample_index ASC
+                """
+            )
+            for row in cursor:
+                yield ImuExportSampleRecord(
+                    sample_index=int(row["sample_index"]),
+                    recorded_timestamp_ms=int(row["recorded_timestamp_ns"]) // 1_000_000,
+                    height_m=_optional_float(row["clearance_height_m"]),
+                    minimum_height_m=_optional_float(row["minimum_clearance_height_m"]),
+                    rtk_timestamp_ms=(
+                        int(row["rtk_timestamp_ns"]) // 1_000_000
+                        if row["rtk_timestamp_ns"] is not None else None
+                    ),
+                    rtk_latitude_deg=_optional_float(row["rtk_latitude_deg"]),
+                    rtk_longitude_deg=_optional_float(row["rtk_longitude_deg"]),
+                    rtk_altitude_m=_optional_float(row["rtk_altitude_m"]),
+                    rtk_valid=(bool(row["rtk_valid"]) if row["rtk_valid"] is not None else None),
+                    rtk_satellite_count=(
+                        int(row["rtk_satellite_count"])
+                        if row["rtk_satellite_count"] is not None else None
+                    ),
+                    rtk_hdop=_optional_float(row["rtk_hdop"]),
+                    rtk_pdop=_optional_float(row["rtk_pdop"]),
+                    rtk_speed_knots=_optional_float(row["rtk_speed_knots"]),
+                    rtk_track_degrees=_optional_float(row["rtk_track_degrees"]),
+                    gyro_x_rad_s=_optional_float(row["gyro_x_rad_s"]),
+                    gyro_y_rad_s=_optional_float(row["gyro_y_rad_s"]),
+                    gyro_z_rad_s=_optional_float(row["gyro_z_rad_s"]),
+                    accel_x_m_s2=_optional_float(row["accel_x_m_s2"]),
+                    accel_y_m_s2=_optional_float(row["accel_y_m_s2"]),
+                    accel_z_m_s2=_optional_float(row["accel_z_m_s2"]),
+                    radar_temperature_c=_optional_float(row["radar_temperature_c"]),
+                    minimum_point_x_m=_optional_float(row["minimum_point_x_m"]),
+                    minimum_point_y_m=_optional_float(row["minimum_point_y_m"]),
+                    minimum_point_z_m=_optional_float(row["minimum_point_z_m"]),
+                    vehicle_pitch_deg=_optional_float(row["vehicle_pitch_deg"]),
+                    vehicle_roll_deg=_optional_float(row["vehicle_roll_deg"]),
+                    vehicle_heading_deg=_optional_float(row["vehicle_heading_deg"]),
+                    odin_position_x_m=_optional_float(row["odin_position_x_m"]),
+                    odin_position_y_m=_optional_float(row["odin_position_y_m"]),
+                    odin_position_z_m=_optional_float(row["odin_position_z_m"]),
+                    odin_qx=_optional_float(row["odin_qx"]),
+                    odin_qy=_optional_float(row["odin_qy"]),
+                    odin_qz=_optional_float(row["odin_qz"]),
+                    odin_qw=_optional_float(row["odin_qw"]),
+                )
+        except MeasurementStorageError:
+            raise
+        except sqlite3.Error as error:
+            raise MeasurementStorageError(f"读取IMU原始明细失败：{error}") from error
+        finally:
+            try:
+                connection.close()
+            except sqlite3.Error:
+                pass
 
     def load_clearance_analysis(
         self,

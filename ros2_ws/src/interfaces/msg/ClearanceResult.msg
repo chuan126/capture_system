@@ -18,6 +18,10 @@ float64 residual_p95_m
 float64 minimum_position_east_m
 float64 minimum_position_north_m
 float64 minimum_position_up_m
+# 原始雷达本体系最低可信点簇的真实代表点；无有效点簇时为NaN。
+float64 minimum_point_x_m
+float64 minimum_point_y_m
+float64 minimum_point_z_m
 float64 valid_point_ratio
 string invalid_reason
 float64 processing_time_ms

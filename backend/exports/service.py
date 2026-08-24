@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
@@ -174,7 +175,7 @@ class ReportExportService:
         except OSError as error:
             raise ExportStorageError(f"无法创建 TXT 导出目录：{error}") from error
         safe_code = _safe_component(task.tunnel_code)
-        file_name = f"{task.display_id}_{safe_code}_50Hz测量明细.txt"
+        file_name = f"{task.display_id}_{safe_code}_原始数据保存.txt"
         destination = output_directory / file_name
         generated_at = _utc_now_text()
         temporary_path: Path | None = None
@@ -268,7 +269,7 @@ class ReportExportService:
     def resolve_txt_download(self, task: TaskRecord) -> Path:
         output_directory = self._task_export_directory(task)
         safe_code = _safe_component(task.tunnel_code)
-        candidate = output_directory / f"{task.display_id}_{safe_code}_50Hz测量明细.txt"
+        candidate = output_directory / f"{task.display_id}_{safe_code}_原始数据保存.txt"
         if not candidate.is_file():
             raise ExportNotFoundError("TXT 尚未生成")
         return candidate
@@ -316,34 +317,23 @@ class ReportExportService:
         analysis: ClearanceAnalysisResult,
         generated_at: str,
     ) -> None:
-        entry_rtk = _format_rtk(summary.entry_rtk)
-        exit_rtk = _format_rtk(summary.exit_rtk)
-        _write_txt_row(file_object, ["隧道净空检测 50 Hz 测量明细"])
+        _write_txt_row(file_object, ["原始数据保存"])
         _write_txt_row(file_object, [])
         _write_txt_row(
             file_object,
             [
                 "采样序号",
-                "源帧序号",
-                "源帧时间",
                 "记录时间",
-                "源帧年龄 ms",
-                "重复源帧",
-                "重复序号",
                 "隧道编号",
                 "检测车道",
-                "净空有效",
-                "无效原因",
                 "实时高度 m",
                 "最低高度 m",
-                "质量分数",
                 "隧道入口 RTK",
                 "隧道出口 RTK",
                 "RTK时间",
                 "RTK纬度 deg",
                 "RTK经度 deg",
                 "RTK高程 m",
-                "RTK解类型",
                 "RTK有效",
                 "RTK卫星数",
                 "RTK HDOP",
@@ -356,7 +346,6 @@ class ReportExportService:
                 "加速度计X m/s2",
                 "加速度计Y m/s2",
                 "加速度计Z m/s2",
-                "IMU样本数",
                 "雷达温度 °C",
                 "最低点云X m",
                 "最低点云Y m",
@@ -373,35 +362,24 @@ class ReportExportService:
                 "里程计四元数w",
             ]
         )
-        # TXT保留既有“异常分析后有效最低值”语义；新的建议值和可信度只增加到PDF汇总。
-        minimum_height = _format_number(analysis.effective_min_clearance_m, 3)
-        for sample in self.measurement_repository.iter_export_samples(task):
+        for sample in self.measurement_repository.iter_imu_export_samples(task):
             _write_txt_row(
                 file_object,
                 [
                     sample.sample_index,
-                    sample.source_sequence if sample.source_sequence is not None else "",
-                    _format_timestamp_ms(sample.source_timestamp_ms),
                     _format_timestamp_ms(sample.recorded_timestamp_ms),
-                    _format_txt_number(sample.source_age_ms, 3),
-                    _format_optional_bool(sample.is_repeated),
-                    sample.repeat_index if sample.repeat_index is not None else "",
-                    task.tunnel_code,
-                    _lane_text(summary.lane, summary.travel_direction, summary.lane_side),
-                    "1" if sample.valid else "0",
-                    sample.invalid_reason or "",
-                    _format_txt_number(sample.height_m if sample.valid else None, 3),
-                    minimum_height,
-                    _format_txt_number(sample.quality_score, 6),
-                    entry_rtk,
-                    exit_rtk,
-                    _format_timestamp_ms(sample.rtk_timestamp_ms) if sample.rtk_timestamp_ms is not None else "",
+                    _txt_or_zero(task.tunnel_code),
+                    _txt_or_zero(_lane_text(summary.lane, summary.travel_direction, summary.lane_side)),
+                    _format_txt_number(sample.height_m, 3),
+                    _format_txt_number(sample.minimum_height_m, 3),
+                    _format_txt_rtk(summary.entry_rtk),
+                    _format_txt_rtk(summary.exit_rtk),
+                    _format_timestamp_ms(sample.rtk_timestamp_ms) if sample.rtk_timestamp_ms is not None else "0",
                     _format_txt_number(sample.rtk_latitude_deg, 9),
                     _format_txt_number(sample.rtk_longitude_deg, 9),
                     _format_txt_number(sample.rtk_altitude_m, 4),
-                    sample.rtk_fix_type or "",
                     _format_optional_bool(sample.rtk_valid),
-                    sample.rtk_satellite_count if sample.rtk_satellite_count is not None else "",
+                    sample.rtk_satellite_count if sample.rtk_satellite_count is not None else "0",
                     _format_txt_number(sample.rtk_hdop, 3),
                     _format_txt_number(sample.rtk_pdop, 3),
                     _format_txt_number(sample.rtk_speed_knots, 4),
@@ -412,7 +390,6 @@ class ReportExportService:
                     _format_txt_number(sample.accel_x_m_s2, 6),
                     _format_txt_number(sample.accel_y_m_s2, 6),
                     _format_txt_number(sample.accel_z_m_s2, 6),
-                    sample.imu_sample_count if sample.imu_sample_count is not None else "",
                     _format_txt_number(sample.radar_temperature_c, 2),
                     _format_txt_number(sample.minimum_point_x_m, 4),
                     _format_txt_number(sample.minimum_point_y_m, 4),
@@ -493,8 +470,6 @@ class ReportExportService:
             "隧道编号",
             "检测车道",
             "原始单帧最低 m",
-            "建议最低可信净空 m",
-            "可信度",
             "记录时间",
             "隧道入口 RTK",
             "隧道出口 RTK",
@@ -516,12 +491,6 @@ class ReportExportService:
                     mixed_paragraph(assessment.task.tunnel_code, body_style, fonts),
                     mixed_paragraph(_lane_text(summary.lane, summary.travel_direction, summary.lane_side), body_style, fonts),
                     mixed_paragraph(_format_number(analysis.raw_min_clearance_m, 3), body_style, fonts),
-                    mixed_paragraph(
-                        _format_number(analysis.recommended_min_clearance_m, 3) or "—",
-                        body_style,
-                        fonts,
-                    ),
-                    mixed_paragraph(_format_confidence(analysis.confidence_score, analysis.confidence_level), body_style, fonts),
                     mixed_paragraph(time_text, body_style, fonts),
                     mixed_paragraph(_format_rtk(summary.entry_rtk), body_style, fonts),
                     mixed_paragraph(_format_rtk(summary.exit_rtk), body_style, fonts),
@@ -530,7 +499,7 @@ class ReportExportService:
         table = Table(
             rows,
             repeatRows=1,
-            colWidths=[29 * mm, 25 * mm, 19 * mm, 22 * mm, 27 * mm, 21 * mm, 38 * mm, 37 * mm, 37 * mm],
+            colWidths=[32 * mm, 31 * mm, 25 * mm, 28 * mm, 44 * mm, 54 * mm, 54 * mm],
         )
         table.setStyle(
             TableStyle(
@@ -539,7 +508,7 @@ class ReportExportService:
                     ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E8EDF3")),
                     ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#202833")),
                     ("ALIGN", (0, 0), (0, -1), "CENTER"),
-                    ("ALIGN", (2, 1), (5, -1), "CENTER"),
+                    ("ALIGN", (2, 1), (4, -1), "CENTER"),
                     ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                     ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#8D98A6")),
                     ("LEFTPADDING", (0, 0), (-1, -1), 4),
@@ -550,20 +519,6 @@ class ReportExportService:
             )
         )
         story.append(table)
-        story.extend(
-            [
-                Spacer(1, 5 * mm),
-                mixed_paragraph(
-                    "说明　原始单帧最低值不做异常剔除；建议最低可信净空由单任务证据算法计算。"
-                    "少于5个几何合格独立源帧时建议值显示为—，不会复制原始最低值。"
-                    "可信度为0–100的证据评分，不是统计概率；待复核低值仍保守计入。"
-                    "周期性设施和具有空间连续性的单个结构不会因高度低而自动排除。"
-                    "无有效 RTK 端点时对应字段标记为未记录。",
-                    body_style,
-                    fonts,
-                ),
-            ]
-        )
 
         def draw_footer(canvas: object, doc: object) -> None:
             canvas.saveState()
@@ -640,13 +595,22 @@ def _format_confidence(score: int, level: str) -> str:
 
 def _format_txt_number(value: float | None, digits: int) -> str:
     # TXT 的 0 只承担缺失占位语义，SQLite 中的 NULL 和有效标志保持不变。
-    return "0" if value is None else f"{value:.{digits}f}"
+    return "0" if value is None or not math.isfinite(value) else f"{value:.{digits}f}"
 
 
 def _format_optional_bool(value: bool | None) -> str:
     if value is None:
-        return ""
+        return "0"
     return "1" if value else "0"
+
+
+def _txt_or_zero(value: str | None) -> str:
+    normalized = (value or "").strip()
+    return normalized if normalized and normalized != "未记录" else "0"
+
+
+def _format_txt_rtk(endpoint: RtkEndpointRecord | None) -> str:
+    return "0" if endpoint is None or not endpoint.valid else _format_rtk(endpoint)
 
 
 def _parse_datetime(value: str) -> datetime:

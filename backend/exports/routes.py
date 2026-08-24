@@ -7,12 +7,14 @@ from fastapi.responses import FileResponse
 
 from backend.exports.models import (
     DeepSeekReportRequest,
+    DeepSeekSettings,
     ExportFileResponse,
     ExportJobResponse,
     ReportPreviewResponse,
     ReportSelectionRequest,
     TaskExportPreviewResponse,
 )
+from backend.device_settings import DeviceSettingsError, DeviceSettingsStore
 from backend.exports.jobs import ExportJobError, ExportJobManager, ExportJobRecord
 from backend.exports.service import (
     ExportBlockedError,
@@ -39,6 +41,35 @@ def _service(request: Request) -> ReportExportService:
 
 def _job_manager(request: Request) -> ExportJobManager:
     return request.app.state.export_job_manager
+
+
+def _device_settings(request: Request) -> DeviceSettingsStore:
+    return request.app.state.device_settings_store
+
+
+@router.get("/deepseek/settings", response_model=DeepSeekSettings)
+def get_deepseek_settings(request: Request) -> DeepSeekSettings:
+    try:
+        return DeepSeekSettings(**_device_settings(request).get_deepseek())
+    except DeviceSettingsError as error:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)) from error
+
+
+@router.put("/deepseek/settings", response_model=DeepSeekSettings)
+def put_deepseek_settings(
+    payload: DeepSeekSettings,
+    request: Request,
+) -> DeepSeekSettings:
+    try:
+        _device_settings(request).set_deepseek(
+            payload.api_url,
+            payload.api_key,
+            payload.model,
+            payload.skill_prompt,
+        )
+        return DeepSeekSettings(**_device_settings(request).get_deepseek())
+    except DeviceSettingsError as error:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
 
 
 def _rtk_response(record: RtkEndpointRecord | None) -> RtkEndpointResponse | None:
@@ -207,17 +238,20 @@ def create_deepseek_report_job(
 ) -> ExportJobResponse:
     try:
         _task_repository(request).get_task(task_id)
+        saved_settings = _device_settings(request).get_deepseek()
         return _job_response(
             _job_manager(request).submit(
                 "deepseek_pdf",
                 [task_id],
                 deepseek_api_key=payload.api_key,
                 deepseek_model=payload.model,
+                deepseek_api_url=payload.api_url or saved_settings["api_url"],
+                deepseek_skill_prompt=payload.skill_prompt or saved_settings["skill_prompt"],
             )
         )
     except TaskNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务不存在") from error
-    except (TaskStorageError, ExportJobError) as error:
+    except (TaskStorageError, ExportJobError, DeviceSettingsError) as error:
         raise _export_http_error(error) from error
 
 

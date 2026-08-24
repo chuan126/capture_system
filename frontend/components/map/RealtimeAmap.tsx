@@ -163,51 +163,17 @@ function loadAmapScript(key: string, serviceHost: string): Promise<void> {
   });
 }
 
-function vehicleMarkerMarkup(): string {
-  return `
-    <svg viewBox="0 0 48 66" aria-label="检测车辆">
-      <defs>
-        <linearGradient id="captureCarBodyGradient" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stop-color="#4b9cff"/>
-          <stop offset="58%" stop-color="#176bff"/>
-          <stop offset="100%" stop-color="#0d47b8"/>
-        </linearGradient>
-        <linearGradient id="captureCarGlassGradient" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#e8f4ff"/>
-          <stop offset="100%" stop-color="#9ac7ef"/>
-        </linearGradient>
-        <filter id="captureCarShadow" x="-40%" y="-30%" width="180%" height="190%">
-          <feDropShadow dx="0" dy="3" stdDeviation="2.4" flood-color="#173667" flood-opacity=".34"/>
-        </filter>
-      </defs>
-      <g class="vehicle-direction">
-        <path d="M24 1 L30 11 H18 Z" fill="#176bff" opacity=".72"/>
-        <circle cx="24" cy="9" r="8" fill="none" stroke="#176bff" stroke-width="1.5" opacity=".22"/>
-      </g>
-      <g filter="url(#captureCarShadow)">
-        <rect x="6" y="17" width="36" height="45" rx="13" fill="#ffffff"/>
-        <rect x="8" y="18" width="32" height="42" rx="11" fill="url(#captureCarBodyGradient)"/>
-        <path d="M14 27 Q16 21 21 20 H27 Q32 21 34 27 L36 39 H12 Z"
-              fill="url(#captureCarGlassGradient)" stroke="#ffffff" stroke-width="1.2"/>
-        <path d="M14 40 H34 L32 50 Q30 56 24 57 Q18 56 16 50 Z"
-              fill="#dcecff" opacity=".93"/>
-        <rect x="5" y="27" width="4" height="11" rx="2" fill="#24334a"/>
-        <rect x="39" y="27" width="4" height="11" rx="2" fill="#24334a"/>
-        <rect x="5" y="45" width="4" height="10" rx="2" fill="#24334a"/>
-        <rect x="39" y="45" width="4" height="10" rx="2" fill="#24334a"/>
-        <ellipse cx="15" cy="22" rx="4" ry="2" fill="#fff4b8"/>
-        <ellipse cx="33" cy="22" rx="4" ry="2" fill="#fff4b8"/>
-        <ellipse cx="15" cy="56" rx="4" ry="2" fill="#ff9cac"/>
-        <ellipse cx="33" cy="56" rx="4" ry="2" fill="#ff9cac"/>
-        <rect x="18" y="13" width="12" height="7" rx="3.5" fill="#0f9f6e" stroke="#fff" stroke-width="1.3"/>
-        <circle cx="24" cy="16.5" r="2" fill="#bff7df"/>
-      </g>
-    </svg>`;
-}
+export type RtkTrackPoint = {
+  sequence: number;
+  latitude: number;
+  longitude: number;
+};
 
 type RealtimeAmapProps = {
   snapshot: RtkSnapshot | null;
   rawRtkValid: boolean;
+  trackPoints: RtkTrackPoint[];
+  trackRevision: number;
   connectionDetail: string;
   laneLabel?: string;
   expanded?: boolean;
@@ -246,6 +212,8 @@ function MapExpandButton({
 export default function RealtimeAmap({
   snapshot,
   rawRtkValid,
+  trackPoints,
+  trackRevision,
   connectionDetail,
   laneLabel = "待任务接入",
   expanded = false,
@@ -256,7 +224,6 @@ export default function RealtimeAmap({
   const [mapState, setMapState] = useState<
     "no_key" | "loading" | "error" | "ready"
   >("no_key");
-  const [trackPointCount, setTrackPointCount] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsKey, setSettingsKey] = useState("");
   const [settingsSecurityCode, setSettingsSecurityCode] = useState("");
@@ -267,7 +234,6 @@ export default function RealtimeAmap({
   const mapRef = useRef<AmapMapLike | null>(null);
   const markerRef = useRef<unknown>(null);
   const polylineRefs = useRef<Array<{ source: TrackSource; overlay: unknown }>>([]);
-  const trackPointsRef = useRef<TrackPoint[]>([]);
   const lastPositionRef = useRef<[number, number] | null>(null);
 
   const loadDeviceConfig = useCallback(async () => {
@@ -389,60 +355,38 @@ export default function RealtimeAmap({
       | undefined;
     if (!map || !AMap) return;
 
-    const source: TrackSource = "rtk";
-    const latitude = snapshot?.latitude;
-    const longitude = snapshot?.longitude;
-    const headingDeg = rawRtkValid &&
-      typeof snapshot?.track_degrees === "number" && Number.isFinite(snapshot.track_degrees)
-      ? snapshot.track_degrees
-      : null;
-
-    if (
-      !rawRtkValid ||
-      latitude === null ||
-      latitude === undefined ||
-      longitude === null ||
-      longitude === undefined
-    ) {
+    if (trackPoints.length === 0) {
       return;
     }
-
-    const gcj = wgs84ToGcj02(latitude, longitude);
+    const points: TrackPoint[] = trackPoints.map((point) => {
+      const converted = wgs84ToGcj02(point.latitude, point.longitude);
+      return { lng: converted[0], lat: converted[1], source: "rtk" };
+    });
+    const latest = points[points.length - 1];
+    const gcj: [number, number] = [latest.lng, latest.lat];
     lastPositionRef.current = gcj;
 
     if (markerRef.current) {
       const marker = markerRef.current as {
-        setAngle?: (angle: number) => void;
         setPosition?: (position: [number, number]) => void;
       };
       marker.setPosition?.(gcj);
-      if (headingDeg !== null) marker.setAngle?.(headingDeg);
     } else {
       const markerElement = document.createElement("div");
-      markerElement.className = "amap-vehicle-marker";
-      markerElement.innerHTML = vehicleMarkerMarkup();
+      markerElement.className = "amap-position-dot";
+      markerElement.setAttribute("aria-label", "当前有效RTK位置");
 
       const Marker = AMap.Marker as (new (...args: unknown[]) => unknown) | undefined;
       if (Marker) {
         const marker = new Marker({
           position: gcj,
           content: markerElement,
-          offset: [-24, -33],
+          offset: [-10, -10],
           zIndex: 120,
         });
         map.add?.(marker);
         markerRef.current = marker;
-        if (headingDeg !== null) {
-          (marker as { setAngle?: (angle: number) => void }).setAngle?.(headingDeg);
-        }
       }
-    }
-
-    const points = trackPointsRef.current;
-    const last = points.at(-1);
-    if (!last || last.lng !== gcj[0] || last.lat !== gcj[1]) {
-      points.push({ lng: gcj[0], lat: gcj[1], source });
-      setTrackPointCount(points.length);
     }
 
     const segments = buildTrackSegments(points);
@@ -482,12 +426,19 @@ export default function RealtimeAmap({
     } else {
       map.setCenter?.(gcj);
     }
-  }, [mapState, rawRtkValid, snapshot]);
+  }, [mapState, trackPoints, trackRevision]);
 
   useEffect(() => {
     const resize = () => mapRef.current?.resize?.();
     window.addEventListener("resize", resize);
     return () => window.removeEventListener("resize", resize);
+  }, []);
+
+  useEffect(() => () => {
+    mapRef.current?.destroy?.();
+    mapRef.current = null;
+    markerRef.current = null;
+    polylineRefs.current = [];
   }, []);
 
   useEffect(() => {
@@ -521,8 +472,8 @@ export default function RealtimeAmap({
     mapState !== "ready"
       ? "等待地图配置"
       : hasPosition
-        ? trackPointCount > 0
-          ? `实时绘制 · ${trackPointCount} 点`
+        ? trackPoints.length > 0
+          ? `实时绘制 · ${trackPoints.length} 点`
           : "等待定位"
         : "轨迹已暂停";
   const mapSubtitle = rawRtkValid

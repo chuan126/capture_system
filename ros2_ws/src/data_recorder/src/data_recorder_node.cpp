@@ -674,6 +674,15 @@ private:
     latest.message = *message;
     latest_clearance_ = latest;
 
+    if (active_ && !paused_ && latest.valid && latest.lidar_to_top_m.has_value()) {
+      const double clearance_height = *latest.lidar_to_top_m + lidar_mount_height_m_;
+      if (!minimum_clearance_height_m_.has_value() ||
+        clearance_height < *minimum_clearance_height_m_)
+      {
+        minimum_clearance_height_m_ = clearance_height;
+      }
+    }
+
     if (active_ && !paused_ && database_ != nullptr) {
       try {
         insert_source_frame(latest);
@@ -733,18 +742,187 @@ private:
     }
     const auto & gyro = message->angular_velocity;
     const auto & accel = message->linear_acceleration;
-    if (!std::isfinite(gyro.x) || !std::isfinite(gyro.y) || !std::isfinite(gyro.z) ||
-      !std::isfinite(accel.x) || !std::isfinite(accel.y) || !std::isfinite(accel.z))
-    {
+    const bool imu_values_finite =
+      std::isfinite(gyro.x) && std::isfinite(gyro.y) && std::isfinite(gyro.z) &&
+      std::isfinite(accel.x) && std::isfinite(accel.y) && std::isfinite(accel.z);
+    if (imu_values_finite) {
+      ++imu_accumulator_.count;
+      imu_accumulator_.gyro_x_sum += gyro.x;
+      imu_accumulator_.gyro_y_sum += gyro.y;
+      imu_accumulator_.gyro_z_sum += gyro.z;
+      imu_accumulator_.accel_x_sum += accel.x;
+      imu_accumulator_.accel_y_sum += accel.y;
+      imu_accumulator_.accel_z_sum += accel.z;
+    }
+    // 原始数据保存以收到的IMU消息为采样基准；非有限分量只在该行落0，不丢整行。
+    try {
+      insert_imu_sample(*message);
+    } catch (const std::exception & error) {
+      handle_runtime_storage_error(error.what());
+    }
+  }
+
+  void insert_imu_sample(const sensor_msgs::msg::Imu & message)
+  {
+    if (database_ == nullptr) {
       return;
     }
-    ++imu_accumulator_.count;
-    imu_accumulator_.gyro_x_sum += gyro.x;
-    imu_accumulator_.gyro_y_sum += gyro.y;
-    imu_accumulator_.gyro_z_sum += gyro.z;
-    imu_accumulator_.accel_x_sum += accel.x;
-    imu_accumulator_.accel_y_sum += accel.y;
-    imu_accumulator_.accel_z_sum += accel.z;
+    const auto recorded_ns = system_now_ns();
+    auto imu_timestamp_ns = rclcpp::Time(message.header.stamp).nanoseconds();
+    if (imu_timestamp_ns <= 0) {
+      imu_timestamp_ns = recorded_ns;
+    }
+    const auto elapsed_ms = std::max(
+      0.0, static_cast<double>(recorded_ns - start_requested_ns_) / 1'000'000.0);
+    const auto monotonic_now_ns = steady_now_ns();
+    const bool odin_fresh = latest_odin_.available &&
+      static_cast<double>(std::max<std::int64_t>(
+        0, monotonic_now_ns - latest_odin_.received_monotonic_ns)) / 1'000'000.0 <=
+      odometry_snapshot_max_age_ms_;
+    const bool rtk_fix_fresh = latest_fix_.available &&
+      static_cast<double>(std::max<std::int64_t>(
+        0, monotonic_now_ns - latest_fix_.received_monotonic_ns)) / 1'000'000.0 <=
+      endpoint_rtk_max_age_ms_;
+    const bool rtk_status_fresh = latest_rtk_status_.available &&
+      static_cast<double>(std::max<std::int64_t>(
+        0, monotonic_now_ns - latest_rtk_status_.received_monotonic_ns)) / 1'000'000.0 <=
+      endpoint_rtk_max_age_ms_;
+    const bool temperature_fresh = latest_temperature_.available &&
+      static_cast<double>(std::max<std::int64_t>(
+        0, monotonic_now_ns - latest_temperature_.received_monotonic_ns)) / 1'000'000.0 <=
+      radar_temperature_max_age_ms_;
+    const auto finite_or_zero = [](double value) {
+        return std::isfinite(value) ? value : 0.0;
+      };
+
+    std::optional<double> clearance_height;
+    std::optional<double> minimum_point_x;
+    std::optional<double> minimum_point_y;
+    std::optional<double> minimum_point_z;
+    if (latest_clearance_.has_value()) {
+      const auto & source = *latest_clearance_;
+      const double source_age_ms = std::max(
+        0.0, static_cast<double>(recorded_ns - source.received_timestamp_ns) / 1'000'000.0);
+      if (source_age_ms <= source_timeout_ms_ && source.valid &&
+        source.lidar_to_top_m.has_value())
+      {
+        clearance_height = *source.lidar_to_top_m + lidar_mount_height_m_;
+        if (!minimum_clearance_height_m_.has_value() ||
+          *clearance_height < *minimum_clearance_height_m_)
+        {
+          minimum_clearance_height_m_ = clearance_height;
+        }
+        const auto & minimum = source.message;
+        if (std::isfinite(minimum.minimum_point_x_m)) {
+          minimum_point_x = minimum.minimum_point_x_m;
+        }
+        if (std::isfinite(minimum.minimum_point_y_m)) {
+          minimum_point_y = minimum.minimum_point_y_m;
+        }
+        if (std::isfinite(minimum.minimum_point_z_m)) {
+          minimum_point_z = minimum.minimum_point_z_m;
+        }
+      }
+    }
+
+    sqlite3_stmt * statement = nullptr;
+    check_sqlite(
+      sqlite3_prepare_v2(
+        database_,
+        "INSERT INTO imu_samples ("
+        "sample_index, imu_timestamp_ns, recorded_timestamp_ns, elapsed_ms, "
+        "clearance_height_m, minimum_clearance_height_m, rtk_timestamp_ns, "
+        "rtk_latitude_deg, rtk_longitude_deg, rtk_altitude_m, rtk_valid, "
+        "rtk_satellite_count, rtk_hdop, rtk_pdop, rtk_speed_knots, rtk_track_degrees, "
+        "gyro_x_rad_s, gyro_y_rad_s, gyro_z_rad_s, accel_x_m_s2, accel_y_m_s2, "
+        "accel_z_m_s2, radar_temperature_c, minimum_point_x_m, minimum_point_y_m, "
+        "minimum_point_z_m, vehicle_pitch_deg, vehicle_roll_deg, vehicle_heading_deg, "
+        "odin_position_x_m, odin_position_y_m, odin_position_z_m, odin_qx, odin_qy, "
+        "odin_qz, odin_qw) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
+        "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        -1, &statement, nullptr),
+      database_, "准备IMU原始样本写入失败");
+    check_sqlite(
+      sqlite3_bind_int64(statement, 1, static_cast<sqlite3_int64>(imu_sample_index_++)),
+      database_, "绑定IMU样本序号失败");
+    check_sqlite(sqlite3_bind_int64(statement, 2, imu_timestamp_ns), database_, "绑定IMU时间失败");
+    check_sqlite(sqlite3_bind_int64(statement, 3, recorded_ns), database_, "绑定IMU接收时间失败");
+    check_sqlite(sqlite3_bind_double(statement, 4, elapsed_ms), database_, "绑定IMU相对时间失败");
+    bind_nullable_double(statement, 5, clearance_height);
+    bind_nullable_double(statement, 6, minimum_clearance_height_m_);
+    bind_nullable_int64(statement, 7, rtk_fix_fresh, latest_fix_.timestamp_ns);
+    bind_nullable_double(statement, 8, rtk_fix_fresh ?
+      std::optional<double>(latest_fix_.latitude_deg) : std::nullopt);
+    bind_nullable_double(statement, 9, rtk_fix_fresh ?
+      std::optional<double>(latest_fix_.longitude_deg) : std::nullopt);
+    bind_nullable_double(statement, 10, rtk_fix_fresh ? latest_fix_.altitude_m : std::nullopt);
+    if (rtk_fix_fresh) {
+      check_sqlite(
+        sqlite3_bind_int(statement, 11, latest_fix_.valid ? 1 : 0),
+        database_, "绑定IMU样本RTK有效性失败");
+    } else {
+      sqlite3_bind_null(statement, 11);
+    }
+    if (rtk_status_fresh) {
+      check_sqlite(
+        sqlite3_bind_int(statement, 12, latest_rtk_status_.satellite_count),
+        database_, "绑定IMU样本RTK卫星数失败");
+    } else {
+      sqlite3_bind_null(statement, 12);
+    }
+    bind_nullable_double(statement, 13, rtk_status_fresh ?
+      std::optional<double>(latest_rtk_status_.hdop) : std::nullopt);
+    bind_nullable_double(statement, 14, rtk_status_fresh ?
+      std::optional<double>(latest_rtk_status_.pdop) : std::nullopt);
+    bind_nullable_double(statement, 15, rtk_status_fresh ?
+      std::optional<double>(latest_rtk_status_.speed_knots) : std::nullopt);
+    bind_nullable_double(statement, 16, rtk_status_fresh ?
+      std::optional<double>(latest_rtk_status_.track_degrees) : std::nullopt);
+    check_sqlite(
+      sqlite3_bind_double(statement, 17, finite_or_zero(message.angular_velocity.x)),
+      database_, "绑定陀螺X失败");
+    check_sqlite(
+      sqlite3_bind_double(statement, 18, finite_or_zero(message.angular_velocity.y)),
+      database_, "绑定陀螺Y失败");
+    check_sqlite(
+      sqlite3_bind_double(statement, 19, finite_or_zero(message.angular_velocity.z)),
+      database_, "绑定陀螺Z失败");
+    check_sqlite(
+      sqlite3_bind_double(statement, 20, finite_or_zero(message.linear_acceleration.x)),
+      database_, "绑定加速度X失败");
+    check_sqlite(
+      sqlite3_bind_double(statement, 21, finite_or_zero(message.linear_acceleration.y)),
+      database_, "绑定加速度Y失败");
+    check_sqlite(
+      sqlite3_bind_double(statement, 22, finite_or_zero(message.linear_acceleration.z)),
+      database_, "绑定加速度Z失败");
+    bind_nullable_double(statement, 23, temperature_fresh ?
+      std::optional<double>(latest_temperature_.celsius) : std::nullopt);
+    bind_nullable_double(statement, 24, minimum_point_x);
+    bind_nullable_double(statement, 25, minimum_point_y);
+    bind_nullable_double(statement, 26, minimum_point_z);
+    // 融合定位已经移除，姿态三列保留为兼容占位并在TXT中导出为0。
+    bind_nullable_double(statement, 27, std::nullopt);
+    bind_nullable_double(statement, 28, std::nullopt);
+    bind_nullable_double(statement, 29, std::nullopt);
+    bind_nullable_double(statement, 30, odin_fresh ?
+      std::optional<double>(latest_odin_.position_x_m) : std::nullopt);
+    bind_nullable_double(statement, 31, odin_fresh ?
+      std::optional<double>(latest_odin_.position_y_m) : std::nullopt);
+    bind_nullable_double(statement, 32, odin_fresh ?
+      std::optional<double>(latest_odin_.position_z_m) : std::nullopt);
+    bind_nullable_double(statement, 33, odin_fresh ? std::optional<double>(latest_odin_.qx) : std::nullopt);
+    bind_nullable_double(statement, 34, odin_fresh ? std::optional<double>(latest_odin_.qy) : std::nullopt);
+    bind_nullable_double(statement, 35, odin_fresh ? std::optional<double>(latest_odin_.qz) : std::nullopt);
+    bind_nullable_double(statement, 36, odin_fresh ? std::optional<double>(latest_odin_.qw) : std::nullopt);
+    check_sqlite(sqlite3_step(statement), database_, "写入IMU原始样本失败");
+    sqlite3_finalize(statement);
+
+    ++pending_transaction_samples_;
+    if (pending_transaction_samples_ >= static_cast<std::uint64_t>(transaction_batch_size_)) {
+      flush_transaction();
+      begin_transaction();
+    }
   }
 
   void on_odometry(const nav_msgs::msg::Odometry::SharedPtr message)
@@ -859,14 +1037,14 @@ private:
       std::optional<double> minimum_point_z;
       if (latest_clearance_.has_value()) {
         const auto & minimum = latest_clearance_->message;
-        if (std::isfinite(minimum.minimum_position_east_m)) {
-          minimum_point_x = minimum.minimum_position_east_m;
+        if (std::isfinite(minimum.minimum_point_x_m)) {
+          minimum_point_x = minimum.minimum_point_x_m;
         }
-        if (std::isfinite(minimum.minimum_position_north_m)) {
-          minimum_point_y = minimum.minimum_position_north_m;
+        if (std::isfinite(minimum.minimum_point_y_m)) {
+          minimum_point_y = minimum.minimum_point_y_m;
         }
-        if (std::isfinite(minimum.minimum_position_up_m)) {
-          minimum_point_z = minimum.minimum_position_up_m;
+        if (std::isfinite(minimum.minimum_point_z_m)) {
+          minimum_point_z = minimum.minimum_point_z_m;
         }
       }
 
@@ -1087,6 +1265,45 @@ private:
         odin_qw REAL
       );
       CREATE INDEX clearance_samples_timestamp_idx ON clearance_samples(source_timestamp_ns);
+      CREATE TABLE imu_samples (
+        sample_index INTEGER PRIMARY KEY CHECK (sample_index >= 0),
+        imu_timestamp_ns INTEGER NOT NULL,
+        recorded_timestamp_ns INTEGER NOT NULL,
+        elapsed_ms REAL NOT NULL CHECK (elapsed_ms >= 0),
+        clearance_height_m REAL,
+        minimum_clearance_height_m REAL,
+        rtk_timestamp_ns INTEGER,
+        rtk_latitude_deg REAL,
+        rtk_longitude_deg REAL,
+        rtk_altitude_m REAL,
+        rtk_valid INTEGER CHECK (rtk_valid IN (0, 1)),
+        rtk_satellite_count INTEGER,
+        rtk_hdop REAL,
+        rtk_pdop REAL,
+        rtk_speed_knots REAL,
+        rtk_track_degrees REAL,
+        gyro_x_rad_s REAL NOT NULL,
+        gyro_y_rad_s REAL NOT NULL,
+        gyro_z_rad_s REAL NOT NULL,
+        accel_x_m_s2 REAL NOT NULL,
+        accel_y_m_s2 REAL NOT NULL,
+        accel_z_m_s2 REAL NOT NULL,
+        radar_temperature_c REAL,
+        minimum_point_x_m REAL,
+        minimum_point_y_m REAL,
+        minimum_point_z_m REAL,
+        vehicle_pitch_deg REAL,
+        vehicle_roll_deg REAL,
+        vehicle_heading_deg REAL,
+        odin_position_x_m REAL,
+        odin_position_y_m REAL,
+        odin_position_z_m REAL,
+        odin_qx REAL,
+        odin_qy REAL,
+        odin_qz REAL,
+        odin_qw REAL
+      );
+      CREATE INDEX imu_samples_recorded_timestamp_idx ON imu_samples(recorded_timestamp_ns);
       CREATE TABLE clearance_source_frames (
         source_sequence INTEGER PRIMARY KEY,
         source_timestamp_ns INTEGER NOT NULL,
@@ -1223,7 +1440,7 @@ private:
         "config_version, software_version, lidar_mount_height_m, clearance_threshold_m, "
         "clearance_upper_limit_m, "
         "entry_rtk_status, exit_rtk_status) "
-        "VALUES (1, 12, ?, 'recorded', ?, ?, ?, ?, NULL, 0, ?, ?, ?, ?, ?, ?, ?, "
+        "VALUES (1, 13, ?, 'recorded', ?, ?, ?, ?, NULL, 0, ?, ?, ?, ?, ?, ?, ?, "
         "'pending', 'not_requested')",
         -1, &statement, nullptr),
       database_, "准备任务元数据写入失败");
@@ -1435,6 +1652,18 @@ private:
     check_sqlite(
       sqlite3_bind_int64(statement, 1, requested_ns), database_, "绑定停止边界失败");
     check_sqlite(sqlite3_step(statement), database_, "清理停止边界后的样本失败");
+    sqlite3_finalize(statement);
+
+    statement = nullptr;
+    check_sqlite(
+      sqlite3_prepare_v2(
+        database_,
+        "DELETE FROM imu_samples WHERE recorded_timestamp_ns > ?",
+        -1, &statement, nullptr),
+      database_, "准备停止边界IMU样本清理失败");
+    check_sqlite(
+      sqlite3_bind_int64(statement, 1, requested_ns), database_, "绑定IMU停止边界失败");
+    check_sqlite(sqlite3_step(statement), database_, "清理停止边界后的IMU样本失败");
     sqlite3_finalize(statement);
 
     statement = nullptr;
@@ -1693,6 +1922,8 @@ private:
     last_written_source_sequence_ = 0;
     last_persisted_source_sequence_ = 0;
     current_repeat_index_ = 0;
+    imu_sample_index_ = 0;
+    minimum_clearance_height_m_.reset();
     imu_accumulator_ = ImuAccumulator{};
     entry_rtk_status_ = "not_requested";
     exit_rtk_status_ = "not_requested";
@@ -1745,10 +1976,12 @@ private:
   std::uint64_t last_written_source_sequence_{0};
   std::uint64_t last_persisted_source_sequence_{0};
   std::uint32_t current_repeat_index_{0};
+  std::uint64_t imu_sample_index_{0};
   std::int64_t last_received_clearance_timestamp_ns_{0};
   std::string entry_rtk_status_{"not_requested"};
   std::string exit_rtk_status_{"not_requested"};
   std::optional<LatestClearance> latest_clearance_;
+  std::optional<double> minimum_clearance_height_m_;
   LatestFix latest_fix_;
   LatestRtkStatus latest_rtk_status_;
   ImuAccumulator imu_accumulator_;

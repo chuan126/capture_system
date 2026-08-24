@@ -1,14 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useClearanceSocket } from "@/components/clearance/useClearanceSocket";
 import type { ClearanceSnapshot } from "@/components/clearance/clearanceProtocol";
 import RealtimeAmap from "@/components/map/RealtimeAmap";
+import type { RtkTrackPoint } from "@/components/map/RealtimeAmap";
 import PointCloudViewer from "@/components/point-cloud/PointCloudViewer";
 import WifiControl from "@/components/network/WifiControl";
 import { rtkSolutionLabel } from "@/components/rtk/localizationView";
 import { useRtkSocket } from "@/components/rtk/useRtkSocket";
+import type { RtkConnectionState } from "@/components/rtk/useRtkSocket";
 import { useSystemStatusSocket } from "@/components/system-status/useSystemStatusSocket";
 import { isDeviceConnected } from "@/components/system-status/systemStatusProtocol";
 import type { DeviceStatus, HealthState } from "@/components/system-status/systemStatusProtocol";
@@ -485,6 +487,9 @@ function Dashboard({
   setMountHeight,
   operationLane,
   setOperationLane,
+  rtk,
+  rtkTrackPoints,
+  rtkTrackRevision,
 }: {
   tasks: CollectionTask[];
   selectedTaskId: string | null;
@@ -500,6 +505,9 @@ function Dashboard({
   setMountHeight: React.Dispatch<React.SetStateAction<string>>;
   operationLane: CollectionTaskLane;
   setOperationLane: React.Dispatch<React.SetStateAction<CollectionTaskLane>>;
+  rtk: RtkConnectionState;
+  rtkTrackPoints: RtkTrackPoint[];
+  rtkTrackRevision: number;
 }) {
   const [expandedVisual, setExpandedVisual] = useState<"cloud" | "map" | null>(null);
   const [taskDialogOpen, setTaskDialogOpen] = useState(false);
@@ -514,7 +522,6 @@ function Dashboard({
   const [canResume, setCanResume] = useState(false);
   const [canStop, setCanStop] = useState(false);
   const [canRecover, setCanRecover] = useState(false);
-  const rtk = useRtkSocket();
   const rtkSnapshot = rtk.snapshot;
   const clearance = useClearanceSocket();
   const clearanceSnapshot = clearance.snapshot;
@@ -925,6 +932,8 @@ function Dashboard({
             <RealtimeAmap
               snapshot={rtkSnapshot}
               rawRtkValid={rawCoordinateAvailable}
+              trackPoints={rtkTrackPoints}
+              trackRevision={rtkTrackRevision}
               connectionDetail={rtk.detail}
               expanded={expandedVisual === "map"}
               onToggleExpanded={() => setExpandedVisual((current) => current === "map" ? null : "map")}
@@ -1222,6 +1231,40 @@ export default function Home() {
   const [taskQueryState, setTaskQueryState] = useState<"loading" | "ready" | "error">("loading");
   const [taskQueryError, setTaskQueryError] = useState<string | null>(null);
   const taskStatus = useTaskStatusSocket();
+  const rtk = useRtkSocket();
+  const rtkTrackPointsRef = useRef<RtkTrackPoint[]>([]);
+  const [rtkTrackRevision, setRtkTrackRevision] = useState(0);
+
+  useEffect(() => {
+    const snapshot = rtk.snapshot;
+    const rmcCharacter = snapshot?.rmc_validity
+      ? String.fromCharCode(snapshot.rmc_validity)
+      : null;
+    const valid = rtk.connection === "connected"
+      && rtk.streamState === "streaming"
+      && snapshot?.fix_status !== null
+      && snapshot?.fix_status !== undefined
+      && snapshot.fix_status !== -1
+      && rmcCharacter !== "V"
+      && typeof snapshot.latitude === "number"
+      && Number.isFinite(snapshot.latitude)
+      && typeof snapshot.longitude === "number"
+      && Number.isFinite(snapshot.longitude);
+    if (!valid || snapshot === null || snapshot.latitude === null || snapshot.longitude === null) {
+      return;
+    }
+    const latitude = snapshot.latitude;
+    const longitude = snapshot.longitude;
+    const points = rtkTrackPointsRef.current;
+    const last = points.at(-1);
+    if (last?.sequence === snapshot.sequence ||
+      (last?.latitude === latitude && last.longitude === longitude))
+    {
+      return;
+    }
+    points.push({ sequence: snapshot.sequence, latitude, longitude });
+    setRtkTrackRevision((current) => current + 1);
+  }, [rtk]);
 
   const loadPersistedData = useCallback(async (showLoading = true) => {
     if (showLoading) setTaskQueryState("loading");
@@ -1277,7 +1320,7 @@ export default function Home() {
         {activePage !== "dashboard" && <Header page={activePage} task={selectedTask} />}
         <div className="page-content">
           {taskQueryState !== "ready" && <section className={`task-data-notice task-data-notice--${taskQueryState}`} role={taskQueryState === "error" ? "alert" : "status"}><div><strong>{taskQueryState === "loading" ? "正在读取设备任务记录" : "任务记录读取失败"}</strong><span>{taskQueryState === "loading" ? "任务列表从 FastAPI 持久化接口加载" : taskQueryError ?? "无法读取设备端任务数据库"}</span></div>{taskQueryState === "error" && <button type="button" onClick={() => void loadPersistedData()}>重新读取</button>}</section>}
-          {activePage === "dashboard" && <Dashboard tasks={tasks} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} onNavigate={setActivePage} taskRepositoryReady={taskQueryState === "ready"} reloadTasks={reloadTasks} heightThreshold={heightThreshold} setHeightThreshold={setHeightThreshold} heightUpperLimit={heightUpperLimit} setHeightUpperLimit={setHeightUpperLimit} mountHeight={mountHeight} setMountHeight={setMountHeight} operationLane={operationLane} setOperationLane={setOperationLane} />}
+          {activePage === "dashboard" && <Dashboard tasks={tasks} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} onNavigate={setActivePage} taskRepositoryReady={taskQueryState === "ready"} reloadTasks={reloadTasks} heightThreshold={heightThreshold} setHeightThreshold={setHeightThreshold} heightUpperLimit={heightUpperLimit} setHeightUpperLimit={setHeightUpperLimit} mountHeight={mountHeight} setMountHeight={setMountHeight} operationLane={operationLane} setOperationLane={setOperationLane} rtk={rtk} rtkTrackPoints={rtkTrackPointsRef.current} rtkTrackRevision={rtkTrackRevision} />}
           {activePage === "playback" && <PlaybackWorkspace tasks={tasks} selectedTaskId={selectedTaskId} onSelectTask={setSelectedTaskId} onDataChanged={reloadTasks} onNavigate={setActivePage} />}
           {activePage === "report" && <ReportWorkspace tasks={tasks} selectedTaskId={selectedTaskId} onSelectTask={setSelectedTaskId} onNavigate={setActivePage} />}
           {activePage === "devtools" && DEVTOOLS_ENABLED && DevToolsWorkspace && <DevToolsWorkspace />}

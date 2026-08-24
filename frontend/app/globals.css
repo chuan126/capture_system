@@ -565,19 +565,14 @@ th { color: #7f8b9e; background: #fafbfd; font-weight: 600; white-space: nowrap;
 .amap-map-tip strong { overflow: hidden; color: #34445b; font: 700 9px/1.25 Arial; text-overflow: ellipsis; white-space: nowrap; }
 .amap-map-tip span { font-size: 9px; line-height: 1.55; }
 .amap-map-tip small { overflow: hidden; color: #8793a5; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
-.amap-vehicle-marker {
-  position: relative;
-  width: 48px;
-  height: 66px;
-  transform-origin: center;
-  filter: drop-shadow(0 7px 10px rgba(20,49,98,.28));
+.amap-position-dot {
+  width: 20px;
+  height: 20px;
+  border: 3px solid #fff;
+  border-radius: 50%;
+  background: #176bff;
+  box-shadow: 0 3px 12px rgba(16, 75, 174, .46), 0 0 0 5px rgba(23, 107, 255, .16);
   pointer-events: none;
-}
-.amap-vehicle-marker svg { display: block; width: 100%; height: 100%; overflow: visible; }
-.amap-vehicle-marker .vehicle-direction { transform-origin: 24px 34px; animation: vehiclePulse 1.4s ease-in-out infinite; }
-@keyframes vehiclePulse {
-  0%, 100% { opacity: .42; transform: scale(.92); }
-  50% { opacity: .92; transform: scale(1.08); }
 }
 .map-modal-mask {
   position: fixed;
@@ -2171,10 +2166,10 @@ table {
 .report-export-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  align-items: start;
+  align-items: stretch;
   gap: 16px;
 }
-.report-export-card { display: flex; min-width: 0; min-height: 630px; flex-direction: column; }
+.report-export-card { display: flex; min-width: 0; min-height: 630px; height: 100%; overflow-x: hidden; flex-direction: column; }
 .report-export-card__head {
   display: grid;
   grid-template-columns: 52px minmax(0, 1fr) auto;
@@ -2229,7 +2224,7 @@ table {
 .report-field-list > div > div { display: grid; gap: 2px; min-width: 0; }
 .report-field-list strong { font-size: 12px; }
 .report-field-list small { color: var(--muted); font-size: 11px; line-height: 1.45; }
-.report-pdf-outline { display: grid; gap: 15px; margin-top: 18px; }
+.report-pdf-outline { display: grid; min-width: 0; gap: 15px; margin-top: 18px; }
 .report-pdf-outline > header {
   display: flex;
   align-items: baseline;
@@ -2241,11 +2236,11 @@ table {
 }
 .report-pdf-outline > header span { color: var(--muted); font-size: 11px; }
 .report-pdf-outline > header strong { overflow: hidden; font-size: 18px; text-overflow: ellipsis; white-space: nowrap; }
-.report-pdf-table { overflow-x: auto; border: 1px solid var(--line); border-radius: 9px; }
+.report-pdf-table { min-width: 0; max-width: 100%; overflow-x: auto; border: 1px solid var(--line); border-radius: 9px; }
 .report-pdf-table__row {
   display: grid;
-  grid-template-columns: 82px 110px 90px 120px 140px 118px 150px minmax(180px, 1fr) minmax(180px, 1fr);
-  min-width: 1290px;
+  grid-template-columns: 90px 120px 100px 140px 160px minmax(190px, 1fr) minmax(190px, 1fr);
+  min-width: 1080px;
 }
 .report-pdf-table__row > span {
   min-width: 0;
@@ -2273,6 +2268,10 @@ table {
 }
 .deepseek-report-config {
   display: grid;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
   gap: 12px;
   margin-top: 14px;
   padding: 14px;
@@ -2285,22 +2284,38 @@ table {
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
+  min-width: 0;
 }
-.deepseek-report-config > header > div { display: grid; gap: 4px; }
+.deepseek-report-config > header > div { display: grid; min-width: 0; gap: 4px; }
 .deepseek-report-config > header strong { color: #244e79; font-size: 13px; }
 .deepseek-report-config > header span,
 .deepseek-report-config > small { color: #66778c; font-size: 10px; line-height: 1.55; }
-.deepseek-report-config > header > span { flex: 0 0 auto; padding: 5px 8px; border-radius: 6px; background: #e7f0f9; }
+.deepseek-report-config > header > span {
+  flex: 0 1 auto;
+  max-width: 48%;
+  padding: 5px 8px;
+  overflow: hidden;
+  border-radius: 6px;
+  background: #e7f0f9;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .deepseek-report-config__fields {
   display: grid;
-  grid-template-columns: minmax(260px, 1fr) minmax(190px, .42fr);
+  width: 100%;
+  min-width: 0;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
-.deepseek-report-config__fields label { display: grid; gap: 6px; }
+.deepseek-report-config__fields label { display: grid; min-width: 0; gap: 6px; }
 .deepseek-report-config__fields label > span { color: #50647c; font-size: 10px; font-weight: 750; }
 .deepseek-report-config__fields input,
-.deepseek-report-config__fields select {
+.deepseek-report-config__fields select,
+.deepseek-report-config__fields textarea {
   width: 100%;
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
   min-height: 40px;
   padding: 8px 10px;
   color: #24374e;
@@ -2309,9 +2324,47 @@ table {
   background: #fff;
   font-size: 12px;
 }
+.deepseek-report-config__fields textarea {
+  height: 132px;
+  min-height: 112px;
+  resize: vertical;
+  font-family: "Times New Roman", "SimSun", serif;
+  line-height: 1.55;
+}
+.deepseek-report-config__skill { grid-column: 1 / -1; }
 .deepseek-report-config > p { margin: 0; overflow-wrap: anywhere; font-size: 10px; line-height: 1.5; }
 .deepseek-report-config > p.is-success { color: var(--green); }
 .deepseek-report-config > p.is-error { color: var(--red); }
+.deepseek-report-config > p.deepseek-thinking {
+  display: flex;
+  align-items: baseline;
+  min-height: 30px;
+  color: #176bff;
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: .2px;
+}
+.deepseek-thinking > span:first-child { animation: deepseek-thinking-pulse 1.4s ease-in-out infinite; }
+.deepseek-thinking__dots { display: inline-flex; margin-left: 2px; }
+.deepseek-thinking__dots i {
+  display: inline-block;
+  font-style: normal;
+  animation: deepseek-thinking-bounce .9s ease-in-out infinite;
+}
+.deepseek-thinking__dots i:nth-child(2) { animation-delay: .14s; }
+.deepseek-thinking__dots i:nth-child(3) { animation-delay: .28s; }
+@keyframes deepseek-thinking-pulse {
+  0%, 100% { opacity: .7; }
+  50% { opacity: 1; }
+}
+@keyframes deepseek-thinking-bounce {
+  0%, 60%, 100% { transform: translateY(0); }
+  30% { transform: translateY(-6px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .deepseek-thinking > span:first-child,
+  .deepseek-thinking__dots i { animation: none; }
+}
 .report-export-card__footer {
   display: flex;
   align-items: center;
@@ -2328,7 +2381,17 @@ table {
 .report-export-card__footer small.is-success { color: var(--green); }
 .report-export-card__footer small.is-error { color: var(--red); }
 .report-export-card__footer .button { min-width: 124px; min-height: 42px; font-size: 13px; }
-.report-export-card__actions { display: flex; flex: 0 0 auto; gap: 10px; }
+.report-export-card__actions {
+  display: grid;
+  width: min(100%, 350px);
+  min-width: 0;
+  flex: 0 0 auto;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.report-export-card__actions .button { width: 100%; min-width: 0; }
+.report-export-card__footer--buttons { justify-content: flex-end; }
+.report-export-card__footer--buttons > small { margin-right: auto; }
 
 @media (max-width: 1700px) {
   .report-export-grid { grid-template-columns: 1fr; }
@@ -2351,9 +2414,9 @@ table {
   .report-export-card__head > strong { grid-column: 1 / -1; justify-self: start; }
   .report-export-card__footer { align-items: stretch; flex-direction: column; }
   .report-export-card__footer .button { width: 100%; }
-  .report-export-card__actions,
   .deepseek-report-config__fields { grid-template-columns: 1fr; }
-  .report-export-card__actions { display: grid; }
+  .report-export-card__actions { width: 100%; }
+  .report-export-card__actions .button { width: 100%; }
   .deepseek-report-config > header { flex-direction: column; }
   .report-export-blocker { grid-template-columns: 1fr; }
 }

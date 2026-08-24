@@ -127,6 +127,9 @@ class TestClearanceEngineNode(unittest.TestCase):
         self.assertEqual(result.candidate_count, 1)
         self.assertEqual(result.selected_inlier_count, 6)
         self.assertTrue(math.isnan(result.minimum_position_east_m))
+        self.assertAlmostEqual(result.minimum_point_x_m, 2.01, delta=1e-5)
+        self.assertTrue(math.isfinite(result.minimum_point_y_m))
+        self.assertTrue(math.isfinite(result.minimum_point_z_m))
         deadline = time.monotonic() + 2.0
         while time.monotonic() < deadline and not self.diagnostics:
             rclpy.spin_once(self.node, timeout_sec=0.05)

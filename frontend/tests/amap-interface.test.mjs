@@ -124,7 +124,7 @@ test("page.tsx imports RealtimeAmap from the map component directory", async () 
   assert.match(page, /<RealtimeAmap/);
   assert.match(page, /snapshot=\{rtkSnapshot\}/);
   assert.match(page, /rawRtkValid=\{rawCoordinateAvailable\}/);
-  assert.match(page, /fusionValid=\{localizationValid\}/);
+  assert.match(page, /trackPoints=\{rtkTrackPoints\}/);
   assert.match(page, /connectionDetail=\{rtk\.detail\}/);
 });
 
@@ -142,17 +142,11 @@ test("RealtimeAmap component contains WGS-84 to GCJ-02 conversion", async () => 
   assert.match(component, /\/api\/v1\/map\/config/);
   assert.match(component, /serviceHost/);
   assert.match(component, /loadAmapScript/);
-  assert.match(component, /const fusedFix = !rawRtkValid && fusionValid/);
-  assert.match(component, /source: TrackSource/);
+  assert.match(component, /trackPoints\.map/);
+  assert.match(component, /source: "rtk"/);
   assert.match(component, /buildTrackSegments/);
-  assert.match(component, /segment\.source === "fusion" \? "#f2c94c" : "#176bff"/);
-  assert.match(component, /当前为融合定位结果/);
-  assert.match(component, /浅黄色轨迹由RTK锚点和ODIN航位推算得到/);
-  assert.match(component, /snapshot\?\.localization_valid === true/);
-  assert.match(component, /snapshot\.localization_heading_source !== 0/);
-  assert.match(component, /: rawRtkValid && typeof snapshot\?\.track_degrees/);
-  assert.match(component, /if \(headingDeg !== null\) marker\.setAngle/);
-  assert.doesNotMatch(component, /setAngle\?\.\(headingDeg \?\? 0\)/);
+  assert.match(component, /strokeColor: "#176bff"/);
+  assert.match(component, /amap-position-dot/);
   assert.doesNotMatch(component, /localStorage|NEXT_PUBLIC_AMAP/);
   assert.match(component, /地图设置/);
   assert.match(component, /security_js_code/);
@@ -167,7 +161,7 @@ test("globals.css includes amap layout and marker styles", async () => {
   assert.match(css, /\.amap-empty/);
   assert.match(css, /\.amap-status-row/);
   assert.match(css, /\.amap-map-tip/);
-  assert.match(css, /\.amap-vehicle-marker/);
+  assert.match(css, /\.amap-position-dot/);
   assert.match(css, /\.map-modal-mask/);
   assert.match(css, /\.map-modal-panel/);
   assert.match(css, /\.amap-chip--button/);

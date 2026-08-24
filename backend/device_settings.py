@@ -7,6 +7,29 @@ import threading
 from pathlib import Path
 
 
+DEFAULT_DEEPSEEK_SKILL = """你是隧道净空测量证据审计器。输入是RK3588从最多2 GiB measurements.db只读流式计算得到的capture-clearance-audit-v2 analysis_package，不是数据库全表。不得要求重新上传全库、不得臆造未提供的数据，也不得修改原始记录。
+
+字段口径：n必须原样取source_frame_statistics.valid_frames，禁止把最低帧数量或候选数量写成n。raw必须取source_frame_statistics.raw_min_m；f取与raw对应的最低真实源帧。设备端已经按source_sequence去重并排除无效、0、NaN和Inf高度，clearance_samples中的重复保持记录不能当成独立障碍。
+
+判定时以点云证据为主体：综合raw_min_m、median_m、mad_m、p01_m、p05_m、rolling3_median_min_m、rolling5_median_min_m、lowest_20_real_frames的重复低值、selected_inlier_count以及candidate_contexts前后连续性。只有同时满足“孤立、明显突降、前后立即恢复、无连续或周期结构支持”才判O。连续低值、风机、横梁或周期结构判V；证据确实矛盾或不足时判R。V或R时eff必须等于raw，只有O允许从输入已有滚动统计或候选值中选择eff。
+
+可信度c表示“对V/R/O判定结论的可信程度”，不是净空精度、RTK有效率或数据字段完整率。R表示有充分理由需要复核，结论明确时c可以较高，不能因为状态是R就自动限制在0.5以下。
+
+评分时遵守以下规则：
+- 真实有效源帧不少于20且source_valid_ratio不低于0.95，是强基础证据；不少于100帧且频率稳定时可进一步提高可信度。
+- 多个相近低值、连续低值、3帧或5帧滚动统计支持、较高inlier数量，均应提高结论可信度；单个最低帧inlier偏少只降低该帧权重，不得抹去其他低值帧证据。
+- RTK无效、continuous_distance_m为null只影响空间定位，不直接否定点云高度，对c的合计影响不得超过0.05。
+- selected_grid_area_m2、selected_residual_p95_m或最低点XYZ等辅助字段缺失只写入q；已有帧数、连续性和inlier证据可用时，对c的合计影响不得超过0.10。
+- 同一缺项不得通过多个描述重复扣分。q用于披露数据问题，不要求每个q都降低c。
+- 证据一致的V通常为0.80–0.98；证据清楚但仍需现场确认的R通常为0.65–0.85；证据充分的O通常为0.80–0.98。
+- 只有有效真实源帧少于5、核心高度大量无效或证据严重冲突时，c才应低于0.55。
+
+报告依据必须诚实、保守但不过度惩罚辅助数据缺项。数据库={DB_PATH}；范围={TASK_OR_TIME_RANGE}。"""
+
+_LEGACY_DEEPSEEK_SKILL_PREFIX = "你是隧道净空数据库审计器。直接读取SQLite数据库"
+_OUTDATED_CONFIDENCE_SKILL_MARKER = "可信度c表示当前证据充分程度，不是统计概率"
+
+
 class DeviceSettingsError(RuntimeError):
     pass
 
@@ -28,6 +51,15 @@ class DeviceSettingsStore:
                     "amap": {
                         "js_api_key": os.getenv("CAPTURE_AMAP_JS_KEY", "").strip(),
                         "security_js_code": os.getenv("CAPTURE_AMAP_SECURITY_CODE", "").strip(),
+                    },
+                    "deepseek": {
+                        "api_url": os.getenv(
+                            "CAPTURE_DEEPSEEK_API_URL",
+                            "https://api.deepseek.com/chat/completions",
+                        ).strip(),
+                        "api_key": os.getenv("CAPTURE_DEEPSEEK_API_KEY", "").strip(),
+                        "model": os.getenv("CAPTURE_DEEPSEEK_MODEL", "deepseek-v4-flash").strip(),
+                        "skill_prompt": DEFAULT_DEEPSEEK_SKILL,
                     },
                 }
                 self._write_locked(initial)
@@ -55,10 +87,78 @@ class DeviceSettingsStore:
             try:
                 payload = self._read_locked()
             except DeviceSettingsError:
-                # 前端重新保存地图配置应能修复损坏的设备配置文件。当前 schema 仅包含 amap。
+                # 前端重新保存地图配置应能修复损坏的设备配置文件。
                 payload = {"schema_version": 1}
             payload["schema_version"] = 1
             payload["amap"] = {"js_api_key": key, "security_js_code": code}
+            self._write_locked(payload)
+
+    def get_deepseek(self) -> dict[str, str]:
+        with self._lock:
+            payload = self._read_locked()
+            deepseek = payload.get("deepseek") if isinstance(payload, dict) else None
+            values = deepseek if isinstance(deepseek, dict) else {}
+            stored_skill_prompt = str(values.get("skill_prompt") or DEFAULT_DEEPSEEK_SKILL)
+            skill_prompt = stored_skill_prompt
+            if (
+                skill_prompt.startswith(_LEGACY_DEEPSEEK_SKILL_PREFIX)
+                or _OUTDATED_CONFIDENCE_SKILL_MARKER in skill_prompt
+            ):
+                skill_prompt = DEFAULT_DEEPSEEK_SKILL
+            if skill_prompt != stored_skill_prompt:
+                migrated_values = dict(values)
+                migrated_values["skill_prompt"] = skill_prompt
+                payload["deepseek"] = migrated_values
+                self._write_locked(payload)
+            return {
+                "api_url": str(
+                    values.get("api_url") or "https://api.deepseek.com/chat/completions"
+                ).strip(),
+                "api_key": str(values.get("api_key") or "").strip(),
+                "model": str(values.get("model") or "deepseek-v4-flash").strip(),
+                "skill_prompt": skill_prompt,
+            }
+
+    def set_deepseek(
+        self,
+        api_url: str,
+        api_key: str,
+        model: str,
+        skill_prompt: str,
+    ) -> None:
+        normalized_url = api_url.strip()
+        normalized_key = api_key.strip()
+        normalized_model = model.strip()
+        normalized_skill = skill_prompt.strip()
+        if (
+            normalized_skill.startswith(_LEGACY_DEEPSEEK_SKILL_PREFIX)
+            or _OUTDATED_CONFIDENCE_SKILL_MARKER in normalized_skill
+        ):
+            # 页面可能在后端升级前已经加载了旧命令词；保存时也执行迁移，
+            # 避免旧页面把过度保守的评分规则重新写回设备端。
+            normalized_skill = DEFAULT_DEEPSEEK_SKILL
+        if not normalized_url.startswith(("https://", "http://")):
+            raise DeviceSettingsError("DeepSeek API地址必须使用HTTP或HTTPS")
+        if len(normalized_url) > 2048 or len(normalized_key) > 2048:
+            raise DeviceSettingsError("DeepSeek API配置长度无效")
+        if normalized_model not in {"deepseek-v4-flash", "deepseek-v4-pro"}:
+            raise DeviceSettingsError("DeepSeek模型配置无效")
+        if not normalized_skill or len(normalized_skill) > 20_000:
+            raise DeviceSettingsError("大模型Skill长度必须在1至20000字符之间")
+        if any(ord(char) < 32 and char not in "\r\n\t" for char in normalized_key + normalized_skill):
+            raise DeviceSettingsError("DeepSeek配置包含非法控制字符")
+        with self._lock:
+            try:
+                payload = self._read_locked()
+            except DeviceSettingsError:
+                payload = {"schema_version": 1}
+            payload["schema_version"] = 1
+            payload["deepseek"] = {
+                "api_url": normalized_url,
+                "api_key": normalized_key,
+                "model": normalized_model,
+                "skill_prompt": normalized_skill,
+            }
             self._write_locked(payload)
 
     def _read_locked(self) -> dict[str, object]:

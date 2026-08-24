@@ -30,6 +30,9 @@ def test_data_recorder_cpp_schema_executes_without_duplicate_columns() -> None:
         sample_columns = {
             row[1] for row in connection.execute("PRAGMA table_info(clearance_samples)")
         }
+        imu_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(imu_samples)")
+        }
     finally:
         connection.close()
 
@@ -74,6 +77,21 @@ def test_data_recorder_cpp_schema_executes_without_duplicate_columns() -> None:
         "odin_qw",
     }.issubset(sample_columns)
     assert "imu_accumulator_ = ImuAccumulator{};" in source
+    assert {
+        "recorded_timestamp_ns",
+        "clearance_height_m",
+        "minimum_clearance_height_m",
+        "rtk_timestamp_ns",
+        "gyro_x_rad_s",
+        "accel_z_m_s2",
+        "minimum_point_x_m",
+        "odin_qw",
+    }.issubset(imu_columns)
+    assert "insert_imu_sample(*message);" in source
+    assert "const bool imu_values_finite" in source
+    assert "非有限分量只在该行落0，不丢整行" in source
+    assert "finite_or_zero(message.angular_velocity.x)" in source
+    assert "finite_or_zero(message.linear_acceleration.z)" in source
     assert "bind_nullable_double(statement, 36, std::nullopt);" in source
     assert "bind_nullable_double(statement, 37, std::nullopt);" in source
     assert "bind_nullable_double(statement, 38, std::nullopt);" in source
@@ -93,7 +111,7 @@ def test_data_recorder_stores_mount_adjusted_clearance_and_keeps_raw_algorithm_v
         / "data_recorder_node.cpp"
     ).read_text(encoding="utf-8")
 
-    assert "VALUES (1, 12, ?, 'recorded'" in source
+    assert "VALUES (1, 13, ?, 'recorded'" in source
     assert "clearance_height = *value + lidar_mount_height_m_" in source
     assert "bind_nullable_double(statement, 5, value);" in source
     assert "bind_nullable_double(statement, 6, clearance_height);" in source
@@ -104,6 +122,7 @@ def test_data_recorder_stores_mount_adjusted_clearance_and_keeps_raw_algorithm_v
     assert "write_periodic_sample" in source
     assert "sample_timer_" in source
     assert "latest.source_timestamp_ns == last_received_clearance_timestamp_ns_" in source
+    assert "DELETE FROM imu_samples WHERE recorded_timestamp_ns > ?" in source
 
 
 def test_recorder_keeps_raw_sensor_snapshots_without_fusion_localization_dependencies() -> None:

@@ -59,6 +59,17 @@ class DeepSeekReportRequest(BaseModel):
 
     api_key: str = Field(min_length=1, max_length=2048)
     model: Literal["deepseek-v4-flash", "deepseek-v4-pro"] = "deepseek-v4-flash"
+    api_url: str | None = Field(default=None, min_length=1, max_length=2048)
+    skill_prompt: str | None = Field(default=None, min_length=1, max_length=20_000)
+
+
+class DeepSeekSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    api_url: str = Field(min_length=1, max_length=2048)
+    api_key: str = Field(default="", max_length=2048)
+    model: Literal["deepseek-v4-flash", "deepseek-v4-pro"] = "deepseek-v4-flash"
+    skill_prompt: str = Field(min_length=1, max_length=20_000)
 
 
 class ReportPreviewResponse(BaseModel):

@@ -105,13 +105,18 @@ test("creates a fresh DeepSeek report job with the display-side key", async () =
     }), { status: 200, headers: { "content-type": "application/json" } });
   };
 
-  const job = await startDeepSeekReportJob("task-1", "sk-entered-on-display", "deepseek-v4-pro");
+  const job = await startDeepSeekReportJob("task-1", {
+    apiUrl: "https://api.deepseek.com/chat/completions",
+    apiKey: "sk-entered-on-display",
+    model: "deepseek-v4-pro",
+    skillPrompt: "审计当前任务",
+  });
 
   assert.equal(job.exportFormat, "deepseek_pdf");
   assert.deepEqual(request, [
     "/api/v1/tasks/task-1/export-jobs/deepseek-report",
     "POST",
-    { api_key: "sk-entered-on-display", model: "deepseek-v4-pro" },
+    { api_key: "sk-entered-on-display", model: "deepseek-v4-pro", api_url: "https://api.deepseek.com/chat/completions", skill_prompt: "审计当前任务" },
   ]);
 });
 

@@ -62,12 +62,16 @@ def run(data_root: Path, job_file: Path, pdf_font: Path | None) -> int:
         elif export_format == "deepseek_pdf":
             api_key = payload.get("deepseek_api_key")
             model = payload.get("deepseek_model")
-            if not isinstance(api_key, str) or not isinstance(model, str):
+            api_url = payload.get("deepseek_api_url")
+            skill_prompt = payload.get("deepseek_skill_prompt")
+            if not all(isinstance(value, str) for value in (api_key, model, api_url, skill_prompt)):
                 raise RuntimeError("大模型报告任务缺少DeepSeek API配置")
             generated = deepseek_service.generate(
                 task_repository.get_task(task_ids[0]),
                 api_key,
                 model,
+                api_url=api_url,
+                skill_prompt=skill_prompt,
                 progress=lambda phase, progress: _update(
                     job_file,
                     phase=phase,

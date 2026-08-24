@@ -190,14 +190,14 @@ test("clearance chart keeps a stable fitted y range until the user changes it", 
 });
 
 test("report removes task-name fields and aggregates only user-selected tasks", () => {
-  assert.match(report, /50 Hz 测量明细/);
+  assert.match(report, /原始数据保存/);
   assert.match(report, /隧道净空检测汇总/);
   assert.match(report, /任务编号/);
   assert.match(report, /隧道编号/);
   assert.match(report, /检测车道/);
   assert.match(report, /原始单帧最低/);
-  assert.match(report, /建议最低可信净空/);
-  assert.match(report, /可信度/);
+  assert.doesNotMatch(report, /建议最低可信净空/);
+  assert.doesNotMatch(report, /可信度是单个任务内部/);
   assert.match(report, /隧道入口 RTK/);
   assert.match(report, /隧道出口 RTK/);
   assert.match(report, /checkedTaskIds=\{checked\}/);
@@ -207,35 +207,46 @@ test("report removes task-name fields and aggregates only user-selected tasks", 
 });
 
 test("report enables formal exports only for eligible recorded selected data", () => {
-  assert.match(report, /loadReportPreview\(previewIds,controller\.signal\)/);
+  assert.match(report, /loadReportPreview\(previewIds, controller\.signal\)/);
   assert.match(report, /startTaskTxtJob\(selectedTask\.taskId\)/);
   assert.match(report, /startSummaryPdfJob\(selectedIds\)/);
   assert.match(report, /downloadExportJob/);
-  assert.match(report, /txtState==="generating"\?cancel/);
-  assert.match(report, /pdfState==="generating"\?cancel/);
-  assert.match(report, /localStorage\.setItem\(jobKey\(kind\),created\.jobId\)/);
+  assert.match(report, /txtState === "generating" \? cancel/);
+  assert.match(report, /pdfState === "generating" \? cancel/);
+  assert.match(report, /localStorage\.setItem\(jobKey\(kind\), created\.jobId\)/);
   assert.match(report, /pdfExportableTasks/);
   assert.match(report, /rawMinClearanceM/);
-  assert.match(report, /recommendedMinClearanceM/);
-  assert.match(report, /confidenceScore/);
-  assert.match(report, /建议值至少需要5个几何合格独立源帧/);
-  assert.match(report, /证据不足时显示“--”，不会复制原始最低值/);
-  assert.match(report, /真实连续结构和周期性设施受到保护/);
+  assert.doesNotMatch(report, /recommendedMinClearanceM/);
+  assert.doesNotMatch(report, /confidenceScore/);
   assert.match(reportApi, /task_ids:taskIds/);
 });
 
 test("report adds one-shot DeepSeek export beside the existing PDF export", () => {
-  assert.match(report, /"导出 PDF"/);
-  assert.match(report, /"大模型报告导出"/);
-  assert.match(report, /startDeepSeekReportJob\(selectedTask\.taskId,deepseekApiKey,deepseekModel\)/);
-  assert.match(report, /previewIds=useMemo/);
-  assert.match(report, /checked\.has\(t\.taskId\)&&t\.pdfExportable/);
-  assert.match(report, /capture-deepseek-api-key/);
-  assert.match(report, /localStorage\.setItem\(DEEPSEEK_API_KEY_STORAGE,value\)/);
-  assert.match(report, /每次点击都创建一个新的模型任务窗口/);
-  assert.match(report, /完整measurements\.db并使用单次请求，不进行长任务分块/);
+  assert.match(report, /"本地报告生成"/);
+  assert.match(report, /"AI报告生成"/);
+  assert.match(report, /startDeepSeekReportJob\(selectedTask\.taskId, deepseekSettings\)/);
+  assert.match(report, /const previewIds = useMemo/);
+  assert.match(report, /checked\.has\(task\.taskId\) && task\.pdfExportable/);
+  assert.match(report, /大模型Skill/);
+  assert.match(report, /saveDeepSeekSettings\(deepseekSettings\)/);
+  assert.match(report, /className="deepseek-thinking"/);
+  assert.match(report, /大模型thinking/);
+  assert.doesNotMatch(report, /`大模型thiking\.\.\. \$\{percentage\}%`/);
+  assert.match(css, /\.deepseek-report-config > p\.deepseek-thinking\s*\{[^}]*font-size:\s*20px/i);
+  assert.match(css, /@keyframes deepseek-thinking-bounce/);
   assert.match(reportApi, /export-jobs\/deepseek-report/);
-  assert.match(reportApi, /api_key:apiKey,model/);
+  assert.match(reportApi, /api_key:value\.apiKey/);
+  assert.match(report, /capture-clearance-audit-v2 analysis_package/);
+  assert.match(report, /n必须原样取source_frame_statistics\.valid_frames/);
+  assert.match(report, /对V\/R\/O判定结论的可信程度/);
+  assert.match(report, /合计影响不得超过0\.05/);
+  assert.match(css, /\.deepseek-report-config\s*\{[^}]*box-sizing:\s*border-box;[^}]*max-width:\s*100%;/i);
+  assert.match(css, /\.deepseek-report-config__fields\s*\{[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/i);
+  assert.match(css, /\.deepseek-report-config__fields textarea\s*\{[^}]*height:\s*132px;[^}]*min-height:\s*112px;/i);
+  assert.match(css, /\.report-export-card__actions\s*\{[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/i);
+  assert.match(css, /\.report-export-grid\s*\{[^}]*align-items:\s*stretch;/i);
+  assert.match(css, /\.report-export-card\s*\{[^}]*overflow-x:\s*hidden;/i);
+  assert.match(css, /\.report-pdf-table\s*\{[^}]*max-width:\s*100%;[^}]*overflow-x:\s*auto;/i);
 });
 
 test("task browser searches time identifiers and tunnel metadata and groups by date", () => {

@@ -64,6 +64,42 @@ def create_measurement_database(
                 invalid_reason TEXT,
                 quality_score REAL
             );
+            CREATE TABLE imu_samples (
+                sample_index INTEGER PRIMARY KEY,
+                recorded_timestamp_ns INTEGER NOT NULL,
+                clearance_height_m REAL,
+                minimum_clearance_height_m REAL,
+                rtk_timestamp_ns INTEGER,
+                rtk_latitude_deg REAL,
+                rtk_longitude_deg REAL,
+                rtk_altitude_m REAL,
+                rtk_valid INTEGER,
+                rtk_satellite_count INTEGER,
+                rtk_hdop REAL,
+                rtk_pdop REAL,
+                rtk_speed_knots REAL,
+                rtk_track_degrees REAL,
+                gyro_x_rad_s REAL,
+                gyro_y_rad_s REAL,
+                gyro_z_rad_s REAL,
+                accel_x_m_s2 REAL,
+                accel_y_m_s2 REAL,
+                accel_z_m_s2 REAL,
+                radar_temperature_c REAL,
+                minimum_point_x_m REAL,
+                minimum_point_y_m REAL,
+                minimum_point_z_m REAL,
+                vehicle_pitch_deg REAL,
+                vehicle_roll_deg REAL,
+                vehicle_heading_deg REAL,
+                odin_position_x_m REAL,
+                odin_position_y_m REAL,
+                odin_position_z_m REAL,
+                odin_qx REAL,
+                odin_qy REAL,
+                odin_qz REAL,
+                odin_qw REAL
+            );
             CREATE TABLE rtk_endpoints (
                 role TEXT PRIMARY KEY,
                 timestamp_ns INTEGER NOT NULL,
@@ -98,6 +134,19 @@ def create_measurement_database(
                 (1, base_ns + 20_000_000, base_ns + 21_000_000, 20.0, None, None, 0, "insufficient_points", None),
                 (2, base_ns + 40_000_000, base_ns + 41_000_000, 40.0, 2.89, 5.18, 1, None, 0.94),
                 (3, base_ns + 60_000_000, base_ns + 61_000_000, 60.0, 2.91, 5.21, 1, None, 0.96),
+            ],
+        )
+        connection.executemany(
+            """
+            INSERT INTO imu_samples (
+                sample_index, recorded_timestamp_ns, clearance_height_m,
+                minimum_clearance_height_m, gyro_x_rad_s, gyro_y_rad_s, gyro_z_rad_s,
+                accel_x_m_s2, accel_y_m_s2, accel_z_m_s2
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (0, base_ns + 1_000_000, 5.20, 5.20, 0.01, 0.02, 0.03, 0.1, 0.2, 9.8),
+                (1, base_ns + 2_000_000, 5.18, 5.18, 0.04, 0.05, 0.06, 0.3, 0.4, 9.7),
             ],
         )
         connection.executemany(
@@ -187,7 +236,7 @@ def test_preview_and_txt_export_use_only_recorded_completed_task(tmp_path: Path)
     assert generation_response.json()["file_name"].startswith(f"{task['display_id']}_")
     assert download_response.status_code == 200
     text = download_response.content.decode("utf-8-sig")
-    assert "隧道净空检测 50 Hz 测量明细" in text
+    assert "原始数据保存" in text
     assert "记录时间" in text
     assert "G45-001" in text
     assert "5.180" in text
@@ -195,7 +244,16 @@ def test_preview_and_txt_export_use_only_recorded_completed_task(tmp_path: Path)
     assert "\t" not in text
     assert "," not in text
     header = text.splitlines()[2].split("    ")
-    assert len(header) == 48
+    assert header == [
+        "采样序号", "记录时间", "隧道编号", "检测车道", "实时高度 m", "最低高度 m",
+        "隧道入口 RTK", "隧道出口 RTK", "RTK时间", "RTK纬度 deg", "RTK经度 deg",
+        "RTK高程 m", "RTK有效", "RTK卫星数", "RTK HDOP", "RTK PDOP", "RTK速度 knot",
+        "RTK航向 deg", "陀螺X rad/s", "陀螺Y rad/s", "陀螺Z rad/s", "加速度计X m/s2",
+        "加速度计Y m/s2", "加速度计Z m/s2", "雷达温度 °C", "最低点云X m",
+        "最低点云Y m", "最低点云Z m", "俯仰 deg", "横滚 deg", "方位 deg",
+        "里程计位置x m", "里程计位置y m", "里程计位置z m", "里程计四元数x",
+        "里程计四元数y", "里程计四元数z", "里程计四元数w",
+    ]
     assert "陀螺X rad/s" in header
     assert "加速度计Z m/s2" in header
     assert "俯仰 deg" in header
@@ -204,7 +262,7 @@ def test_preview_and_txt_export_use_only_recorded_completed_task(tmp_path: Path)
     assert first_sample["雷达温度 °C"] == "0"
     assert first_sample["方位 deg"] == "0"
     assert first_sample["里程计位置z m"] == "0"
-    assert "insufficient_points" in text
+    assert len(text.splitlines()) == 5
     assert "attachment" in download_response.headers["content-disposition"]
 
 
@@ -371,9 +429,9 @@ def test_report_exports_accept_nanosecond_iso_timestamps(tmp_path: Path) -> None
     assert txt_response.status_code == 200
     assert txt_download.status_code == 200
     txt = txt_download.content.decode("utf-8-sig")
-    # 明细时间来自每条源帧；纳秒精度metadata时间用于PDF任务时间范围。
-    assert "2026-08-06T09:00:00.000+08:00" in txt
-    assert "2026-08-06T09:00:00.060+08:00" in txt
+    # TXT 明细时间来自每条 IMU 样本；纳秒精度 metadata 时间用于 PDF 任务时间范围。
+    assert "2026-08-06T09:00:00.001+08:00" in txt
+    assert "2026-08-06T09:00:00.002+08:00" in txt
     assert pdf_response.status_code == 200
 
 
@@ -512,7 +570,7 @@ def test_report_uses_effective_minimum_and_writes_outlier_trace(tmp_path: Path) 
     assert preview["recommended_min_clearance_m"] is None
     assert isinstance(preview["confidence_score"], int)
     assert preview["outlier_count"] == 1
-    assert generated["file_name"].endswith("_50Hz测量明细.txt")
+    assert generated["file_name"].endswith("_原始数据保存.txt")
     trace_path = (
         data_root
         / "tasks"

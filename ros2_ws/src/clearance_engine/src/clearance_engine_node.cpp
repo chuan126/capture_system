@@ -169,6 +169,9 @@ private:
     output.minimum_position_east_m = nanValue();
     output.minimum_position_north_m = nanValue();
     output.minimum_position_up_m = nanValue();
+    output.minimum_point_x_m = estimate.valid ? estimate.representative.x : nanValue();
+    output.minimum_point_y_m = estimate.valid ? estimate.representative.y : nanValue();
+    output.minimum_point_z_m = estimate.valid ? estimate.representative.z : nanValue();
     output.valid_point_ratio = estimate.valid_point_ratio;
     output.invalid_reason = estimate.invalid_reason;
     output.processing_time_ms = elapsed_ms;
