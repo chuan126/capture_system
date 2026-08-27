@@ -36,6 +36,8 @@ class _QueuedCommand:
     lidar_mount_height_m: float | None
     clearance_threshold_m: float | None
     clearance_upper_limit_m: float | None
+    detection_radius_m: float | None
+    min_support_points: int | None
     future: Future[TaskControlResult]
 
 
@@ -70,6 +72,7 @@ class TaskControlBridge:
         self._clients: dict[str, object] = {}
         self._start_request_type: object | None = None
         self._command_request_type: object | None = None
+        self._clearance_parameter_client: object | None = None
         self._service_ready: dict[str, bool] = {name: False for name in self._service_names}
         self._service_ready_lock = threading.Lock()
         self.error: str | None = None
@@ -147,6 +150,8 @@ class TaskControlBridge:
         lidar_mount_height_m: float | None = None,
         clearance_threshold_m: float | None = None,
         clearance_upper_limit_m: float | None = None,
+        detection_radius_m: float | None = None,
+        min_support_points: int | None = None,
         timeout_seconds: float = 15.0,
     ) -> TaskControlResult:
         if self.error is not None or self._thread is None or not self._thread.is_alive():
@@ -163,6 +168,8 @@ class TaskControlBridge:
             lidar_mount_height_m=lidar_mount_height_m,
             clearance_threshold_m=clearance_threshold_m,
             clearance_upper_limit_m=clearance_upper_limit_m,
+            detection_radius_m=detection_radius_m,
+            min_support_points=min_support_points,
             future=future,
         )
         try:
@@ -180,6 +187,7 @@ class TaskControlBridge:
             import rclpy
             from interfaces.msg import TaskStatus
             from interfaces.srv import StartTask, TaskCommand
+            from rcl_interfaces.srv import SetParametersAtomically
             from rclpy.context import Context
             from rclpy.executors import SingleThreadedExecutor
             from rclpy.node import Node
@@ -204,6 +212,10 @@ class TaskControlBridge:
             }
             self._start_request_type = StartTask.Request
             self._command_request_type = TaskCommand.Request
+            self._clearance_parameter_client = node.create_client(
+                SetParametersAtomically,
+                "/clearance_engine_node/set_parameters_atomically",
+            )
             executor = SingleThreadedExecutor(context=context)
             executor.add_node(node)
             self._executor = executor
@@ -252,6 +264,7 @@ class TaskControlBridge:
             if not client.wait_for_service(timeout_sec=0.25):
                 raise RuntimeError(f"任务控制Service不可用：{self._service_names[command.command]}")
             if command.command == "start":
+                self._apply_clearance_parameters(command, executor)
                 request = self._start_request_type()
                 request.task_id = command.task_id
                 request.command_id = command.command_id
@@ -264,6 +277,12 @@ class TaskControlBridge:
                 request.clearance_threshold_m = float(command.clearance_threshold_m or 0.0)
                 request.clearance_upper_limit_m = float(
                     20.0 if command.clearance_upper_limit_m is None else command.clearance_upper_limit_m
+                )
+                request.detection_radius_m = float(
+                    1.0 if command.detection_radius_m is None else command.detection_radius_m
+                )
+                request.min_support_points = int(
+                    5 if command.min_support_points is None else command.min_support_points
                 )
             else:
                 request = self._command_request_type()
@@ -291,6 +310,37 @@ class TaskControlBridge:
             )
         except Exception as error:
             command.future.set_exception(error)
+
+    def _apply_clearance_parameters(self, command: _QueuedCommand, executor: Any) -> None:
+        from rcl_interfaces.msg import Parameter, ParameterType, ParameterValue
+        from rcl_interfaces.srv import SetParametersAtomically
+
+        client = self._clearance_parameter_client
+        if client is None or not client.wait_for_service(timeout_sec=0.5):
+            raise RuntimeError("净空算法参数Service不可用")
+        radius = ParameterValue(
+            type=ParameterType.PARAMETER_DOUBLE,
+            double_value=float(1.0 if command.detection_radius_m is None else command.detection_radius_m),
+        )
+        support = ParameterValue(
+            type=ParameterType.PARAMETER_INTEGER,
+            integer_value=int(5 if command.min_support_points is None else command.min_support_points),
+        )
+        request = SetParametersAtomically.Request()
+        request.parameters = [
+            Parameter(name="raw_cluster.detection_radius_m", value=radius),
+            Parameter(name="raw_cluster.min_support_points", value=support),
+        ]
+        future = client.call_async(request)
+        deadline = time.monotonic() + 2.0
+        while not future.done() and time.monotonic() < deadline:
+            executor.spin_once(timeout_sec=0.02)
+        if not future.done():
+            raise TimeoutError("净空算法参数应用超时")
+        response = future.result()
+        if response is None or not response.result.successful:
+            reason = response.result.reason if response is not None else "无返回结果"
+            raise RuntimeError(f"净空算法参数应用失败：{reason}")
 
     def _on_status(self, message: object) -> None:
         self._snapshot_sink(from_ros_message(message))

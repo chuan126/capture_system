@@ -113,6 +113,8 @@ export const startTaskControl = (
     lidarMountHeightM: number;
     clearanceThresholdM: number;
     clearanceUpperLimitM: number;
+    detectionRadiusM: number;
+    minSupportPoints: number;
     expectedRevision: number;
     idempotencyKey: string;
   },
@@ -125,6 +127,8 @@ export const startTaskControl = (
     lidar_mount_height_m: options.lidarMountHeightM,
     clearance_threshold_m: options.clearanceThresholdM,
     clearance_upper_limit_m: options.clearanceUpperLimitM,
+    detection_radius_m: options.detectionRadiusM,
+    min_support_points: options.minSupportPoints,
     expected_revision: options.expectedRevision,
   },
   options.idempotencyKey,

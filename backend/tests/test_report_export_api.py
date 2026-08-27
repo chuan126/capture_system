@@ -217,7 +217,7 @@ def test_preview_and_txt_export_use_only_recorded_completed_task(tmp_path: Path)
     assert preview["tasks"][0]["exportable"] is True
     assert preview["tasks"][0]["pdf_exportable"] is True
     assert preview["tasks"][0]["minimum_height_m"] == 5.18
-    assert preview["tasks"][0]["normal_minimum_height_m"] == 5.18
+    assert preview["tasks"][0]["normal_minimum_height_m"] == 5.20
     assert preview["tasks"][0]["raw_min_clearance_m"] == 5.18
     assert preview["tasks"][0]["effective_min_clearance_m"] == 5.18
     assert preview["tasks"][0]["recommended_min_clearance_m"] is None
@@ -263,10 +263,18 @@ def test_preview_and_txt_export_use_only_recorded_completed_task(tmp_path: Path)
     assert first_sample["方位 deg"] == "0"
     assert first_sample["里程计位置z m"] == "0"
     assert len(text.splitlines()) == 5
+    with sqlite3.connect(data_root / "tasks" / str(task["task_id"]) / "measurements.db") as connection:
+        stored_heights = [
+            row[0]
+            for row in connection.execute(
+                "SELECT clearance_height_m FROM clearance_samples ORDER BY sample_index"
+            )
+        ]
+    assert stored_heights == [5.20, None, 5.18, 5.21]
     assert "attachment" in download_response.headers["content-disposition"]
 
 
-def test_pdf_uses_effective_minimum_even_outside_legacy_frozen_height_range(tmp_path: Path) -> None:
+def test_pdf_keeps_task_without_samples_inside_frozen_height_range(tmp_path: Path) -> None:
     static_dir = tmp_path / "site"
     make_static_site(static_dir)
     data_root = tmp_path / "runtime"
@@ -303,10 +311,18 @@ def test_pdf_uses_effective_minimum_even_outside_legacy_frozen_height_range(tmp_
     assert preview["exportable_task_count"] == 1
     assert preview["tasks"][0]["exportable"] is True
     assert preview["tasks"][0]["pdf_exportable"] is True
+    assert preview["tasks"][0]["normal_minimum_height_m"] is None
     assert preview["tasks"][0]["effective_min_clearance_m"] == 5.18
     assert preview["tasks"][0]["pdf_blocked_reason"] is None
     assert txt_response.status_code == 200
     assert pdf_response.status_code == 200
+    manifest = __import__("json").loads(
+        (data_root / "reports" / pdf_response.json()["report_id"] / "manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert manifest["report_height_ranges"][0]["minimum_height_m"] is None
+    assert manifest["report_height_ranges"][0]["normal_samples"] == 0
 
 
 def test_test_fixture_is_visible_but_blocked_from_formal_export(tmp_path: Path) -> None:
@@ -384,6 +400,10 @@ def test_pdf_summary_generation_and_download(tmp_path: Path) -> None:
     assert download_response.content.startswith(b"%PDF-")
     assert len(download_response.content) > 1000
     assert download_response.headers["content-type"] == "application/pdf"
+    manifest = __import__("json").loads(
+        (data_root / "reports" / payload["report_id"] / "manifest.json").read_text(encoding="utf-8")
+    )
+    assert [item["minimum_height_m"] for item in manifest["report_height_ranges"]] == [5.18, 5.18]
 
 
 def test_report_exports_accept_nanosecond_iso_timestamps(tmp_path: Path) -> None:
@@ -435,7 +455,7 @@ def test_report_exports_accept_nanosecond_iso_timestamps(tmp_path: Path) -> None
     assert pdf_response.status_code == 200
 
 
-def test_report_preview_and_pdf_use_task_creation_order(tmp_path: Path) -> None:
+def test_report_preview_and_pdf_use_reverse_task_creation_order(tmp_path: Path) -> None:
     assert PDF_FONT.is_file(), "测试环境缺少 PDF 中文字体"
     static_dir = tmp_path / "site"
     make_static_site(static_dir)
@@ -470,14 +490,14 @@ def test_report_preview_and_pdf_use_task_creation_order(tmp_path: Path) -> None:
 
     assert preview_response.status_code == 200
     preview_ids = [item["task_id"] for item in preview_response.json()["tasks"]]
-    assert preview_ids == [task["task_id"] for task in created]
+    assert preview_ids == [task["task_id"] for task in reversed(created)]
     assert pdf_response.status_code == 200
     report_id = pdf_response.json()["report_id"]
     manifest = __import__("json").loads(
         (data_root / "reports" / report_id / "manifest.json").read_text(encoding="utf-8")
     )
-    assert manifest["task_ids"] == [task["task_id"] for task in created]
-    assert manifest["task_display_ids"] == [task["display_id"] for task in created]
+    assert manifest["task_ids"] == [task["task_id"] for task in reversed(created)]
+    assert manifest["task_display_ids"] == [task["display_id"] for task in reversed(created)]
 
 
 def test_report_lane_text_uses_actual_direction_and_lane_side() -> None:

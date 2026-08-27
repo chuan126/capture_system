@@ -30,6 +30,7 @@ test("capture, playback and report share persisted tasks and one browser selecti
   assert.doesNotMatch(page, /selectedBatchId|listBatches\(/);
   assert.match(page, /<PlaybackWorkspace[\s\S]*selectedTaskId=\{selectedTaskId\}/);
   assert.match(page, /<ReportWorkspace[\s\S]*selectedTaskId=\{selectedTaskId\}/);
+  assert.doesNotMatch(page, /persistedTasks\[0\]\?\.taskId/);
 });
 
 test("time identifiers replace visible operation-batch task numbering", () => {
@@ -57,8 +58,9 @@ test("stopped tasks expose direct playback and report navigation", () => {
   assert.match(page, /onNavigate\("report"\)/);
 });
 
-test("playback task browser follows task creation order", () => {
-  assert.match(playback, /heading="选择回放任务"[\s\S]*sortOrder="asc"/);
+test("playback and report task browsers show newest tasks first", () => {
+  assert.match(playback, /heading="选择回放任务"[\s\S]*sortOrder="desc"/);
+  assert.match(report, /heading="选择导出任务"[\s\S]*sortOrder="desc"/);
   assert.match(taskBrowser, /sortOrder\?: "asc" \| "desc"/);
   assert.match(taskBrowser, /const direction=sortOrder==="asc"\?1:-1/);
 });
@@ -195,13 +197,13 @@ test("report removes task-name fields and aggregates only user-selected tasks", 
   assert.match(report, /任务编号/);
   assert.match(report, /隧道编号/);
   assert.match(report, /检测车道/);
-  assert.match(report, /原始单帧最低/);
+  assert.match(report, /"最低值"/);
   assert.doesNotMatch(report, /建议最低可信净空/);
   assert.doesNotMatch(report, /可信度是单个任务内部/);
   assert.match(report, /隧道入口 RTK/);
   assert.match(report, /隧道出口 RTK/);
   assert.match(report, /checkedTaskIds=\{checked\}/);
-  assert.match(report, /heading="选择导出任务" sortOrder="asc"/);
+  assert.match(report, /heading="选择导出任务" sortOrder="desc"/);
   assert.match(report, /startSummaryPdfJob\(selectedIds\)/);
   assert.doesNotMatch(report, /任务名称|taskName|batchId|selectedBatch/);
 });
@@ -215,7 +217,7 @@ test("report enables formal exports only for eligible recorded selected data", (
   assert.match(report, /pdfState === "generating" \? cancel/);
   assert.match(report, /localStorage\.setItem\(jobKey\(kind\), created\.jobId\)/);
   assert.match(report, /pdfExportableTasks/);
-  assert.match(report, /rawMinClearanceM/);
+  assert.match(report, /normalMinimumHeightM/);
   assert.doesNotMatch(report, /recommendedMinClearanceM/);
   assert.doesNotMatch(report, /confidenceScore/);
   assert.match(reportApi, /task_ids:taskIds/);
@@ -247,6 +249,11 @@ test("report adds one-shot DeepSeek export beside the existing PDF export", () =
   assert.match(css, /\.report-export-grid\s*\{[^}]*align-items:\s*stretch;/i);
   assert.match(css, /\.report-export-card\s*\{[^}]*overflow-x:\s*hidden;/i);
   assert.match(css, /\.report-pdf-table\s*\{[^}]*max-width:\s*100%;[^}]*overflow-x:\s*auto;/i);
+});
+
+test("report workspace stays mounted while navigation hides it so AI polling continues", () => {
+  assert.match(page, /<div hidden=\{activePage !== "report"\}>[\s\S]*<ReportWorkspace/);
+  assert.doesNotMatch(page, /activePage === "report" && <ReportWorkspace/);
 });
 
 test("task browser searches time identifiers and tunnel metadata and groups by date", () => {

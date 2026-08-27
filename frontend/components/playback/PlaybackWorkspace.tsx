@@ -371,7 +371,7 @@ export default function PlaybackWorkspace({
           selectedTaskId={selectedTaskId}
           onSelectTask={onSelectTask}
           heading="选择回放任务"
-          sortOrder="asc"
+          sortOrder="desc"
           selectable
           showSelectAll
           checkedTaskIds={checked}

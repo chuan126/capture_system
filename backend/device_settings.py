@@ -61,6 +61,10 @@ class DeviceSettingsStore:
                         "model": os.getenv("CAPTURE_DEEPSEEK_MODEL", "deepseek-v4-flash").strip(),
                         "skill_prompt": DEFAULT_DEEPSEEK_SKILL,
                     },
+                    "clearance_algorithm": {
+                        "detection_radius_m": 1.0,
+                        "min_support_points": 5,
+                    },
                 }
                 self._write_locked(initial)
             else:
@@ -158,6 +162,35 @@ class DeviceSettingsStore:
                 "api_key": normalized_key,
                 "model": normalized_model,
                 "skill_prompt": normalized_skill,
+            }
+            self._write_locked(payload)
+
+    def get_clearance_algorithm(self) -> dict[str, float | int]:
+        with self._lock:
+            payload = self._read_locked()
+            stored = payload.get("clearance_algorithm") if isinstance(payload, dict) else None
+            values = stored if isinstance(stored, dict) else {}
+            try:
+                radius = float(values.get("detection_radius_m", 1.0))
+                support = int(values.get("min_support_points", 5))
+            except (TypeError, ValueError) as error:
+                raise DeviceSettingsError("净空算法参数配置无效") from error
+            if not 0.1 <= radius <= 5.0 or not 1 <= support <= 10_000:
+                raise DeviceSettingsError("净空算法参数超出允许范围")
+            return {"detection_radius_m": radius, "min_support_points": support}
+
+    def set_clearance_algorithm(self, detection_radius_m: float, min_support_points: int) -> None:
+        radius = float(detection_radius_m)
+        support = int(min_support_points)
+        if not 0.1 <= radius <= 5.0:
+            raise DeviceSettingsError("圆柱检测半径必须在0.1至5.0 m之间")
+        if not 1 <= support <= 10_000:
+            raise DeviceSettingsError("最低簇支持点数必须在1至10000之间")
+        with self._lock:
+            payload = self._read_locked()
+            payload["clearance_algorithm"] = {
+                "detection_radius_m": radius,
+                "min_support_points": support,
             }
             self._write_locked(payload)
 

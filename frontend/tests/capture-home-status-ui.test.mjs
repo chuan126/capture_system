@@ -99,7 +99,7 @@ test("task card exposes only one create-task entry", () => {
   assert.doesNotMatch(taskCard, />新建任务<\/button>|>批量创建<\/button>/);
 });
 
-test("task card shows a two-by-two parameter grid with the inclusive height range", () => {
+test("task card shows frozen task and runtime algorithm parameters", () => {
   assert.match(taskCard, /task-parameter-strip/);
   assert.match(taskCard, />高度下限阈值</);
   assert.match(taskCard, /value=\{heightThreshold\}/);
@@ -110,6 +110,14 @@ test("task card shows a two-by-two parameter grid with the inclusive height rang
   assert.match(taskCard, /value=\{mountHeight\}/);
   assert.match(taskCard, />作业车道</);
   assert.match(taskCard, /value=\{operationLane\}/);
+  assert.match(taskCard, />圆柱检测半径</);
+  assert.match(taskCard, /value=\{detectionRadius\}/);
+  assert.match(taskCard, />最低簇支持点数</);
+  assert.match(taskCard, /value=\{minSupportPoints\}/);
+  assert.match(taskCard, /立即应用/);
+  assert.match(page, /window\.setTimeout\(\(\) => void saveAlgorithmParameters\(true\), 500\)/);
+  assert.match(taskCard, /onBlur=\{\(\) => void saveAlgorithmParameters\(\)\}/);
+  assert.match(page, /下一帧实时检测和点云预览生效/);
   for (const lane of ["上行左车道", "上行右车道", "下行左车道", "下行右车道"]) {
     assert.match(taskCard, new RegExp(`option value="${lane}"`));
   }
@@ -151,13 +159,15 @@ test("task creation stores independent planned lane and height range", () => {
 });
 
 
-test("dashboard defaults task execution to the earliest pending task and preserves manual pending selection", () => {
+test("dashboard starts without selecting a pending task and preserves explicit workflow selection", () => {
   assert.match(page, /const firstPendingTask = tasks\.find\(\(task\) => task\.status === "待执行"\) \?\? null/);
-  assert.match(page, /currentTask = activeTask \?\? selectedPendingTask \?\? firstPendingTask \?\? selectedTask \?\? null/);
+  assert.match(page, /currentTask = activeTask \?\? selectedPendingTask \?\? selectedTask \?\? null/);
   assert.match(page, /selectedExecutableTask = tasks\.find/);
   assert.match(page, /preferredTaskId = selectedExecutableTask\?\.taskId \?\? firstPendingTask\?\.taskId \?\? null/);
   assert.match(page, /setSelectedTaskId\(preferredTaskId \?\? created\.taskId\)/);
-  assert.match(page, /persistedTasks\.find\(\(task\) => task\.status === "待执行"\)\?\.taskId/);
+  assert.match(page, /setSelectedTaskId\(\(current\) => current && persistedTasks\.some[\s\S]*?\? current\s*:\s*null\)/);
+  assert.doesNotMatch(page, /persistedTasks\.find\(\(task\) => task\.status === "待执行"\)\?\.taskId/);
+  assert.doesNotMatch(page, /persistedTasks\[0\]\?\.taskId/);
   assert.match(page, /pendingTasks = tasks[\s\S]*?sort\(\(left, right\) => left\.createdAt\.localeCompare\(right\.createdAt\)\)/);
 });
 

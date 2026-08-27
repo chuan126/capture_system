@@ -34,6 +34,8 @@ from backend.tests.test_report_export_api import (
     make_static_site,
 )
 
+HEIGHT_BOUNDS = {"clearance_threshold_m": 0.0, "clearance_upper_limit_m": 20.0}
+
 
 def test_measurements_db_is_reduced_to_a_bounded_source_frame_audit_package(
     tmp_path: Path,
@@ -55,7 +57,7 @@ def test_measurements_db_is_reduced_to_a_bounded_source_frame_audit_package(
 
     result = build_bounded_analysis_payload(
         path,
-        {"task_sequence": "20260824_010000", "database_path": str(path)},
+        {"task_sequence": "20260824_010000", "database_path": str(path), **HEIGHT_BOUNDS},
         100_000,
     )
     payload = json.loads(result.json_text)
@@ -93,12 +95,52 @@ def test_high_rate_rows_do_not_expand_deepseek_payload_with_database_size(
             """
         )
 
-    result = build_bounded_analysis_payload(path, {}, 100_000)
+    result = build_bounded_analysis_payload(path, HEIGHT_BOUNDS, 100_000)
     payload = json.loads(result.json_text)
 
     assert payload["data_quality"]["imu_samples"]["rows"] == 100_000
     assert result.database_size_bytes > result.byte_count
     assert result.byte_count < 100_000
+
+
+def test_deepseek_payload_filters_all_low_value_evidence_by_frozen_height_range(tmp_path: Path) -> None:
+    path = tmp_path / "task-filtered" / "measurements.db"
+    create_measurement_database(path, "task-filtered")
+
+    result = build_bounded_analysis_payload(
+        path,
+        {"clearance_threshold_m": 5.19, "clearance_upper_limit_m": 5.20},
+        100_000,
+    )
+    payload = json.loads(result.json_text)
+    statistics = payload["source_frame_statistics"]
+
+    assert statistics["raw_min_m"] == 5.20
+    assert statistics["valid_frames"] == 1
+    assert statistics["valid_frames_before_height_filter"] == 3
+    assert statistics["height_range_excluded_frames"] == 2
+    assert [frame["height_m"] for frame in payload["lowest_20_real_frames"]] == [5.20]
+
+
+def test_deepseek_payload_keeps_task_context_when_height_range_has_no_samples(tmp_path: Path) -> None:
+    path = tmp_path / "task-empty-range" / "measurements.db"
+    create_measurement_database(path, "task-empty-range")
+
+    result = build_bounded_analysis_payload(
+        path,
+        {"clearance_threshold_m": 5.22, "clearance_upper_limit_m": 5.30},
+        100_000,
+    )
+    payload = json.loads(result.json_text)
+    statistics = payload["source_frame_statistics"]
+
+    assert statistics["valid_frames"] == 0
+    assert statistics["valid_frames_before_height_filter"] == 3
+    assert statistics["height_range_excluded_frames"] == 3
+    assert statistics["raw_min_m"] is None
+    assert payload["lowest_20_real_frames"] == []
+    assert payload["candidate_contexts"] == []
+    assert payload["data_quality"]["clearance_samples"]["rows"] == 4
 
 
 def test_payload_builder_supports_two_gibibyte_limit_and_rejects_larger(
@@ -112,7 +154,7 @@ def test_payload_builder_supports_two_gibibyte_limit_and_rejects_larger(
         "_database_size",
         lambda _path: MAX_SUPPORTED_DATABASE_BYTES,
     )
-    accepted = build_bounded_analysis_payload(path, {}, 100_000)
+    accepted = build_bounded_analysis_payload(path, HEIGHT_BOUNDS, 100_000)
     assert accepted.database_size_bytes == MAX_SUPPORTED_DATABASE_BYTES
 
     monkeypatch.setattr(
@@ -121,7 +163,7 @@ def test_payload_builder_supports_two_gibibyte_limit_and_rejects_larger(
         lambda _path: MAX_SUPPORTED_DATABASE_BYTES + 1,
     )
     with pytest.raises(DeepSeekPayloadError, match="超过当前支持的2 GiB上限"):
-        build_bounded_analysis_payload(path, {}, 100_000)
+        build_bounded_analysis_payload(path, HEIGHT_BOUNDS, 100_000)
 
 
 def test_deepseek_json_response_is_strictly_parsed() -> None:
@@ -299,6 +341,7 @@ def test_deepseek_report_uses_one_database_request_and_generates_pdf(tmp_path: P
                     report_analysis="任务数据完整，综合判定为待复核。",
                     data_quality_analysis="数据可信度中等，存在误检可能。",
                     effective_minimum_m=5.18,
+                    raw_minimum_m=5.18,
                     confidence_score=72,
                 ),
             )
@@ -362,6 +405,80 @@ def test_deepseek_report_uses_one_database_request_and_generates_pdf(tmp_path: P
     assert manifest["analysis_payload_format"] == "capture-clearance-audit-v2"
     assert manifest["analysis_payload_bytes"] < 100_000
     assert "api_key" not in json.dumps(manifest)
+
+
+def test_deepseek_report_keeps_task_when_height_range_has_no_minimum(tmp_path: Path) -> None:
+    data_root = tmp_path / "runtime"
+    captured: dict[str, object] = {}
+
+    class EmptyRangeClient:
+        def analyze(self, analysis_json: str, local_summary: dict[str, object]) -> DeepSeekCompletion:
+            captured["analysis_json"] = analysis_json
+            captured["local_summary"] = local_summary
+            return DeepSeekCompletion(
+                response_id="response-empty-range",
+                model="deepseek-v4-flash",
+                finish_reason="stop",
+                usage={},
+                analysis=DeepSeekAnalysis(
+                    report_analysis="高度区间内没有有效最低值，保留任务信息供复核。",
+                    data_quality_analysis="原始记录存在，但全部有效高度均高于设置上限。",
+                    # 即使模型违反空区间契约填入区间外数值，设备端也应清空后继续出报告。
+                    effective_minimum_m=5.25,
+                    raw_minimum_m=5.25,
+                    confidence_score=100,
+                ),
+            )
+
+    task_repository = TaskRepository(data_root / "capture.db", data_root / "tasks")
+    task_repository.initialize()
+    created = task_repository.create_tasks([
+        TaskCreateRequest(
+            tunnel_code="AI-EMPTY",
+            tunnel_name="无区间最低值测试隧道",
+            clearance_threshold_m=5.22,
+            clearance_upper_limit_m=5.30,
+        )
+    ])[0]
+    relative_path = f"{created.task_id}/measurements.db"
+    create_measurement_database(data_root / "tasks" / relative_path, created.task_id)
+    with sqlite3.connect(data_root / "capture.db") as connection:
+        connection.execute(
+            """
+            UPDATE tasks SET status='completed', operation_phase='completed', has_measurements=1,
+                recording_path=?, started_at='2026-08-06T01:00:00Z',
+                completed_at='2026-08-06T01:00:00.060Z' WHERE task_id=?
+            """,
+            (relative_path, created.task_id),
+        )
+    task = task_repository.get_task(created.task_id)
+    measurement_repository = MeasurementRepository(data_root / "tasks")
+    report_service = ReportExportService(
+        data_root, task_repository, measurement_repository, pdf_font_path=PDF_FONT,
+    )
+    service = DeepSeekReportService(
+        data_root,
+        report_service,
+        measurement_repository,
+        pdf_font_path=PDF_FONT,
+        client_factory=lambda _api_key, _model: EmptyRangeClient(),
+    )
+
+    generated = service.generate(
+        task,
+        "sk-empty-range",
+        "deepseek-v4-flash",
+        skill_prompt="分析任务。",
+    )
+
+    payload = json.loads(str(captured["analysis_json"]))
+    assert payload["source_frame_statistics"]["valid_frames"] == 0
+    assert captured["local_summary"]["raw_min_clearance_m"] is None
+    assert captured["local_summary"]["height_range_empty"] is True
+    assert generated.path.read_bytes().startswith(b"%PDF-")
+    manifest = json.loads((generated.path.parent / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["analysis"]["raw_minimum_m"] is None
+    assert manifest["analysis"]["effective_minimum_m"] is None
 
 
 def test_deepseek_report_endpoint_creates_a_new_job_with_display_key(tmp_path: Path) -> None:

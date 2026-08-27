@@ -35,7 +35,7 @@ const pdfColumns = [
   "任务编号",
   "隧道编号",
   "检测车道",
-  "原始单帧最低 m",
+  "最低值",
   "记录时间",
   "隧道入口 RTK",
   "隧道出口 RTK",
@@ -297,7 +297,7 @@ export default function ReportWorkspace({
       </section>
       {previewError && <p className="batch-operation-message is-error" role="alert">{previewError}</p>}
       <section className="report-simple-layout">
-        <TaskBrowser tasks={tasks} selectedTaskId={selectedTaskId} onSelectTask={onSelectTask} heading="选择导出任务" sortOrder="asc" selectable checkedTaskIds={checked} onToggleChecked={toggle} onToggleDateChecked={toggleDate} />
+        <TaskBrowser tasks={tasks} selectedTaskId={selectedTaskId} onSelectTask={onSelectTask} heading="选择导出任务" sortOrder="desc" selectable checkedTaskIds={checked} onToggleChecked={toggle} onToggleDateChecked={toggleDate} />
         <main className="report-simple-main">
           <article className="panel report-task-summary">
             <header className="report-simple-heading"><div><span>当前任务</span><h2>{selectedTask?.displayId ?? "导出对象"}</h2></div><strong className={txtReady ? "is-ready" : "is-pending"}>{selectedPreview ? statusText[selectedPreview.status] : selectedTask?.status ?? "待选择"}</strong></header>
@@ -313,7 +313,7 @@ export default function ReportWorkspace({
               <header className="report-export-card__head"><span className="report-export-card__type">PDF</span><div><h2>隧道净空检测汇总</h2></div><strong>{pdfExportableTasks.length} 项</strong></header>
               <section className="report-pdf-outline">
                 <header><span>报告标题</span><strong>隧道净空检测汇总报告</strong></header>
-                <div className="report-pdf-table"><div className="report-pdf-table__row report-pdf-table__row--head">{pdfColumns.map((column) => <span key={column}>{column}</span>)}</div>{pdfExportableTasks.length === 0 ? <div className="report-pdf-table__row">{pdfColumns.map((column) => <span key={column}>--</span>)}</div> : pdfExportableTasks.map((task) => <div className="report-pdf-table__row" key={task.taskId}><span>{task.displayId}</span><span>{task.tunnelCode}</span><span>{task.lane ?? "未记录"}</span><span>{formatHeight(task.rawMinClearanceM)}</span><span>{formatTime(task.startedAt)}</span><span>{formatRtk(task.entryRtk)}</span><span>{formatRtk(task.exitRtk)}</span></div>)}</div>
+                <div className="report-pdf-table"><div className="report-pdf-table__row report-pdf-table__row--head">{pdfColumns.map((column) => <span key={column}>{column}</span>)}</div>{pdfExportableTasks.length === 0 ? <div className="report-pdf-table__row">{pdfColumns.map((column) => <span key={column}>--</span>)}</div> : pdfExportableTasks.map((task) => <div className="report-pdf-table__row" key={task.taskId}><span>{task.displayId}</span><span>{task.tunnelCode}</span><span>{task.lane ?? "未记录"}</span><span>{formatHeight(task.normalMinimumHeightM)}</span><span>{formatTime(task.startedAt)}</span><span>{formatRtk(task.entryRtk)}</span><span>{formatRtk(task.exitRtk)}</span></div>)}</div>
               </section>
               <section className="deepseek-report-config">
                 <header><div><strong>DeepSeek大模型辅助分析</strong></div><span>当前任务：{selectedTask?.displayId ?? "--"}</span></header>

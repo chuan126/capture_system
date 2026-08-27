@@ -13,6 +13,7 @@ from backend.tasks.models import (
     TaskStartRequest,
 )
 from backend.tasks.repository import TaskNotFoundError, TaskStorageError
+from backend.device_settings import DeviceSettingsError
 
 router = APIRouter(tags=["task-control"])
 
@@ -280,6 +281,13 @@ def start_task(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"{sensor_detail}，无法开始采集",
         )
+    try:
+        request.app.state.device_settings_store.set_clearance_algorithm(
+            payload.detection_radius_m,
+            payload.min_support_points,
+        )
+    except DeviceSettingsError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
     resolved_lane = payload.lane_side or payload.lane
     return _invoke(
         request,
@@ -293,6 +301,8 @@ def start_task(
         lidar_mount_height_m=payload.lidar_mount_height_m,
         clearance_threshold_m=payload.clearance_threshold_m,
         clearance_upper_limit_m=payload.clearance_upper_limit_m,
+        detection_radius_m=payload.detection_radius_m,
+        min_support_points=payload.min_support_points,
     )
 
 

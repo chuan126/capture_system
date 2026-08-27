@@ -780,20 +780,22 @@ th { color: #7f8b9e; background: #fafbfd; font-weight: 600; white-space: nowrap;
 .health-kpi-card > span { position: relative; z-index: 1; align-self: start; color: #5f6f84; font-size: clamp(12px, .72vw, 15px); font-weight: 700; line-height: 1.2; }
 .health-kpi-card > span > b { font: inherit; }
 .health-kpi-card > span > small { margin-left: 7px; color: #c53030; font-size: .72em; font-weight: 800; }
+.health-kpi-card--primary > span { display: flex; flex-wrap: wrap; gap: 3px 7px; }
+.health-kpi-card--primary > span > small { margin-left: 0; overflow-wrap: anywhere; }
 .health-kpi-card > strong {
   position: relative;
   z-index: 1;
   align-self: center;
   justify-self: center;
   max-width: 100%;
-  overflow: hidden;
+  overflow: visible;
   color: #26364d;
   font: 800 clamp(29px, 1.9vw, 42px)/1 Arial, sans-serif;
   letter-spacing: 0;
   text-align: center;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
+.health-kpi-card--primary > strong { font-size: clamp(27px, 1.75vw, 40px); }
 .health-kpi-card > strong small { margin-left: 6px; color: #8794a6; font-size: clamp(12px, .68vw, 15px); letter-spacing: 0; }
 .health-kpi-card--primary { border-color: #d4e2fb; background: linear-gradient(135deg, #fff 0%, #f2f7ff 100%); }
 .health-kpi-card--primary::after {
@@ -1094,6 +1096,10 @@ th { color: #7f8b9e; background: #fafbfd; font-weight: 600; white-space: nowrap;
 .task-parameter-grid input:disabled,
 .task-parameter-grid select:disabled { color: #7c8796; background: #edf1f5; opacity: 1; }
 .task-parameter-range-hint { color: #738197; font-size: 8px; line-height: 1.4; }
+.task-parameter-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.task-parameter-footer button { flex: 0 0 auto; min-height: 28px; padding: 5px 9px; color: #1769ee; border: 1px solid #bfd2f4; border-radius: 7px; background: #f6f9ff; font-size: 9px; font-weight: 750; }
+.task-parameter-footer button:disabled { color: #8995a8; border-color: #d9e0e9; background: #f1f3f6; }
+.task-parameter-message { color: #456783; font-size: 9px; overflow-wrap: anywhere; }
 
 .task-current-card {
   position: relative;
@@ -1777,6 +1783,7 @@ table {
   .health-kpi-card { gap: 10px; padding: 15px 16px; }
   .health-kpi-card > span { font-size: clamp(13px, .78vw, 16px); }
   .health-kpi-card > strong { font-size: clamp(31px, 2vw, 44px); }
+  .health-kpi-card--primary > strong { font-size: clamp(28px, 1.8vw, 40px); }
   .health-kpi-card > strong small { font-size: clamp(13px, .72vw, 16px); }
   .health-kpi-rtk-coordinate { gap: 12px; }
   .health-kpi-rtk-coordinate small,

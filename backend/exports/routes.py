@@ -110,7 +110,8 @@ def _preview_response(assessment: TaskExportAssessment) -> TaskExportPreviewResp
         invalid_samples=summary.statistics.invalid_samples if summary else None,
         minimum_height_m=summary.statistics.minimum_height_m if summary else None,
         normal_minimum_height_m=(
-            analysis.effective_min_clearance_m if analysis else None
+            assessment.normal_height_statistics.minimum_height_m
+            if assessment.normal_height_statistics else None
         ),
         clearance_threshold_m=(
             assessment.normal_height_statistics.clearance_threshold_m

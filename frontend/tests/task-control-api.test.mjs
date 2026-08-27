@@ -42,6 +42,8 @@ test("starts a task only through FastAPI HTTP and forwards frozen parameters", a
       lidarMountHeightM: 1.86,
       clearanceThresholdM: 4.5,
       clearanceUpperLimitM: 5.8,
+      detectionRadiusM: 1.2,
+      minSupportPoints: 8,
       expectedRevision: 0,
       idempotencyKey: "command-001",
     });
@@ -55,6 +57,8 @@ test("starts a task only through FastAPI HTTP and forwards frozen parameters", a
       lidar_mount_height_m: 1.86,
       clearance_threshold_m: 4.5,
       clearance_upper_limit_m: 5.8,
+      detection_radius_m: 1.2,
+      min_support_points: 8,
       expected_revision: 0,
     });
     assert.equal(result.operationPhase, "recording");

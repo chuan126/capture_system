@@ -7,7 +7,7 @@ import os
 import shutil
 import time
 import uuid
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable
@@ -62,6 +62,8 @@ _AUDIT_JSON_CONTRACT = """
 必须包含以下字段，字段名不得翻译或改写：
 {"n":真实有效源帧整数,"raw":原始最低净空数字或null,"eff":最低可信净空数字或null,"f":最低候选源帧号或null,"t":"最低候选时间","pre":[],"post":[],"len_f":连续支持帧整数,"len_m":持续距离数字或null,"s":"V/R/O","c":0到1数字,"why":["最多3条短依据"],"q":["数据质量问题"]}
 V或R时eff必须等于raw；仅O允许采用输入证据中已有数值调整eff。最终JSON正文保持紧凑。
+若高度区间过滤后的source_frame_statistics.valid_frames为0，n必须为0，raw、eff、f必须为null；
+仍须根据任务元数据、RTK和数据质量字段完成分析，并明确说明高度区间内没有有效最低值。
 """
 
 
@@ -74,6 +76,7 @@ class DeepSeekAnalysis:
     report_analysis: str
     data_quality_analysis: str
     effective_minimum_m: float | None = None
+    raw_minimum_m: float | None = None
     confidence_score: int | None = None
 
 
@@ -230,6 +233,37 @@ class DeepSeekReportService:
         if isinstance(client, DeepSeekClient):
             client.endpoint = validate_endpoint(api_url)
         completion = client.analyze(analysis_payload.json_text, local_summary)
+        normal_statistics = assessment.normal_height_statistics
+        if normal_statistics is None:
+            raise DeepSeekReportError("任务缺少高度区间统计")
+        expected_minimum = normal_statistics.minimum_height_m
+        raw_minimum = completion.analysis.raw_minimum_m
+        effective_minimum = completion.analysis.effective_minimum_m
+        if expected_minimum is None:
+            if raw_minimum is not None or effective_minimum is not None:
+                # 模型误填区间外最低值时不阻断异常任务报告，设备端强制清空最低值，
+                # 同时用确定性说明替换可能引用该数值的结论文本。
+                completion = replace(
+                    completion,
+                    analysis=replace(
+                        completion.analysis,
+                        raw_minimum_m=None,
+                        effective_minimum_m=None,
+                        report_analysis=(
+                            "任务设定的高度上下限区间内没有有效净空样本，"
+                            "最低值不显示；任务信息和数据质量保留供复核。"
+                        ),
+                    ),
+                )
+        else:
+            if raw_minimum is None or abs(raw_minimum - expected_minimum) > 0.001:
+                raise DeepSeekReportError("DeepSeek返回的原始最低值与设备端区间统计不一致")
+            if effective_minimum is not None and not (
+                normal_statistics.clearance_threshold_m
+                <= effective_minimum
+                <= normal_statistics.clearance_upper_limit_m
+            ):
+                raise DeepSeekReportError("DeepSeek返回的最低可信值超出任务高度区间")
         if progress:
             progress("生成大模型辅助分析PDF", 0.84)
         return self._write_report(
@@ -343,6 +377,8 @@ def _local_summary(assessment: TaskExportAssessment) -> dict[str, object]:
     summary = assessment.summary
     analysis = assessment.clearance_analysis
     assert summary is not None and analysis is not None
+    normal_statistics = assessment.normal_height_statistics
+    interval_minimum = normal_statistics.minimum_height_m if normal_statistics else None
     return {
         "task_sequence": assessment.task.display_id,
         "tunnel_code": assessment.task.tunnel_code,
@@ -353,9 +389,11 @@ def _local_summary(assessment: TaskExportAssessment) -> dict[str, object]:
         "total_samples": summary.statistics.total_samples,
         "valid_samples": summary.statistics.valid_samples,
         "invalid_samples": summary.statistics.invalid_samples,
-        "raw_min_clearance_m": analysis.raw_min_clearance_m,
-        "effective_min_clearance_m": analysis.effective_min_clearance_m,
-        "recommended_min_clearance_m": analysis.recommended_min_clearance_m,
+        "raw_min_clearance_m": interval_minimum,
+        "effective_min_clearance_m": interval_minimum,
+        "recommended_min_clearance_m": interval_minimum,
+        "height_range_valid_samples": normal_statistics.normal_samples if normal_statistics else None,
+        "height_range_empty": normal_statistics is not None and normal_statistics.normal_samples == 0,
         "confidence_score": analysis.confidence_score,
         "confidence_level": analysis.confidence_level,
         "confidence_reason": analysis.confidence_reason,
@@ -458,6 +496,7 @@ def _parse_completion(payload: dict[str, object]) -> DeepSeekCompletion:
             report_analysis=report_analysis,
             data_quality_analysis=data_quality_analysis,
             effective_minimum_m=effective_minimum,
+            raw_minimum_m=raw_minimum,
             confidence_score=round(confidence * 100),
         ),
     )
@@ -546,7 +585,8 @@ def _write_deepseek_pdf(
         "隧道入口 RTK",
         "隧道出口 RTK",
     ]
-    minimum = completion.analysis.effective_minimum_m
+    normal_statistics = assessment.normal_height_statistics
+    minimum = normal_statistics.minimum_height_m if normal_statistics is not None else None
     confidence_text = (
         f"{completion.analysis.confidence_score}/100"
         if completion.analysis.confidence_score is not None else "—"

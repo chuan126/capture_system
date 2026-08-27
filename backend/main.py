@@ -34,6 +34,9 @@ from backend.amap.routes import router as amap_router
 from backend.device_settings import DeviceSettingsError, DeviceSettingsStore
 from backend.networking.manager import NetworkManagerWifi
 from backend.networking.routes import router as wifi_router
+from backend.algorithm_parameters import router as algorithm_parameters_router
+from backend.devtools.parameter_bridge import DevParameterBridge
+from backend.devtools.parameters import DevParameterService
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_STATIC_DIR = PROJECT_ROOT / "frontend" / "out"
@@ -135,15 +138,13 @@ def create_app(
     dev_raw_cloud_hub = None
     dev_recording_manager = None
     dev_offline_replay_manager = None
-    dev_parameter_service = None
-    dev_parameter_bridge = None
+    dev_parameter_bridge = DevParameterBridge()
+    dev_parameter_service = DevParameterService(bridge=dev_parameter_bridge)
     dev_system_metrics = None
     devtools_http_router = None
     devtools_ws_router = None
     if development_tools_enabled:
         from backend.devtools.offline_replay import OfflineReplayManager
-        from backend.devtools.parameter_bridge import DevParameterBridge
-        from backend.devtools.parameters import DevParameterService
         from backend.devtools.recording import RosbagRecordingManager
         from backend.devtools.routes import create_devtools_router, create_devtools_websocket_router
         from backend.devtools.telemetry_bridge import DevTelemetryBridge
@@ -152,8 +153,6 @@ def create_app(
         telemetry_factory = dev_telemetry_bridge_factory or DevTelemetryBridge
         dev_telemetry_bridge = telemetry_factory()
         dev_raw_cloud_hub = CloudPreviewHub()
-        dev_parameter_bridge = DevParameterBridge()
-        dev_parameter_service = DevParameterService(bridge=dev_parameter_bridge)
         dev_recording_manager = RosbagRecordingManager(
             runtime_data_root,
             parameter_snapshot_provider=dev_parameter_service.snapshot,
@@ -232,8 +231,8 @@ def create_app(
                 task_control_started, task_control_bridge.error
             )
             application.state.task_control_bridge = task_control_bridge
-            if development_tools_enabled and dev_parameter_bridge is not None and dev_parameter_service is not None:
-                dev_parameter_bridge.start()
+            dev_parameter_bridge.start()
+            if development_tools_enabled:
                 dev_parameter_service.start()
             if development_tools_enabled and dev_raw_cloud_hub is not None:
                 from backend.devtools.raw_cloud_bridge import DevRawCloudPreviewBridge
@@ -244,8 +243,8 @@ def create_app(
                 )
                 dev_raw_cloud_hub.set_ros_availability(False, "等待开发点云预览客户端")
         else:
-            if development_tools_enabled and dev_parameter_bridge is not None and dev_parameter_service is not None:
-                dev_parameter_bridge.start()
+            dev_parameter_bridge.start()
+            if development_tools_enabled:
                 dev_parameter_service.start()
             task_status_hub.set_ros_availability(False, "任务控制ROS桥未启动")
             if development_tools_enabled and dev_raw_cloud_hub is not None:
@@ -313,6 +312,7 @@ def create_app(
     application.state.dev_recording_manager = dev_recording_manager
     application.state.dev_offline_replay_manager = dev_offline_replay_manager
     application.state.dev_parameter_service = dev_parameter_service
+    application.state.algorithm_parameter_service = dev_parameter_service
     application.state.dev_system_metrics = dev_system_metrics
     application.state.device_settings_store = device_settings_store
     application.state.wifi_manager = wifi_manager
@@ -325,6 +325,7 @@ def create_app(
     application.include_router(batch_router)
     application.include_router(task_router)
     application.include_router(task_control_router)
+    application.include_router(algorithm_parameters_router)
     application.include_router(export_router)
     application.include_router(amap_router)
     application.include_router(wifi_router)

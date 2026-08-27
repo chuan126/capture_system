@@ -21,7 +21,7 @@ def test_data_recorder_rejects_stale_rtk_endpoints_by_receive_age() -> None:
 def test_measurement_schema_v13_uses_semantic_source_diagnostic_names() -> None:
     source = (ROOT / "ros2_ws/src/data_recorder/src/data_recorder_node.cpp").read_text(encoding="utf-8")
 
-    assert "VALUES (1, 13," in source
+    assert "VALUES (1, 14," in source
     assert "travel_direction TEXT NOT NULL" in source
     assert "lane_side TEXT NOT NULL" in source
     assert "candidate_region_count INTEGER" in source

@@ -120,7 +120,7 @@ class TaskRecord:
         return self.display_id
 
 
-_SCHEMA_VERSION = 9
+_SCHEMA_VERSION = 10
 _LOCAL_TIMEZONE = ZoneInfo("Asia/Singapore")
 _ALLOWED_STATUS = {
     "pending",
@@ -220,6 +220,11 @@ class TaskRepository:
                     ).fetchone()[0]
                     if current_version < 9:
                         self._apply_migration_9(connection)
+                    current_version = connection.execute(
+                        "SELECT COALESCE(MAX(version), 0) FROM schema_migrations"
+                    ).fetchone()[0]
+                    if current_version < 10:
+                        self._apply_migration_10(connection)
                     current_version = connection.execute(
                         "SELECT COALESCE(MAX(version), 0) FROM schema_migrations"
                     ).fetchone()[0]
@@ -1294,6 +1299,35 @@ class TaskRepository:
             connection.execute(
                 "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
                 (9, _utc_now_text()),
+            )
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+
+    def _apply_migration_10(self, connection: sqlite3.Connection) -> None:
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            parameter_columns = {
+                row[1] for row in connection.execute("PRAGMA table_info(task_parameters)").fetchall()
+            }
+            if "detection_radius_m" not in parameter_columns:
+                connection.execute(
+                    "ALTER TABLE task_parameters ADD COLUMN detection_radius_m REAL "
+                    "NOT NULL DEFAULT 1.0 CHECK (detection_radius_m >= 0.1 AND detection_radius_m <= 5.0)"
+                )
+            if "min_support_points" not in parameter_columns:
+                connection.execute(
+                    "ALTER TABLE task_parameters ADD COLUMN min_support_points INTEGER "
+                    "NOT NULL DEFAULT 5 CHECK (min_support_points >= 1 AND min_support_points <= 10000)"
+                )
+            connection.execute(
+                "UPDATE tasks SET schema_version=? WHERE schema_version<?",
+                (_SCHEMA_VERSION, _SCHEMA_VERSION),
+            )
+            connection.execute(
+                "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
+                (10, _utc_now_text()),
             )
             connection.commit()
         except Exception:

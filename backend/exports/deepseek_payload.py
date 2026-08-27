@@ -46,6 +46,12 @@ def build_bounded_analysis_payload(
     try:
         tables = _table_names(connection)
         frame_query, frame_parameters, frame_source = _frame_query(connection, tables)
+        valid_before_height_filter = int(
+            connection.execute(f"SELECT COUNT(*) FROM ({frame_query})", frame_parameters).fetchone()[0]
+        )
+        lower_bound, upper_bound = _task_height_bounds(task_summary)
+        frame_query = f"SELECT * FROM ({frame_query}) WHERE height_m BETWEEN ? AND ?"
+        frame_parameters = (*frame_parameters, lower_bound, upper_bound)
         if progress:
             progress("扫描真实净空源帧", 0.34)
         source_summary, lowest_frames, candidates = _analyze_source_frames(
@@ -53,6 +59,13 @@ def build_bounded_analysis_payload(
             frame_query,
             frame_parameters,
             frame_source,
+        )
+        source_summary["valid_frames_before_height_filter"] = valid_before_height_filter
+        source_summary["height_range_excluded_frames"] = max(
+            0, valid_before_height_filter - int(source_summary["valid_frames"])
+        )
+        source_summary["invalid_frames"] = max(
+            0, int(source_summary["total_frames"]) - valid_before_height_filter
         )
         if progress:
             progress("提取最低候选连续证据", 0.42)
@@ -76,6 +89,7 @@ def build_bounded_analysis_payload(
                 "lowest_frame_limit": LOWEST_FRAME_LIMIT,
                 "candidate_limit": CANDIDATE_LIMIT,
                 "candidate_context_radius_frames": CANDIDATE_CONTEXT_RADIUS,
+                "height_range_filter": "clearance_threshold_m <= height_m <= clearance_upper_limit_m",
             },
             "database": {
                 "file_name": database_path.name,
@@ -234,7 +248,24 @@ def _analyze_source_frames(
     ).fetchone()[0])
     total_count = _source_total_count(connection, frame_source, valid_count)
     if valid_count <= 0:
-        raise DeepSeekPayloadError("任务没有可用于大模型审计的有效真实净空源帧")
+        # 区间内没有样本本身就是需要进入报告的异常事实。保留任务、RTK和
+        # 数据质量信息，最低值相关统计明确置空，不把整份报告误判为不可生成。
+        return ({
+            "total_frames": total_count,
+            "valid_frames": 0,
+            "invalid_frames": max(0, total_count),
+            "duration_s": 0.0,
+            "actual_frequency_hz": None,
+            "raw_min_m": None,
+            "median_m": None,
+            "mad_m": None,
+            "p01_m": None,
+            "p05_m": None,
+            "rolling3_median_min_m": None,
+            "rolling5_median_min_m": None,
+            "first_timestamp_ns": 0,
+            "last_timestamp_ns": 0,
+        }, [], [])
     bounds = connection.execute(
         f"SELECT MIN(timestamp_ns), MAX(timestamp_ns) FROM ({frame_query})",
         parameters,
@@ -495,7 +526,8 @@ def _data_quality(
 ) -> dict[str, object]:
     quality: dict[str, object] = {
         "source_valid_ratio": _ratio(
-            int(source_summary["valid_frames"]), int(source_summary["total_frames"])
+            int(source_summary.get("valid_frames_before_height_filter", source_summary["valid_frames"])),
+            int(source_summary["total_frames"])
         ),
         "source_invalid_reasons": _invalid_source_reasons(connection, tables),
     }
@@ -617,6 +649,17 @@ def _safe_task_summary(summary: dict[str, object]) -> dict[str, object]:
         for key, value in summary.items()
         if key not in excluded
     }
+
+
+def _task_height_bounds(summary: dict[str, object]) -> tuple[float, float]:
+    try:
+        lower = float(summary["clearance_threshold_m"])
+        upper = float(summary["clearance_upper_limit_m"])
+    except (KeyError, TypeError, ValueError) as error:
+        raise DeepSeekPayloadError("任务缺少有效的高度上下限阈值") from error
+    if not math.isfinite(lower) or not math.isfinite(upper) or lower < 0.0 or upper > 20.0 or lower > upper:
+        raise DeepSeekPayloadError("任务高度上下限阈值无效")
+    return lower, upper
 
 
 def _frame_dict(row: sqlite3.Row) -> dict[str, object]:

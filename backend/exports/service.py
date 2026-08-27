@@ -110,7 +110,10 @@ class ReportExportService:
                 continue
             seen.add(task_id)
             assessments.append(self.assess_task(self.task_repository.get_task(task_id)))
-        assessments.sort(key=lambda item: (item.task.global_sequence, item.task.display_id))
+        assessments.sort(
+            key=lambda item: (item.task.global_sequence, item.task.display_id),
+            reverse=True,
+        )
         return assessments
 
     def assess_task(self, task: TaskRecord) -> TaskExportAssessment:
@@ -149,7 +152,10 @@ class ReportExportService:
         try:
             normal_statistics = self.measurement_repository.load_normal_height_statistics(task)
         except MeasurementStorageError as error:
-            normal_statistics = None
+            return TaskExportAssessment(
+                task, True, None, summary, False, f"正常高度区间统计不可读取：{error}",
+                None, clearance_analysis,
+            )
         return TaskExportAssessment(
             task,
             True,
@@ -248,6 +254,19 @@ class ReportExportService:
                     if assessment.clearance_analysis is not None
                 ],
                 "clearance_anomaly_config": asdict(DEFAULT_CLEARANCE_ANOMALY_CONFIG),
+                "report_height_ranges": [
+                    {
+                        "task_id": assessment.task.task_id,
+                        "clearance_threshold_m": assessment.normal_height_statistics.clearance_threshold_m,
+                        "clearance_upper_limit_m": assessment.normal_height_statistics.clearance_upper_limit_m,
+                        "minimum_height_m": assessment.normal_height_statistics.minimum_height_m,
+                        "normal_samples": assessment.normal_height_statistics.normal_samples,
+                        "below_threshold_samples": assessment.normal_height_statistics.below_threshold_samples,
+                        "above_upper_limit_samples": assessment.normal_height_statistics.above_upper_limit_samples,
+                    }
+                    for assessment in eligible
+                    if assessment.normal_height_statistics is not None
+                ],
             }
             (report_directory / "manifest.json").write_text(
                 json.dumps(manifest, ensure_ascii=False, indent=2),
@@ -466,10 +485,10 @@ class ReportExportService:
             mixed_paragraph("任务汇总", heading_style, fonts),
         ]
         headers = [
-            "任务序号",
+            "任务编号",
             "隧道编号",
             "检测车道",
-            "原始单帧最低 m",
+            "最低值",
             "记录时间",
             "隧道入口 RTK",
             "隧道出口 RTK",
@@ -481,8 +500,8 @@ class ReportExportService:
             summary = assessment.summary
             if summary is None:
                 continue
-            analysis = assessment.clearance_analysis
-            if analysis is None:
+            normal_statistics = assessment.normal_height_statistics
+            if normal_statistics is None:
                 continue
             time_text = f"{_format_iso_text(summary.started_at)}\n{_format_iso_text(summary.ended_at)}"
             rows.append(
@@ -490,7 +509,7 @@ class ReportExportService:
                     mixed_paragraph(assessment.task.display_id, body_style, fonts),
                     mixed_paragraph(assessment.task.tunnel_code, body_style, fonts),
                     mixed_paragraph(_lane_text(summary.lane, summary.travel_direction, summary.lane_side), body_style, fonts),
-                    mixed_paragraph(_format_number(analysis.raw_min_clearance_m, 3), body_style, fonts),
+                    mixed_paragraph(_format_number(normal_statistics.minimum_height_m, 3), body_style, fonts),
                     mixed_paragraph(time_text, body_style, fonts),
                     mixed_paragraph(_format_rtk(summary.entry_rtk), body_style, fonts),
                     mixed_paragraph(_format_rtk(summary.exit_rtk), body_style, fonts),

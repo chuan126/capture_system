@@ -35,6 +35,7 @@ import {
 } from "@/components/workflow/taskModel";
 import { laneSelectionParts } from "@/components/workflow/taskModel";
 import type { CollectionTask, CollectionTaskLane, CollectionTaskStatus, WorkflowPageId } from "@/components/workflow/taskModel";
+import { loadClearanceAlgorithmParameters, saveClearanceAlgorithmParameters } from "@/components/workflow/algorithmParametersApi";
 
 type PageId = WorkflowPageId | "devtools";
 type CollectionTaskDraft = {
@@ -487,6 +488,11 @@ function Dashboard({
   setMountHeight,
   operationLane,
   setOperationLane,
+  detectionRadius,
+  setDetectionRadius,
+  minSupportPoints,
+  setMinSupportPoints,
+  algorithmParametersLoaded,
   rtk,
   rtkTrackPoints,
   rtkTrackRevision,
@@ -505,6 +511,11 @@ function Dashboard({
   setMountHeight: React.Dispatch<React.SetStateAction<string>>;
   operationLane: CollectionTaskLane;
   setOperationLane: React.Dispatch<React.SetStateAction<CollectionTaskLane>>;
+  detectionRadius: string;
+  setDetectionRadius: React.Dispatch<React.SetStateAction<string>>;
+  minSupportPoints: string;
+  setMinSupportPoints: React.Dispatch<React.SetStateAction<string>>;
+  algorithmParametersLoaded: boolean;
   rtk: RtkConnectionState;
   rtkTrackPoints: RtkTrackPoint[];
   rtkTrackRevision: number;
@@ -515,6 +526,9 @@ function Dashboard({
   const [controlSubmitting, setControlSubmitting] = useState<"start" | "pause" | "resume" | "stop" | "recover" | null>(null);
   const [autoAdvanceTaskId, setAutoAdvanceTaskId] = useState<string | null>(null);
   const [controlError, setControlError] = useState<string | null>(null);
+  const [algorithmSaving, setAlgorithmSaving] = useState(false);
+  const [algorithmMessage, setAlgorithmMessage] = useState<string | null>(null);
+  const lastAppliedAlgorithmSignature = useRef<string | null>(null);
   const [controlAvailable, setControlAvailable] = useState(false);
   const [controlDetail, setControlDetail] = useState("正在检查任务控制服务");
   const [activeControlTaskId, setActiveControlTaskId] = useState<string | null>(null);
@@ -653,7 +667,8 @@ function Dashboard({
   const selectedTask = tasks.find((task) => task.taskId === selectedTaskId);
   const selectedPendingTask = selectedTask?.status === "待执行" ? selectedTask : null;
   const firstPendingTask = tasks.find((task) => task.status === "待执行") ?? null;
-  const currentTask = activeTask ?? selectedPendingTask ?? firstPendingTask ?? selectedTask ?? null;
+  // 刷新后不替用户选择待执行或历史任务；真实活动任务仍必须显示控制入口。
+  const currentTask = activeTask ?? selectedPendingTask ?? selectedTask ?? null;
   const pendingTasks = tasks
     .filter((task) => task.status === "待执行" && task.taskId !== currentTask?.taskId)
     .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
@@ -662,6 +677,11 @@ function Dashboard({
   const parsedHeightUpperLimit = Number(heightUpperLimit);
   const heightUpperLimitValid = Number.isFinite(parsedHeightUpperLimit) && parsedHeightUpperLimit >= 0 && parsedHeightUpperLimit <= 20;
   const heightRangeValid = heightThresholdValid && heightUpperLimitValid && parsedHeightThreshold <= parsedHeightUpperLimit;
+  const parsedDetectionRadius = Number(detectionRadius);
+  const detectionRadiusValid = Number.isFinite(parsedDetectionRadius) && parsedDetectionRadius >= 0.1 && parsedDetectionRadius <= 5.0;
+  const parsedMinSupportPoints = Number(minSupportPoints);
+  const minSupportPointsValid = Number.isInteger(parsedMinSupportPoints) && parsedMinSupportPoints >= 1 && parsedMinSupportPoints <= 10000;
+  const algorithmParametersValid = detectionRadiusValid && minSupportPointsValid;
   const clearanceAbnormalReason = displayedClearanceHeightM === null || !heightRangeValid
     ? null
     : displayedClearanceHeightM < parsedHeightThreshold
@@ -737,17 +757,57 @@ function Dashboard({
       taskBusy ||
       !controlAvailable ||
       !heightRangeValid ||
-      !mountHeightValid
+      !mountHeightValid ||
+      !algorithmParametersValid
     ) return;
     void executeControl("start", () => startTaskControl(currentTask.taskId, {
       lane: operationLane,
       lidarMountHeightM: parsedMountHeight,
       clearanceThresholdM: parsedHeightThreshold,
       clearanceUpperLimitM: parsedHeightUpperLimit,
+      detectionRadiusM: parsedDetectionRadius,
+      minSupportPoints: parsedMinSupportPoints,
       expectedRevision: currentTask.statusRevision,
       idempotencyKey: createClientRequestId(),
     }));
   };
+
+  const saveAlgorithmParameters = async (automatic = false) => {
+    if (taskLocked || algorithmSaving || !algorithmParametersValid) return;
+    const signature = `${parsedDetectionRadius}:${parsedMinSupportPoints}`;
+    if (automatic && lastAppliedAlgorithmSignature.current === signature) return;
+    setAlgorithmSaving(true);
+    setAlgorithmMessage(null);
+    try {
+      await saveClearanceAlgorithmParameters({
+        detectionRadiusM: parsedDetectionRadius,
+        minSupportPoints: parsedMinSupportPoints,
+      });
+      lastAppliedAlgorithmSignature.current = signature;
+      setAlgorithmMessage(automatic
+        ? "算法参数已自动应用，下一帧实时检测和点云预览生效"
+        : "算法参数已立即应用并保存到设备端");
+    } catch (error) {
+      setAlgorithmMessage(error instanceof Error ? error.message : "算法参数保存失败");
+    } finally {
+      setAlgorithmSaving(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!algorithmParametersLoaded || taskLocked || !algorithmParametersValid) return;
+    const signature = `${parsedDetectionRadius}:${parsedMinSupportPoints}`;
+    if (lastAppliedAlgorithmSignature.current === signature) return;
+    setAlgorithmMessage("参数已修改，正在等待自动应用");
+    const timer = window.setTimeout(() => void saveAlgorithmParameters(true), 500);
+    return () => window.clearTimeout(timer);
+  }, [
+    algorithmParametersLoaded,
+    taskLocked,
+    algorithmParametersValid,
+    parsedDetectionRadius,
+    parsedMinSupportPoints,
+  ]);
 
   const togglePauseTask = () => {
     if (!currentTask || taskBusy) return;
@@ -1050,8 +1110,19 @@ function Dashboard({
                       <small>m</small>
                     </div>
                   </label>
+
+                  <label className={detectionRadiusValid ? "" : "is-invalid"}>
+                    <span>圆柱检测半径</span>
+                    <div><input type="number" min="0.1" max="5" step="0.01" value={detectionRadius} disabled={taskLocked} aria-invalid={!detectionRadiusValid} onChange={(event) => setDetectionRadius(event.target.value)} onBlur={() => void saveAlgorithmParameters()} /><small>m</small></div>
+                  </label>
+
+                  <label className={minSupportPointsValid ? "" : "is-invalid"}>
+                    <span>最低簇支持点数</span>
+                    <div><input type="number" min="1" max="10000" step="1" value={minSupportPoints} disabled={taskLocked} aria-invalid={!minSupportPointsValid} onChange={(event) => setMinSupportPoints(event.target.value)} onBlur={() => void saveAlgorithmParameters()} /><small>点</small></div>
+                  </label>
                 </div>
-                <small className="task-parameter-range-hint">正常区间：高度下限阈值 ≤ 净空高度 ≤ 高度上限阈值</small>
+                <div className="task-parameter-footer"><small className="task-parameter-range-hint">正常区间：高度下限阈值 ≤ 净空高度 ≤ 高度上限阈值；算法参数修改后自动作用于实时检测和点云预览，任务开始时冻结。</small><button type="button" disabled={taskLocked || algorithmSaving || !algorithmParametersValid} onClick={() => void saveAlgorithmParameters()}>{algorithmSaving ? "应用中" : "立即应用"}</button></div>
+                {algorithmMessage && <small className="task-parameter-message" role="status">{algorithmMessage}</small>}
               </section>
 
               <section className={`task-current-card task-current-card--${currentTask ? taskRuntimeTone(currentTask) : "idle"}`} aria-label="当前任务">
@@ -1228,6 +1299,9 @@ export default function Home() {
   const [heightUpperLimit, setHeightUpperLimit] = useState("20.00");
   const [mountHeight, setMountHeight] = useState("0.00");
   const [operationLane, setOperationLane] = useState<CollectionTaskLane>("上行右车道");
+  const [detectionRadius, setDetectionRadius] = useState("1.00");
+  const [minSupportPoints, setMinSupportPoints] = useState("5");
+  const [algorithmParametersLoaded, setAlgorithmParametersLoaded] = useState(false);
   const [taskQueryState, setTaskQueryState] = useState<"loading" | "ready" | "error">("loading");
   const [taskQueryError, setTaskQueryError] = useState<string | null>(null);
   const taskStatus = useTaskStatusSocket();
@@ -1274,10 +1348,7 @@ export default function Home() {
       setTasks(persistedTasks);
       setSelectedTaskId((current) => current && persistedTasks.some((task) => task.taskId === current)
         ? current
-        : persistedTasks.find((task) => isTaskActive(task))?.taskId
-          ?? persistedTasks.find((task) => task.status === "待执行")?.taskId
-          ?? persistedTasks[0]?.taskId
-          ?? null);
+        : null);
       setTaskQueryState("ready");
     } catch (error) {
       setTaskQueryError(error instanceof Error ? error.message : "任务列表读取失败");
@@ -1286,6 +1357,12 @@ export default function Home() {
   }, []);
 
   useEffect(() => { void loadPersistedData(true); }, [loadPersistedData]);
+  useEffect(() => {
+    void loadClearanceAlgorithmParameters().then((value) => {
+      setDetectionRadius(String(value.detectionRadiusM));
+      setMinSupportPoints(String(value.minSupportPoints));
+    }).catch(() => undefined).finally(() => setAlgorithmParametersLoaded(true));
+  }, []);
   useEffect(() => {
     const snapshot = taskStatus.snapshot;
     if (!snapshot) return;
@@ -1320,9 +1397,11 @@ export default function Home() {
         {activePage !== "dashboard" && <Header page={activePage} task={selectedTask} />}
         <div className="page-content">
           {taskQueryState !== "ready" && <section className={`task-data-notice task-data-notice--${taskQueryState}`} role={taskQueryState === "error" ? "alert" : "status"}><div><strong>{taskQueryState === "loading" ? "正在读取设备任务记录" : "任务记录读取失败"}</strong><span>{taskQueryState === "loading" ? "任务列表从 FastAPI 持久化接口加载" : taskQueryError ?? "无法读取设备端任务数据库"}</span></div>{taskQueryState === "error" && <button type="button" onClick={() => void loadPersistedData()}>重新读取</button>}</section>}
-          {activePage === "dashboard" && <Dashboard tasks={tasks} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} onNavigate={setActivePage} taskRepositoryReady={taskQueryState === "ready"} reloadTasks={reloadTasks} heightThreshold={heightThreshold} setHeightThreshold={setHeightThreshold} heightUpperLimit={heightUpperLimit} setHeightUpperLimit={setHeightUpperLimit} mountHeight={mountHeight} setMountHeight={setMountHeight} operationLane={operationLane} setOperationLane={setOperationLane} rtk={rtk} rtkTrackPoints={rtkTrackPointsRef.current} rtkTrackRevision={rtkTrackRevision} />}
+          {activePage === "dashboard" && <Dashboard tasks={tasks} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} onNavigate={setActivePage} taskRepositoryReady={taskQueryState === "ready"} reloadTasks={reloadTasks} heightThreshold={heightThreshold} setHeightThreshold={setHeightThreshold} heightUpperLimit={heightUpperLimit} setHeightUpperLimit={setHeightUpperLimit} mountHeight={mountHeight} setMountHeight={setMountHeight} operationLane={operationLane} setOperationLane={setOperationLane} detectionRadius={detectionRadius} setDetectionRadius={setDetectionRadius} minSupportPoints={minSupportPoints} setMinSupportPoints={setMinSupportPoints} algorithmParametersLoaded={algorithmParametersLoaded} rtk={rtk} rtkTrackPoints={rtkTrackPointsRef.current} rtkTrackRevision={rtkTrackRevision} />}
           {activePage === "playback" && <PlaybackWorkspace tasks={tasks} selectedTaskId={selectedTaskId} onSelectTask={setSelectedTaskId} onDataChanged={reloadTasks} onNavigate={setActivePage} />}
-          {activePage === "report" && <ReportWorkspace tasks={tasks} selectedTaskId={selectedTaskId} onSelectTask={setSelectedTaskId} onNavigate={setActivePage} />}
+          <div hidden={activePage !== "report"}>
+            <ReportWorkspace tasks={tasks} selectedTaskId={selectedTaskId} onSelectTask={setSelectedTaskId} onNavigate={setActivePage} />
+          </div>
           {activePage === "devtools" && DEVTOOLS_ENABLED && DevToolsWorkspace && <DevToolsWorkspace />}
         </div>
       </main>

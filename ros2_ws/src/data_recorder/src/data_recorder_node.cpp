@@ -479,10 +479,13 @@ private:
       !std::isfinite(request->lidar_mount_height_m) ||
       !std::isfinite(request->clearance_threshold_m) ||
       !std::isfinite(request->clearance_upper_limit_m) ||
+      !std::isfinite(request->detection_radius_m) ||
       request->lidar_mount_height_m < 0.0 || request->lidar_mount_height_m > 20.0 ||
       request->clearance_threshold_m < 0.0 || request->clearance_threshold_m > 20.0 ||
       request->clearance_upper_limit_m < 0.0 || request->clearance_upper_limit_m > 20.0 ||
-      request->clearance_threshold_m > request->clearance_upper_limit_m)
+      request->clearance_threshold_m > request->clearance_upper_limit_m ||
+      request->detection_radius_m < 0.1 || request->detection_radius_m > 5.0 ||
+      request->min_support_points < 1U || request->min_support_points > 10000U)
     {
       reject_prepare(*response, "invalid_parameters", "任务记录参数无效");
       return;
@@ -500,6 +503,8 @@ private:
       lidar_mount_height_m_ = request->lidar_mount_height_m;
       clearance_threshold_m_ = request->clearance_threshold_m;
       clearance_upper_limit_m_ = request->clearance_upper_limit_m;
+      detection_radius_m_ = request->detection_radius_m;
+      min_support_points_ = request->min_support_points;
       start_requested_ns_ = request->requested_at_ns > 0 ? request->requested_at_ns : system_now_ns();
 
       task_directory_ = fs::path(data_root_) / "tasks" / task_id_;
@@ -1214,6 +1219,8 @@ private:
         lidar_mount_height_m REAL,
         clearance_threshold_m REAL,
         clearance_upper_limit_m REAL,
+        detection_radius_m REAL,
+        min_support_points INTEGER,
         entry_rtk_status TEXT NOT NULL DEFAULT 'pending',
         exit_rtk_status TEXT NOT NULL DEFAULT 'not_requested'
       );
@@ -1438,9 +1445,9 @@ private:
         "id, schema_version, task_id, data_origin, lane, travel_direction, lane_side, "
         "started_at, ended_at, complete, nominal_sample_rate_hz, algorithm_version, "
         "config_version, software_version, lidar_mount_height_m, clearance_threshold_m, "
-        "clearance_upper_limit_m, "
+        "clearance_upper_limit_m, detection_radius_m, min_support_points, "
         "entry_rtk_status, exit_rtk_status) "
-        "VALUES (1, 13, ?, 'recorded', ?, ?, ?, ?, NULL, 0, ?, ?, ?, ?, ?, ?, ?, "
+        "VALUES (1, 14, ?, 'recorded', ?, ?, ?, ?, NULL, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
         "'pending', 'not_requested')",
         -1, &statement, nullptr),
       database_, "准备任务元数据写入失败");
@@ -1456,6 +1463,8 @@ private:
     check_sqlite(sqlite3_bind_double(statement, 10, lidar_mount_height_m_), database_, "绑定安装高度失败");
     check_sqlite(sqlite3_bind_double(statement, 11, clearance_threshold_m_), database_, "绑定高度下限阈值失败");
     check_sqlite(sqlite3_bind_double(statement, 12, clearance_upper_limit_m_), database_, "绑定高度上限阈值失败");
+    check_sqlite(sqlite3_bind_double(statement, 13, detection_radius_m_), database_, "绑定检测半径失败");
+    check_sqlite(sqlite3_bind_int64(statement, 14, static_cast<sqlite3_int64>(min_support_points_)), database_, "绑定最低支持点数失败");
     check_sqlite(sqlite3_step(statement), database_, "写入任务元数据失败");
     sqlite3_finalize(statement);
   }
@@ -1961,6 +1970,8 @@ private:
   double lidar_mount_height_m_{0.0};
   double clearance_threshold_m_{0.0};
   double clearance_upper_limit_m_{20.0};
+  double detection_radius_m_{1.0};
+  std::uint32_t min_support_points_{5U};
   fs::path task_directory_;
   fs::path final_database_path_;
   fs::path temporary_database_path_;

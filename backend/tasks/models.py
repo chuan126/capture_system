@@ -118,6 +118,8 @@ class TaskStartRequest(BaseModel):
     lidar_mount_height_m: float = Field(ge=0.0, le=20.0)
     clearance_threshold_m: float = Field(ge=0.0, le=20.0)
     clearance_upper_limit_m: float = Field(default=20.0, ge=0.0, le=20.0)
+    detection_radius_m: float = Field(default=1.0, ge=0.1, le=5.0)
+    min_support_points: int = Field(default=5, ge=1, le=10_000)
     expected_revision: int = Field(ge=0)
 
     @model_validator(mode="after")

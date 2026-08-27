@@ -60,6 +60,8 @@ def test_task_manager_accepts_zero_mount_height_and_height_bounds() -> None:
     assert "request.clearance_threshold_m < 0.0" in source
     assert "request.clearance_upper_limit_m < 0.0" in source
     assert "request.clearance_threshold_m > request.clearance_upper_limit_m" in source
+    assert "request.detection_radius_m < 0.1" in source
+    assert "request.min_support_points < 1U" in source
     assert "request.lidar_mount_height_m <= 0.0" not in source
     assert "request.clearance_threshold_m <= 0.0" not in source
 
@@ -78,12 +80,16 @@ def test_task_manager_freezes_actual_direction_lane_and_height_range_on_start() 
     assert "lane_side=excluded.lane_side" in source
     assert "clearance_threshold_m=excluded.clearance_threshold_m" in source
     assert "clearance_upper_limit_m=excluded.clearance_upper_limit_m" in source
+    assert "detection_radius_m=excluded.detection_radius_m" in source
+    assert "min_support_points=excluded.min_support_points" in source
     assert "request.travel_direction == \"up\"" in source
     assert "request.travel_direction == \"down\"" in source
     assert "request.lane_side.empty() ? request.lane : request.lane_side" in source
     assert "recorder_request->travel_direction = request.travel_direction" in source
     assert "recorder_request->lane_side = lane_side" in source
     assert "recorder_request->clearance_upper_limit_m = request.clearance_upper_limit_m" in source
+    assert "recorder_request->detection_radius_m = request.detection_radius_m" in source
+    assert "recorder_request->min_support_points = request.min_support_points" in source
 
 
 def test_task_manager_keeps_frozen_clearance_parameters_without_redundant_topic() -> None:

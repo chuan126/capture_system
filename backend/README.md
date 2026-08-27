@@ -26,6 +26,7 @@ FastAPI 是浏览器访问 RK3588 的唯一 HTTP 和 WebSocket 入口。当前�
 | `/api/v1/tasks/purge-data` | HTTP POST JSON | 维护接口，物理清理所选任务本地数据并保留任务索引，已逻辑删除任务也可按 UUID 清理 |
 | `/api/v1/task-control/readiness` | HTTP JSON | 任务控制桥、各控制 Service 及开始采集所需的雷达/RTK上线状态 |
 | `/api/v1/tasks/{task_id}/start` | HTTP POST | 冻结作业参数并调用 ROS 2 开始 Service |
+| `/api/v1/algorithm-parameters` | HTTP GET/PUT | 读取或原子应用检测半径与最低簇支持点数；活动任务期间禁止修改 |
 | `/api/v1/tasks/{task_id}/pause` | HTTP POST | 调用 ROS 2 暂停 Service |
 | `/api/v1/tasks/{task_id}/resume` | HTTP POST | 调用 ROS 2 继续 Service |
 | `/api/v1/tasks/{task_id}/stop` | HTTP POST | 调用 ROS 2 停止和文件收尾 Service |
@@ -125,11 +126,13 @@ WebSocket 实际存在客户端时运行。
 
 `data_recorder`保留50 Hz最近净空源帧保持序列供曲线与历史回放使用，真实算法源帧另存于`clearance_source_frames`；同时按IMU实际接收频率写入`imu_samples`，同步快照净空、RTK、温度、最低点和ODIN原始里程计。只根据可靠源序号或时间戳识别通信层重复帧，不按相同高度或相同最低点去重。
 
-PDF 报告由客户端显式提交任务 ID 集合，后端只汇总其中满足正式记录条件的任务，不再依赖作业批次。TXT 面向单个任务按IMU接收频率生成38列“原始数据保存”明细，缺失字段写`0`；同时生成可追溯的异常分析JSON。原有汇总PDF表格不再显示建议最低可信净空和可信度两列。
+PDF 报告由客户端显式提交任务 ID 集合，后端汇总其中满足正式记录条件的任务，不再依赖作业批次。表格最低值由设备端确定性计算为任务冻结高度闭区间内最小值；闭区间内无有效样本时最低值留空，但任务编号、隧道编号、检测车道、记录时间和入口/出口 RTK 仍保留并允许生成报告。TXT 面向单个任务按IMU接收频率生成38列“原始数据保存”明细，缺失字段写`0`；同时生成可追溯的异常分析JSON。
 
 正式TXT和PDF导出使用持久化单并发作业：创建接口立即返回作业ID，前端显示阶段与进度、支持取消，并在刷新后从`localStorage`恢复轮询。工作负载在独立低优先级进程执行；正式任务运行或暂停时保持排队，不与采集链路争用CPU。同步导出接口暂时保留用于兼容。
 
 大模型辅助报告同样通过该队列运行，但每次提交都新建作业，不按任务去重。DeepSeek API地址、API Key、模型和可编辑“大模型Skill”保存于`CAPTURE_DATA_ROOT/settings/device_settings.json`，前端修改后自动写回设备端。工作进程可只读扫描最大2 GiB的任务`measurements.db`：按真实净空源帧去重，在设备端计算原始最低值、中位数、MAD、P01、P05及3帧/5帧滚动中位数，只读取最低20帧和3组候选前后各5帧，并汇总IMU、RTK质量；高频明细和SQLite文件均不上传。固定大小的`capture-clearance-audit-v2`证据包通过一次非流式请求发送。思考模式的内部推理与最终JSON共用`CAPTURE_DEEPSEEK_MAX_TOKENS`额度，默认384000，即当前V4模型384K输出上限。可编辑Skill只控制分析规则；后端始终在其后附加固定审计JSON契约，避免用户删改提示词后导致报告无法解析。解析端兼容常见外层包装、数字字符串、中文状态和单条文本列表。模型按Skill返回紧凑审计JSON，PDF表格后只生成“报告分析结果”和“数据质量分析”两节。作业运行副本中的API Key在完成、失败、取消和服务重启恢复时删除，且不进入报告 manifest。
+
+大模型审计包在所有最低值、分位数、滚动统计、最低20帧和候选连续证据计算前，强制应用任务冻结的高度闭区间；区间外帧只计入剔除数量，不降低源数据有效率。大模型PDF表格最低值始终使用设备端区间统计，不信任模型自由改写。
 
 现有汇总 PDF 与大模型 PDF 共用混合字体模块：中文使用 `CAPTURE_PDF_FONT_PATH` 指定的宋体，ASCII 使用 `CAPTURE_PDF_LATIN_FONT_PATH` 指定的 Times New Roman。因字体授权不随仓库分发；未配置 Times New Roman 时回退为 PDF 标准 Times-Roman。
 

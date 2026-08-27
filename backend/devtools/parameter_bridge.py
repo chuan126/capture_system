@@ -17,7 +17,7 @@ class _Request:
     operation: str
     node: str
     names: tuple[str, ...]
-    value: object | None
+    value: object | dict[str, object] | None
     future: Future[object]
 
 
@@ -68,6 +68,14 @@ class DevParameterBridge:
 
     def set_parameter(self, node: str, name: str, value: object, timeout_seconds: float = 1.5) -> object:
         return self._invoke("set", node, (name,), value, timeout_seconds)
+
+    def set_parameters(self, node: str, values: dict[str, object], timeout_seconds: float = 1.5) -> dict[str, object]:
+        if not values:
+            raise ParameterBridgeError("至少需要一个ROS参数")
+        result = self._invoke("set_many", node, tuple(values), dict(values), timeout_seconds)
+        if not isinstance(result, dict):
+            raise ParameterBridgeError("ROS参数批量设置返回格式无效")
+        return result
 
     def _invoke(self, operation: str, node: str, names: tuple[str, ...], value: object | None, timeout_seconds: float) -> object:
         if not self.available:
@@ -141,8 +149,12 @@ class DevParameterBridge:
         try:
             if request.operation == "get":
                 request.future.set_result(self._get(request.node, request.names, executor))
-            else:
+            elif request.operation == "set":
                 request.future.set_result(self._set(request.node, request.names[0], request.value, executor))
+            else:
+                if not isinstance(request.value, dict):
+                    raise ParameterBridgeError("ROS参数批量设置请求无效")
+                request.future.set_result(self._set_many(request.node, request.value, executor))
         except Exception as error:
             if not request.future.done():
                 request.future.set_exception(ParameterBridgeError(str(error)))
@@ -161,6 +173,18 @@ class DevParameterBridge:
         if client is None:
             client = self._node.create_client(SetParameters, f"{self._service_prefix(node_name)}/set_parameters")
             self._set_clients[node_name] = client
+        return client
+
+    def _atomic_set_client(self, node_name: str):
+        from rcl_interfaces.srv import SetParametersAtomically
+        key = f"atomic:{node_name}"
+        client = self._set_clients.get(key)
+        if client is None:
+            client = self._node.create_client(
+                SetParametersAtomically,
+                f"{self._service_prefix(node_name)}/set_parameters_atomically",
+            )
+            self._set_clients[key] = client
         return client
 
     @staticmethod
@@ -210,6 +234,39 @@ class DevParameterBridge:
             reason = response.results[0].reason if response.results else "无返回结果"
             raise ParameterBridgeError(f"参数设置失败：{reason}")
         return value
+
+    def _set_many(self, node_name: str, values: dict[str, object], executor: Any) -> dict[str, object]:
+        from rcl_interfaces.msg import Parameter
+        from rcl_interfaces.srv import SetParametersAtomically
+        client = self._atomic_set_client(node_name)
+        if not client.wait_for_service(timeout_sec=0.5):
+            raise ParameterBridgeError(f"ROS图中未发现原子参数Service：{node_name}")
+        request = SetParametersAtomically.Request()
+        request.parameters = [
+            Parameter(name=name, value=self._python_to_parameter_value(value))
+            for name, value in values.items()
+        ]
+        response = self._wait_future(client.call_async(request), executor)
+        if not response.result.successful:
+            raise ParameterBridgeError(f"参数设置失败：{response.result.reason or '无返回原因'}")
+        return dict(values)
+
+    @staticmethod
+    def _python_to_parameter_value(value: object):
+        from rcl_interfaces.msg import ParameterType, ParameterValue
+        parameter_value = ParameterValue()
+        if isinstance(value, bool):
+            parameter_value.type = ParameterType.PARAMETER_BOOL
+            parameter_value.bool_value = value
+        elif isinstance(value, int):
+            parameter_value.type = ParameterType.PARAMETER_INTEGER
+            parameter_value.integer_value = value
+        elif isinstance(value, float):
+            parameter_value.type = ParameterType.PARAMETER_DOUBLE
+            parameter_value.double_value = value
+        else:
+            raise ParameterBridgeError("不支持的参数类型")
+        return parameter_value
 
     @staticmethod
     def _parameter_value_to_python(value: Any) -> object | None:

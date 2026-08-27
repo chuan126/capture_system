@@ -19,7 +19,7 @@
 - 原始RTK保存到 `rtk_samples`；旧三张融合定位表保留schema兼容，新任务不写伪数据
 - 正式文件先写入 `measurements.db.tmp`，正常或异常收尾后重命名为 `measurements.db`
 
-记录器保留 `lidar_to_top_m` 作为算法原始输出，并将正式字段 `clearance_height_m` 写为 `lidar_to_top_m + lidar_mount_height_m`。算法 Topic 不改写。记录格式 schema version 5 在 `clearance_source_frames` 使用 `candidate_region_count`、`selected_grid_area_m2`、`selected_residual_median_m` 和 `selected_residual_p95_m` 保存明确的算法诊断语义，并在 `recording_metadata` 中保存实际 `travel_direction` 和 `lane_side`；兼容字段 `lane` 继续保留。schema version 6 至 12保留历史演进语义，version 13新增按IMU实际接收频率写入的`imu_samples`原始表。后端兼容 version 1 至 13。
+记录器保留 `lidar_to_top_m` 作为算法原始输出，并将正式字段 `clearance_height_m` 写为 `lidar_to_top_m + lidar_mount_height_m`。算法 Topic 不改写。记录格式 schema version 5 在 `clearance_source_frames` 使用 `candidate_region_count`、`selected_grid_area_m2`、`selected_residual_median_m` 和 `selected_residual_p95_m` 保存明确的算法诊断语义，并在 `recording_metadata` 中保存实际 `travel_direction` 和 `lane_side`；兼容字段 `lane` 继续保留。schema version 6 至 12保留历史演进语义，version 13新增按IMU实际接收频率写入的`imu_samples`原始表，version 14新增任务开始时冻结的`detection_radius_m`和`min_support_points`。后端兼容 version 1 至 14。
 
 TXT“原始数据保存”按`imu_samples`实际行数输出38列，列间使用4个ASCII空格；缺失或未记录字段统一显示为`0`。旧schema没有`imu_samples`时，后端回退到既有`clearance_samples`序列以保持历史文件可导出，但不能把该回退解释为IMU原始频率。
 

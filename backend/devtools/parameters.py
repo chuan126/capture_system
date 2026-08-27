@@ -23,6 +23,7 @@ class ParameterBridgeLike(Protocol):
     error: str | None
     def get_parameters(self, node: str, names: list[str] | tuple[str, ...], timeout_seconds: float = 1.5) -> dict[str, object]: ...
     def set_parameter(self, node: str, name: str, value: object, timeout_seconds: float = 1.5) -> object: ...
+    def set_parameters(self, node: str, values: dict[str, object], timeout_seconds: float = 1.5) -> dict[str, object]: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -171,6 +172,30 @@ class DevParameterService:
         with self._cache_lock:
             self._runtime_cache[spec.key] = (True, normalized, "", time.time_ns())
         return self._read_cached(spec)
+
+    def set_parameters(self, values: dict[str, object]) -> list[dict[str, object]]:
+        if not values:
+            raise DevParameterError("至少需要一个参数")
+        specs: list[ParameterSpec] = []
+        normalized: dict[str, object] = {}
+        for key, value in values.items():
+            spec = self._spec_by_key.get(key)
+            if spec is None or not spec.writable:
+                raise DevParameterError(f"参数不允许运行时修改：{key}")
+            specs.append(spec)
+            normalized[spec.parameter] = self._normalize(spec, value)
+        nodes = {spec.node for spec in specs}
+        if len(nodes) != 1:
+            raise DevParameterError("批量参数必须属于同一ROS节点")
+        try:
+            self.bridge.set_parameters(next(iter(nodes)), normalized, timeout_seconds=1.2)
+        except (ParameterBridgeError, RuntimeError) as error:
+            raise DevParameterError(str(error)) from error
+        captured_at = time.time_ns()
+        with self._cache_lock:
+            for spec in specs:
+                self._runtime_cache[spec.key] = (True, normalized[spec.parameter], "", captured_at)
+        return [self._read_cached(spec) for spec in specs]
 
     def snapshot(self) -> dict[str, object]:
         parameters = self.list_parameters()

@@ -39,6 +39,7 @@ def test_data_recorder_cpp_schema_executes_without_duplicate_columns() -> None:
     assert "lidar_mount_height_m" in metadata_columns
     assert "clearance_threshold_m" in metadata_columns
     assert "clearance_upper_limit_m" in metadata_columns
+    assert {"detection_radius_m", "min_support_points"}.issubset(metadata_columns)
     assert {"travel_direction", "lane_side"}.issubset(metadata_columns)
     assert {
         "source_sequence",
@@ -111,13 +112,15 @@ def test_data_recorder_stores_mount_adjusted_clearance_and_keeps_raw_algorithm_v
         / "data_recorder_node.cpp"
     ).read_text(encoding="utf-8")
 
-    assert "VALUES (1, 13, ?, 'recorded'" in source
+    assert "VALUES (1, 14, ?, 'recorded'" in source
     assert "clearance_height = *value + lidar_mount_height_m_" in source
     assert "bind_nullable_double(statement, 5, value);" in source
     assert "bind_nullable_double(statement, 6, clearance_height);" in source
     assert "request->lidar_mount_height_m < 0.0" in source
     assert "request->clearance_threshold_m < 0.0" in source
     assert "request->clearance_threshold_m > request->clearance_upper_limit_m" in source
+    assert "request->detection_radius_m < 0.1" in source
+    assert "request->min_support_points < 1U" in source
     assert "write_periodic_sample();" not in source
     assert "write_periodic_sample" in source
     assert "sample_timer_" in source
