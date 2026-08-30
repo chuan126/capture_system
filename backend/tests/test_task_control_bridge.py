@@ -20,6 +20,8 @@ def test_service_availability_is_tracked_per_command() -> None:
         "resume": True,
         "stop": True,
         "recover": False,
+        "capture_entry_rtk": True,
+        "capture_exit_rtk": True,
     })
 
     assert bridge.available is True
@@ -29,6 +31,8 @@ def test_service_availability_is_tracked_per_command() -> None:
         "resume": True,
         "stop": True,
         "recover": False,
+        "capture_entry_rtk": True,
+        "capture_exit_rtk": True,
     }
     assert bridge.is_service_ready("stop") is True
     assert bridge.is_service_ready("recover") is False
@@ -46,4 +50,6 @@ def test_unavailable_bridge_reports_all_services_unavailable() -> None:
         "resume": False,
         "stop": False,
         "recover": False,
+        "capture_entry_rtk": False,
+        "capture_exit_rtk": False,
     }

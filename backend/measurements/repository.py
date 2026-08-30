@@ -383,7 +383,7 @@ class MeasurementRepository:
                 """
                 SELECT
                     sample_index,
-                    source_timestamp_ns,
+                    recorded_timestamp_ns,
                     elapsed_ms,
                     clearance_height_m,
                     lidar_to_top_m,
@@ -397,7 +397,7 @@ class MeasurementRepository:
             samples = [
                 ClearanceHistorySampleRecord(
                     sample_index=int(row["sample_index"]),
-                    timestamp_ms=int(row["source_timestamp_ns"]) // 1_000_000,
+                    timestamp_ms=int(row["recorded_timestamp_ns"]) // 1_000_000,
                     elapsed_ms=float(row["elapsed_ms"]),
                     height_m=_optional_float(row["clearance_height_m"]),
                     lidar_to_top_m=_optional_float(row["lidar_to_top_m"]),
@@ -498,6 +498,7 @@ class MeasurementRepository:
                     samples=[],
                 )
 
+            # 回放横轴使用设备端记录时刻，而不是仅能在雷达设备时间域内解释的源时间戳。
             # API 时间窗口使用毫秒，数据库保留纳秒。结束边界覆盖该毫秒内全部样本。
             start_timestamp_ns = effective_start * 1_000_000
             end_timestamp_ns = effective_end * 1_000_000 + 999_999
@@ -505,7 +506,7 @@ class MeasurementRepository:
                 """
                 SELECT COUNT(*) AS sample_count
                 FROM clearance_samples
-                WHERE source_timestamp_ns BETWEEN ? AND ?
+                WHERE recorded_timestamp_ns BETWEEN ? AND ?
                 """,
                 (start_timestamp_ns, end_timestamp_ns),
             ).fetchone()
@@ -518,14 +519,14 @@ class MeasurementRepository:
                     """
                     SELECT
                         sample_index,
-                        source_timestamp_ns,
+                        recorded_timestamp_ns,
                         elapsed_ms,
                         clearance_height_m,
                         valid,
                         invalid_reason
                     FROM clearance_samples
-                    WHERE source_timestamp_ns BETWEEN ? AND ?
-                    ORDER BY source_timestamp_ns ASC, sample_index ASC
+                    WHERE recorded_timestamp_ns BETWEEN ? AND ?
+                    ORDER BY recorded_timestamp_ns ASC, sample_index ASC
                     """,
                     (start_timestamp_ns, end_timestamp_ns),
                 ).fetchall()
@@ -599,7 +600,7 @@ class MeasurementRepository:
                 """
                 SELECT
                     sample_index,
-                    source_timestamp_ns,
+                    recorded_timestamp_ns,
                     elapsed_ms,
                     clearance_height_m,
                     valid,
@@ -1098,10 +1099,13 @@ class MeasurementRepository:
         path = self._analysis_cache_path(database_path)
         temporary_path: Path | None = None
         try:
-            path.parent.mkdir(parents=True, exist_ok=True)
+            # 任务可能在分析结束前被用户永久删除。这里只允许在仍然存在的任务目录
+            # 下创建analysis子目录，避免迟到的缓存写入重新生成已删除的任务目录。
+            identity = self._analysis_cache_identity(database_path, config)
+            path.parent.mkdir(parents=False, exist_ok=True)
             payload = {
                 "schema_version": 1,
-                "identity": self._analysis_cache_identity(database_path, config),
+                "identity": identity,
                 "result": result.to_trace_dict(),
             }
             with tempfile.NamedTemporaryFile(
@@ -1204,7 +1208,7 @@ class MeasurementRepository:
     ) -> tuple[int, int, int, int]:
         first = connection.execute(
             """
-            SELECT sample_index, source_timestamp_ns
+            SELECT sample_index, recorded_timestamp_ns
             FROM clearance_samples
             ORDER BY sample_index ASC
             LIMIT 1
@@ -1212,7 +1216,7 @@ class MeasurementRepository:
         ).fetchone()
         last = connection.execute(
             """
-            SELECT sample_index, source_timestamp_ns
+            SELECT sample_index, recorded_timestamp_ns
             FROM clearance_samples
             ORDER BY sample_index DESC
             LIMIT 1
@@ -1223,15 +1227,15 @@ class MeasurementRepository:
         return (
             int(first["sample_index"]),
             int(last["sample_index"]),
-            int(first["source_timestamp_ns"]) // 1_000_000,
-            int(last["source_timestamp_ns"]) // 1_000_000,
+            int(first["recorded_timestamp_ns"]) // 1_000_000,
+            int(last["recorded_timestamp_ns"]) // 1_000_000,
         )
 
     @staticmethod
     def _series_sample_from_row(row: sqlite3.Row) -> ClearanceSeriesSampleRecord:
         return ClearanceSeriesSampleRecord(
             sample_index=int(row["sample_index"]),
-            timestamp_ms=int(row["source_timestamp_ns"]) // 1_000_000,
+            timestamp_ms=int(row["recorded_timestamp_ns"]) // 1_000_000,
             elapsed_ms=float(row["elapsed_ms"]),
             height_m=_optional_float(row["clearance_height_m"]),
             valid=bool(row["valid"]),
@@ -1251,18 +1255,18 @@ class MeasurementRepository:
         bucket_count = max(1, (max_points - 2) // 3)
         duration_ns = max(1, end_timestamp_ns - start_timestamp_ns + 1)
         columns = (
-            "sample_index, source_timestamp_ns, elapsed_ms, "
+            "sample_index, recorded_timestamp_ns, elapsed_ms, "
             "clearance_height_m, valid, invalid_reason"
         )
         bucket_expression = (
-            "MIN(? - 1, CAST(((source_timestamp_ns - ?) * ?) / ? AS INTEGER))"
+            "MIN(? - 1, CAST(((recorded_timestamp_ns - ?) * ?) / ? AS INTEGER))"
         )
         sql = f"""
             SELECT DISTINCT {columns}
             FROM (
                 SELECT {columns}, MIN(clearance_height_m) AS selected_value
                 FROM clearance_samples
-                WHERE source_timestamp_ns BETWEEN ? AND ?
+                WHERE recorded_timestamp_ns BETWEEN ? AND ?
                   AND valid = 1 AND clearance_height_m IS NOT NULL
                 GROUP BY {bucket_expression}
 
@@ -1270,7 +1274,7 @@ class MeasurementRepository:
 
                 SELECT {columns}, MAX(clearance_height_m) AS selected_value
                 FROM clearance_samples
-                WHERE source_timestamp_ns BETWEEN ? AND ?
+                WHERE recorded_timestamp_ns BETWEEN ? AND ?
                   AND valid = 1 AND clearance_height_m IS NOT NULL
                 GROUP BY {bucket_expression}
 
@@ -1278,7 +1282,7 @@ class MeasurementRepository:
 
                 SELECT {columns}, MIN(sample_index) AS selected_value
                 FROM clearance_samples
-                WHERE source_timestamp_ns BETWEEN ? AND ?
+                WHERE recorded_timestamp_ns BETWEEN ? AND ?
                   AND (valid = 0 OR clearance_height_m IS NULL)
                 GROUP BY {bucket_expression}
 
@@ -1287,8 +1291,8 @@ class MeasurementRepository:
                 SELECT * FROM (
                     SELECT {columns}, NULL AS selected_value
                     FROM clearance_samples
-                    WHERE source_timestamp_ns BETWEEN ? AND ?
-                    ORDER BY source_timestamp_ns ASC, sample_index ASC
+                    WHERE recorded_timestamp_ns BETWEEN ? AND ?
+                    ORDER BY recorded_timestamp_ns ASC, sample_index ASC
                     LIMIT 1
                 )
 
@@ -1297,12 +1301,12 @@ class MeasurementRepository:
                 SELECT * FROM (
                     SELECT {columns}, NULL AS selected_value
                     FROM clearance_samples
-                    WHERE source_timestamp_ns BETWEEN ? AND ?
-                    ORDER BY source_timestamp_ns DESC, sample_index DESC
+                    WHERE recorded_timestamp_ns BETWEEN ? AND ?
+                    ORDER BY recorded_timestamp_ns DESC, sample_index DESC
                     LIMIT 1
                 )
             )
-            ORDER BY source_timestamp_ns ASC, sample_index ASC
+            ORDER BY recorded_timestamp_ns ASC, sample_index ASC
         """
         bucket_parameters = (
             bucket_count,

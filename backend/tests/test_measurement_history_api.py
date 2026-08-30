@@ -48,6 +48,8 @@ def create_measurement_database(path: Path, task_id: str) -> None:
             );
             CREATE INDEX clearance_samples_timestamp_idx
             ON clearance_samples(source_timestamp_ns);
+            CREATE INDEX clearance_samples_recorded_timestamp_idx
+            ON clearance_samples(recorded_timestamp_ns);
             CREATE TABLE rtk_endpoints (
                 role TEXT PRIMARY KEY,
                 timestamp_ns INTEGER NOT NULL,
@@ -138,6 +140,7 @@ def test_measurement_history_returns_curve_gaps_statistics_and_endpoints(tmp_pat
     assert payload["samples"][2]["valid"] is False
     assert payload["samples"][2]["height_m"] is None
     assert payload["samples"][2]["invalid_reason"] == "insufficient_points"
+    assert payload["samples"][0]["timestamp_ms"] == 1_785_978_000_001
     assert payload["entry_rtk"]["fix_type"] == "RTK_FIXED"
     assert payload["exit_rtk"]["longitude_deg"] == 116.3902
     assert len(payload["pause_intervals"]) == 1
@@ -221,8 +224,8 @@ def test_measurement_summary_and_adaptive_series_preserve_extrema_and_gaps(tmp_p
         prefix_response = client.get(
             f"/api/v1/tasks/{task['task_id']}/measurements/series-prefix?max_samples=200"
         )
-        detail_start_ms = (base_ns + 500 * 20_000_000) // 1_000_000
-        detail_end_ms = (base_ns + 550 * 20_000_000) // 1_000_000
+        detail_start_ms = (base_ns + 500 * 20_000_000 + 1_000_000) // 1_000_000
+        detail_end_ms = (base_ns + 550 * 20_000_000 + 1_000_000) // 1_000_000
         detail_response = client.get(
             f"/api/v1/tasks/{task['task_id']}/measurements/series"
             f"?start_timestamp_ms={detail_start_ms}&end_timestamp_ms={detail_end_ms}&max_points=200"
@@ -234,13 +237,13 @@ def test_measurement_summary_and_adaptive_series_preserve_extrema_and_gaps(tmp_p
     assert summary["statistics"]["total_samples"] == 1000
     assert summary["first_sample_index"] == 0
     assert summary["last_sample_index"] == 999
-    assert summary["first_timestamp_ms"] == base_ns // 1_000_000
-    assert summary["last_timestamp_ms"] == (base_ns + 999 * 20_000_000) // 1_000_000
+    assert summary["first_timestamp_ms"] == (base_ns + 1_000_000) // 1_000_000
+    assert summary["last_timestamp_ms"] == (base_ns + 999 * 20_000_000 + 1_000_000) // 1_000_000
 
     assert series_response.status_code == 200
     series = series_response.json()
-    assert series["domain_start_timestamp_ms"] == base_ns // 1_000_000
-    assert series["domain_end_timestamp_ms"] == (base_ns + 999 * 20_000_000) // 1_000_000
+    assert series["domain_start_timestamp_ms"] == (base_ns + 1_000_000) // 1_000_000
+    assert series["domain_end_timestamp_ms"] == (base_ns + 999 * 20_000_000 + 1_000_000) // 1_000_000
     assert series["source_sample_count"] == 1000
     assert series["returned_sample_count"] <= 200
     assert series["downsampled"] is True
@@ -257,8 +260,8 @@ def test_measurement_summary_and_adaptive_series_preserve_extrema_and_gaps(tmp_p
     assert prefix["downsampled"] is False
     assert prefix["samples"][0]["sample_index"] == 0
     assert prefix["samples"][-1]["sample_index"] == 199
-    assert prefix["requested_start_timestamp_ms"] == base_ns // 1_000_000
-    assert prefix["requested_end_timestamp_ms"] == (base_ns + 199 * 20_000_000) // 1_000_000
+    assert prefix["requested_start_timestamp_ms"] == (base_ns + 1_000_000) // 1_000_000
+    assert prefix["requested_end_timestamp_ms"] == (base_ns + 199 * 20_000_000 + 1_000_000) // 1_000_000
 
     assert detail_response.status_code == 200
     detail = detail_response.json()
@@ -269,7 +272,7 @@ def test_measurement_summary_and_adaptive_series_preserve_extrema_and_gaps(tmp_p
     assert detail["samples"][-1]["sample_index"] == 550
 
 
-def test_measurement_series_window_uses_source_time_across_pause_gap(tmp_path: Path) -> None:
+def test_measurement_series_window_uses_recorded_time_across_pause_gap(tmp_path: Path) -> None:
     static_dir = tmp_path / "site"
     make_static_site(static_dir)
     data_root = tmp_path / "runtime"
@@ -287,9 +290,15 @@ def test_measurement_series_window_uses_source_time_across_pause_gap(tmp_path: P
         create_measurement_database(database_path, task["task_id"])
 
         base_ns = 1_785_978_000_000_000_000
-        timestamps = [
+        source_timestamps = [
             base_ns,
             base_ns + 20_000_000,
+            base_ns + 40_000_000,
+            base_ns + 60_000_000,
+        ]
+        recorded_timestamps = [
+            base_ns + 1_000_000,
+            base_ns + 21_000_000,
             base_ns + 10_000_000_000,
             base_ns + 10_020_000_000,
         ]
@@ -298,9 +307,11 @@ def test_measurement_series_window_uses_source_time_across_pause_gap(tmp_path: P
             connection.executemany(
                 "INSERT INTO clearance_samples VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 [
-                    (index, timestamp_ns, timestamp_ns + 1_000_000, float(index * 20),
+                    (index, source_timestamp_ns, recorded_timestamp_ns, float(index * 20),
                      2.9, 5.2 - index * 0.01, 1, None, 0.95)
-                    for index, timestamp_ns in enumerate(timestamps)
+                    for index, (source_timestamp_ns, recorded_timestamp_ns) in enumerate(
+                        zip(source_timestamps, recorded_timestamps, strict=True)
+                    )
                 ],
             )
         with sqlite3.connect(data_root / "capture.db") as connection:
@@ -381,10 +392,10 @@ def test_measurement_prefix_caps_long_task_at_two_thousand_and_uses_bounded_plan
             window_plan = connection.execute(
                 """
                 EXPLAIN QUERY PLAN
-                SELECT sample_index, source_timestamp_ns
+                SELECT sample_index, recorded_timestamp_ns
                 FROM clearance_samples
-                WHERE source_timestamp_ns BETWEEN ? AND ?
-                ORDER BY source_timestamp_ns ASC, sample_index ASC
+                WHERE recorded_timestamp_ns BETWEEN ? AND ?
+                ORDER BY recorded_timestamp_ns ASC, sample_index ASC
                 """,
                 (base_ns, base_ns + 1_000_000_000),
             ).fetchall()
@@ -409,7 +420,7 @@ def test_measurement_prefix_caps_long_task_at_two_thousand_and_uses_bounded_plan
     assert payload["samples"][0]["sample_index"] == 0
     assert payload["samples"][-1]["sample_index"] == 1999
     assert all("USE TEMP B-TREE" not in str(row[3]).upper() for row in prefix_plan)
-    assert any("clearance_samples_timestamp_idx" in str(row[3]) for row in window_plan)
+    assert any("clearance_samples_recorded_timestamp_idx" in str(row[3]) for row in window_plan)
     assert all("USE TEMP B-TREE" not in str(row[3]).upper() for row in window_plan)
 
 

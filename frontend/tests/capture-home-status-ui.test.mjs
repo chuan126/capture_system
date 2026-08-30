@@ -105,7 +105,7 @@ test("task card shows frozen task and runtime algorithm parameters", () => {
   assert.match(taskCard, /value=\{heightThreshold\}/);
   assert.match(taskCard, />高度上限阈值</);
   assert.match(taskCard, /value=\{heightUpperLimit\}/);
-  assert.match(taskCard, /正常区间：高度下限阈值 ≤ 净空高度 ≤ 高度上限阈值/);
+  assert.doesNotMatch(taskCard, /正常区间：高度下限阈值 ≤ 净空高度 ≤ 高度上限阈值/);
   assert.match(taskCard, />雷达安装高度</);
   assert.match(taskCard, /value=\{mountHeight\}/);
   assert.match(taskCard, />作业车道</);
@@ -114,10 +114,10 @@ test("task card shows frozen task and runtime algorithm parameters", () => {
   assert.match(taskCard, /value=\{detectionRadius\}/);
   assert.match(taskCard, />最低簇支持点数</);
   assert.match(taskCard, /value=\{minSupportPoints\}/);
-  assert.match(taskCard, /立即应用/);
+  assert.doesNotMatch(taskCard, /立即应用|task-parameter-footer|task-parameter-range-hint/);
   assert.match(page, /window\.setTimeout\(\(\) => void saveAlgorithmParameters\(true\), 500\)/);
   assert.match(taskCard, /onBlur=\{\(\) => void saveAlgorithmParameters\(\)\}/);
-  assert.match(page, /下一帧实时检测和点云预览生效/);
+  assert.doesNotMatch(page, /下一帧实时检测和点云预览生效|参数已修改，正在等待自动应用/);
   for (const lane of ["上行左车道", "上行右车道", "下行左车道", "下行右车道"]) {
     assert.match(taskCard, new RegExp(`option value="${lane}"`));
   }
@@ -205,12 +205,19 @@ test("current task provides a dedicated switch dialog", () => {
   assert.match(page, /setTaskSwitchOpen\(true\)/);
 });
 
-test("task actions use a dominant start control and outlined secondary controls", () => {
+test("task actions keep start, pause, RTK and stop in a fixed responsive order", () => {
   assert.match(taskCard, /task-start-button/);
   assert.match(taskCard, /task-pause-button/);
+  assert.match(taskCard, /task-rtk-button/);
   assert.match(taskCard, /task-stop-button/);
-  assert.match(taskCard, /task-running-state/);
-  assert.match(css, /task-operation-actions[\s\S]*grid-template-columns:\s*1\.55fr 1fr 1fr/);
+  assert.doesNotMatch(taskCard, /task-running-state/);
+  assert.match(css, /task-operation-actions[\s\S]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/);
+  assert.match(css, /@container \(max-width:\s*420px\)[\s\S]*?\.task-operation-actions\s*\{[^}]*grid-template-columns:\s*repeat\(2,/i);
+  const startIndex = taskCard.indexOf("task-start-button");
+  const pauseIndex = taskCard.indexOf("task-pause-button");
+  const rtkIndex = taskCard.indexOf("task-rtk-button");
+  const stopIndex = taskCard.indexOf("task-stop-button");
+  assert.ok(startIndex >= 0 && pauseIndex > startIndex && rtkIndex > pauseIndex && stopIndex > rtkIndex);
 });
 
 test("task start validates the shared numeric settings", () => {
@@ -259,6 +266,11 @@ test("notebook task card keeps the middle scrollable without reducing readable c
   assert.doesNotMatch(css, /@media \(max-width:\s*1600px\) and \(min-width:\s*761px\)[\s\S]*?\.task-queue-list \{[^}]*max-height:\s*260px/i);
   assert.match(css, /\.task-operation-actions \.button \{[^}]*min-height:\s*42px[^}]*font-size:\s*11px/i);
   assert.match(css, /\.task-queue-list > button \{[^}]*min-height:\s*52px/i);
+  assert.match(css, /\.task-operation-panel\s*\{[^}]*container-type:\s*inline-size/i);
+  assert.match(css, /\.dashboard-layout\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\) clamp\(330px,\s*18vw,\s*344px\)/i);
+  assert.match(css, /@media \(max-width:\s*1440px\) and \(min-width:\s*1181px\)[\s\S]*?\.dashboard-layout \{ grid-template-columns:\s*1fr/i);
+  assert.match(css, /@container \(max-width:\s*420px\)[\s\S]*?\.task-operation-actions\s*\{[^}]*repeat\(2,/i);
+  assert.match(css, /\.task-recover-button\s*\{[^}]*grid-column:\s*1 \/ -1/i);
 });
 
 test("task title and bottom controls stay outside the scrollable task body", () => {
@@ -298,6 +310,29 @@ test("start and stop execute without confirmation dialogs", () => {
   assert.match(page, /executeControl\("stop"/);
 });
 
+test("one RTK button records entry before start and advances to exit after start", () => {
+  assert.match(page, /captureEntryRtk/);
+  assert.match(page, /captureExitRtk/);
+  assert.match(page, /entryRtkSnapshotRecorded = currentTask\?\.entryRtkStatus === "confirmed" \|\| currentTask\?\.entryRtkStatus === "unconfirmed"/);
+  assert.match(page, /exitRtkSnapshotRecorded = currentTask\?\.exitRtkStatus === "confirmed" \|\| currentTask\?\.exitRtkStatus === "unconfirmed"/);
+  assert.match(page, /currentTask\.status === "待执行"/);
+  assert.match(page, /entryRtkSnapshotRecorded \? null : "entry"/);
+  assert.match(page, /isTaskActive\(currentTask\) \? entryRtkSnapshotRecorded \? "exit" : "entry"/);
+  assert.match(page, /const prestartEntry = currentTask\.status === "待执行" && nextRtkEndpoint === "entry"/);
+  assert.match(page, /poststopExitAvailable = currentTask\?\.status === "已停止"/);
+  assert.match(page, /const poststopExit = currentTask\.status === "已停止" && nextRtkEndpoint === "exit"/);
+  assert.match(page, /测量数据已封存；记录当前最新坐标作为隧道出口RTK/);
+  assert.match(page, /入口RTK已记录/);
+  assert.match(page, /选择待执行任务后可在开始采集前记录入口RTK/);
+  assert.match(page, /rtkSnapshotsComplete \? "RTK快照已记录"/);
+  assert.match(page, /nextRtkEndpoint === "entry" \? "入口RTK"/);
+  assert.match(page, /nextRtkEndpoint === "exit" \? "出口RTK"/);
+  assert.match(taskCard, /captureNextRtkEndpoint\(\)/);
+  assert.doesNotMatch(taskCard, /task-rtk-capture|task-rtk-endpoint|RTK端点记录/);
+  assert.match(css, /\.task-rtk-button--exit\s*\{/);
+  assert.doesNotMatch(page, /等待出口 RTK \$\{exitWaitRemainingSeconds/);
+});
+
 test("task creation no longer exposes operation-batch choices", () => {
   assert.match(taskDialog, /创建检测任务/);
   assert.match(taskDialog, /按创建时间生成/);
@@ -305,8 +340,9 @@ test("task creation no longer exposes operation-batch choices", () => {
   assert.doesNotMatch(taskCard, />新建作业<|>结束作业|作业批次/);
 });
 
-test("completed stop automatically selects the next pending task by creation time", () => {
+test("completed stop waits for an exit snapshot before automatically selecting the next task", () => {
   assert.match(page, /autoAdvanceTaskId/);
+  assert.match(page, /stopped\.exitRtkStatus === "confirmed" \|\| stopped\.exitRtkStatus === "unconfirmed"/);
   assert.match(page, /task\.status === "待执行"/);
   assert.match(page, /left\.createdAt\.localeCompare\(right\.createdAt\)/);
   assert.match(page, /task\.createdAt > stopped\.createdAt/);

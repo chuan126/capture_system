@@ -150,6 +150,10 @@ test("RealtimeAmap component contains WGS-84 to GCJ-02 conversion", async () => 
   assert.doesNotMatch(component, /localStorage|NEXT_PUBLIC_AMAP/);
   assert.match(component, /地图设置/);
   assert.match(component, /security_js_code/);
+  assert.match(component, /"dragstart", suspendFollow/);
+  assert.match(component, /"zoomstart", suspendFollow/);
+  assert.match(component, /10_000/);
+  assert.match(component, /回到车辆/);
 });
 
 test("globals.css includes amap layout and marker styles", async () => {

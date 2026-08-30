@@ -20,6 +20,8 @@ import { DEVTOOLS_ENABLED, DevToolsWorkspace } from "@/components/devtools/devto
 import { useTaskStatusSocket } from "@/components/task-status/useTaskStatusSocket";
 import { createTask, listTasks, TaskApiError } from "@/components/workflow/taskApi";
 import {
+  captureEntryRtk,
+  captureExitRtk,
   getTaskControlReadiness,
   pauseTaskControl,
   recoverTaskControl,
@@ -30,7 +32,6 @@ import {
 import {
   isTaskActive,
   isTaskControlBusy,
-  rtkCaptureLabels,
   taskPhaseLabels,
 } from "@/components/workflow/taskModel";
 import { laneSelectionParts } from "@/components/workflow/taskModel";
@@ -74,7 +75,7 @@ function taskRuntimeLabel(task: CollectionTask): string {
   }
   if (task.operationPhase === "pausing") return "正在暂停";
   if (task.operationPhase === "resuming") return "正在继续";
-  if (["stop_requested", "exit_rtk_capture", "finalizing"].includes(task.operationPhase)) {
+  if (["stop_requested", "exit_rtk_capture", "awaiting_exit_rtk", "finalizing"].includes(task.operationPhase)) {
     return "正在停止";
   }
   return task.status;
@@ -89,6 +90,7 @@ function taskRuntimeTone(task: CollectionTask): "idle" | "ok" | "warn" | "danger
     "resuming",
     "stop_requested",
     "exit_rtk_capture",
+    "awaiting_exit_rtk",
     "finalizing",
   ].includes(task.operationPhase)) {
     return "warn";
@@ -312,10 +314,12 @@ function LiveClearanceChart({
   snapshot,
   streaming,
   detail,
+  mountHeightM,
 }: {
   snapshot: ClearanceSnapshot | null;
   streaming: boolean;
   detail: string;
+  mountHeightM: number | null;
 }) {
   const [samples, setSamples] = useState<LiveClearanceSample[]>([]);
   const [verticalZoom, setVerticalZoom] = useState(1);
@@ -333,7 +337,9 @@ function LiveClearanceChart({
 
   const chart = useMemo(() => {
     const values = samples
-      .map((sample) => sample.heightM)
+      .map((sample) => sample.heightM === null || mountHeightM === null
+        ? null
+        : sample.heightM + mountHeightM)
       .filter((height): height is number => height !== null);
     if (values.length === 0) return null;
 
@@ -358,22 +364,22 @@ function LiveClearanceChart({
     const segments: string[] = [];
     let segment = "";
     samples.forEach((sample, index) => {
-      if (sample.heightM === null) {
+      if (sample.heightM === null || mountHeightM === null) {
         if (segment) segments.push(segment);
         segment = "";
         return;
       }
-      const point = `${xFor(index).toFixed(2)} ${yFor(sample.heightM).toFixed(2)}`;
+      const point = `${xFor(index).toFixed(2)} ${yFor(sample.heightM + mountHeightM).toFixed(2)}`;
       segment += `${segment ? " L" : "M"}${point}`;
     });
     if (segment) segments.push(segment);
 
     const latestIndex = samples.findLastIndex((sample) => sample.heightM !== null);
-    const latest = latestIndex >= 0 && samples[latestIndex].heightM !== null
-      ? { x: xFor(latestIndex), y: yFor(samples[latestIndex].heightM!) }
+    const latest = latestIndex >= 0 && samples[latestIndex].heightM !== null && mountHeightM !== null
+      ? { x: xFor(latestIndex), y: yFor(samples[latestIndex].heightM! + mountHeightM) }
       : null;
     return { yMin, yMax, segments, latest };
-  }, [samples, verticalZoom]);
+  }, [mountHeightM, samples, verticalZoom]);
 
   const adjustVerticalZoom = (factor: number) => {
     setVerticalZoom((current) => Math.min(8, Math.max(0.25, current * factor)));
@@ -523,7 +529,9 @@ function Dashboard({
   const [expandedVisual, setExpandedVisual] = useState<"cloud" | "map" | null>(null);
   const [taskDialogOpen, setTaskDialogOpen] = useState(false);
   const [taskSwitchOpen, setTaskSwitchOpen] = useState(false);
-  const [controlSubmitting, setControlSubmitting] = useState<"start" | "pause" | "resume" | "stop" | "recover" | null>(null);
+  const [controlSubmitting, setControlSubmitting] = useState<
+    "start" | "pause" | "resume" | "stop" | "recover" | "capture_entry_rtk" | "capture_exit_rtk" | null
+  >(null);
   const [autoAdvanceTaskId, setAutoAdvanceTaskId] = useState<string | null>(null);
   const [controlError, setControlError] = useState<string | null>(null);
   const [algorithmSaving, setAlgorithmSaving] = useState(false);
@@ -536,6 +544,9 @@ function Dashboard({
   const [canResume, setCanResume] = useState(false);
   const [canStop, setCanStop] = useState(false);
   const [canRecover, setCanRecover] = useState(false);
+  const [canCaptureEntryRtk, setCanCaptureEntryRtk] = useState(false);
+  const [canCaptureExitRtk, setCanCaptureExitRtk] = useState(false);
+  const [rtkCaptureMessage, setRtkCaptureMessage] = useState<string | null>(null);
   const rtkSnapshot = rtk.snapshot;
   const clearance = useClearanceSocket();
   const clearanceSnapshot = clearance.snapshot;
@@ -552,6 +563,8 @@ function Dashboard({
       setCanResume(readiness.canResume);
       setCanStop(readiness.canStop);
       setCanRecover(readiness.canRecover);
+      setCanCaptureEntryRtk(readiness.canCaptureEntryRtk);
+      setCanCaptureExitRtk(readiness.canCaptureExitRtk);
     } catch (error) {
       setControlAvailable(false);
       setControlDetail(error instanceof Error ? error.message : "任务控制服务不可用");
@@ -560,6 +573,8 @@ function Dashboard({
       setCanResume(false);
       setCanStop(false);
       setCanRecover(false);
+      setCanCaptureEntryRtk(false);
+      setCanCaptureExitRtk(false);
     }
   }, []);
 
@@ -669,6 +684,7 @@ function Dashboard({
   const firstPendingTask = tasks.find((task) => task.status === "待执行") ?? null;
   // 刷新后不替用户选择待执行或历史任务；真实活动任务仍必须显示控制入口。
   const currentTask = activeTask ?? selectedPendingTask ?? selectedTask ?? null;
+  useEffect(() => setRtkCaptureMessage(null), [currentTask?.taskId]);
   const pendingTasks = tasks
     .filter((task) => task.status === "待执行" && task.taskId !== currentTask?.taskId)
     .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
@@ -706,6 +722,30 @@ function Dashboard({
   const currentTaskStatus = currentTask?.status ?? "待执行";
   const currentTaskRuntimeLabel = currentTask ? taskRuntimeLabel(currentTask) : "无任务";
   const taskRunning = currentTask?.status === "采集中" || currentTask?.status === "已暂停" || isTaskControlBusy(currentTask);
+  const entryRtkSnapshotRecorded = currentTask?.entryRtkStatus === "confirmed" || currentTask?.entryRtkStatus === "unconfirmed";
+  const exitRtkSnapshotRecorded = currentTask?.exitRtkStatus === "confirmed" || currentTask?.exitRtkStatus === "unconfirmed";
+  const rtkSnapshotPending = currentTask?.entryRtkStatus === "pending" || currentTask?.exitRtkStatus === "pending";
+  const rtkSnapshotsComplete = entryRtkSnapshotRecorded && exitRtkSnapshotRecorded;
+  const prestartEntryRecorded = currentTask?.status === "待执行" && entryRtkSnapshotRecorded;
+  const poststopExitAvailable = currentTask?.status === "已停止" &&
+    !exitRtkSnapshotRecorded && currentTask.recordingPath !== null && currentTask.localDataPurgedAt === null;
+  const nextRtkEndpoint = !currentTask || rtkSnapshotsComplete || rtkSnapshotPending
+    ? null
+    : currentTask.status === "待执行"
+      ? entryRtkSnapshotRecorded ? null : "entry"
+      : isTaskActive(currentTask) ? entryRtkSnapshotRecorded ? "exit" : "entry"
+        : poststopExitAvailable ? "exit" : null;
+  const canCaptureNextRtk = nextRtkEndpoint === "entry" ? canCaptureEntryRtk
+    : nextRtkEndpoint === "exit" ? canCaptureExitRtk
+      : false;
+  const rtkButtonLabel = controlSubmitting === "capture_entry_rtk" ? "正在记录入口"
+    : controlSubmitting === "capture_exit_rtk" ? "正在记录出口"
+      : rtkSnapshotPending ? "正在记录RTK"
+        : rtkSnapshotsComplete ? "RTK快照已记录"
+        : prestartEntryRecorded ? "入口RTK已记录"
+        : nextRtkEndpoint === "entry" ? "入口RTK"
+          : nextRtkEndpoint === "exit" ? "出口RTK"
+            : "入口/出口RTK";
   const createSingleTask = async (
     draft: CollectionTaskDraft,
     idempotencyKey: string,
@@ -784,9 +824,6 @@ function Dashboard({
         minSupportPoints: parsedMinSupportPoints,
       });
       lastAppliedAlgorithmSignature.current = signature;
-      setAlgorithmMessage(automatic
-        ? "算法参数已自动应用，下一帧实时检测和点云预览生效"
-        : "算法参数已立即应用并保存到设备端");
     } catch (error) {
       setAlgorithmMessage(error instanceof Error ? error.message : "算法参数保存失败");
     } finally {
@@ -798,7 +835,6 @@ function Dashboard({
     if (!algorithmParametersLoaded || taskLocked || !algorithmParametersValid) return;
     const signature = `${parsedDetectionRadius}:${parsedMinSupportPoints}`;
     if (lastAppliedAlgorithmSignature.current === signature) return;
-    setAlgorithmMessage("参数已修改，正在等待自动应用");
     const timer = window.setTimeout(() => void saveAlgorithmParameters(true), 500);
     return () => window.clearTimeout(timer);
   }, [
@@ -850,6 +886,34 @@ function Dashboard({
     ));
   };
 
+  const captureNextRtkEndpoint = async () => {
+    if (!currentTask || !nextRtkEndpoint || controlSubmitting !== null) return;
+    const prestartEntry = currentTask.status === "待执行" && nextRtkEndpoint === "entry";
+    const poststopExit = currentTask.status === "已停止" && nextRtkEndpoint === "exit";
+    if (!prestartEntry && !poststopExit && activeControlTaskId !== currentTask.taskId) return;
+    const role = nextRtkEndpoint;
+    const command = role === "entry" ? "capture_entry_rtk" : "capture_exit_rtk";
+    const allowed = role === "entry" ? canCaptureEntryRtk : canCaptureExitRtk;
+    if (!allowed) return;
+    setControlSubmitting(command);
+    setControlError(null);
+    setRtkCaptureMessage(null);
+    try {
+      const action = role === "entry" ? captureEntryRtk : captureExitRtk;
+      const result = await action(
+        currentTask.taskId, currentTask.statusRevision, createClientRequestId(),
+      );
+      setRtkCaptureMessage(result.message);
+      await reloadTasks();
+      await refreshControlReadiness();
+    } catch (error) {
+      setRtkCaptureMessage(error instanceof Error ? error.message : "RTK端点记录失败");
+      await reloadTasks().catch(() => undefined);
+    } finally {
+      setControlSubmitting(null);
+    }
+  };
+
   useEffect(() => {
     if (!autoAdvanceTaskId) return;
     const stopped = tasks.find((task) => task.taskId === autoAdvanceTaskId);
@@ -857,7 +921,8 @@ function Dashboard({
       setAutoAdvanceTaskId(null);
       return;
     }
-    if (stopped.status === "已停止") {
+    if (stopped.status === "已停止" &&
+      (stopped.exitRtkStatus === "confirmed" || stopped.exitRtkStatus === "unconfirmed")) {
       const pending = tasks
         .filter((task) => task.status === "待执行")
         .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
@@ -1014,6 +1079,7 @@ function Dashboard({
               snapshot={clearanceSnapshot}
               streaming={clearanceStreaming}
               detail={clearance.detail}
+              mountHeightM={mountHeightValid ? parsedMountHeight : null}
             />
           </article>
         </div>
@@ -1121,7 +1187,6 @@ function Dashboard({
                     <div><input type="number" min="1" max="10000" step="1" value={minSupportPoints} disabled={taskLocked} aria-invalid={!minSupportPointsValid} onChange={(event) => setMinSupportPoints(event.target.value)} onBlur={() => void saveAlgorithmParameters()} /><small>点</small></div>
                   </label>
                 </div>
-                <div className="task-parameter-footer"><small className="task-parameter-range-hint">正常区间：高度下限阈值 ≤ 净空高度 ≤ 高度上限阈值；算法参数修改后自动作用于实时检测和点云预览，任务开始时冻结。</small><button type="button" disabled={taskLocked || algorithmSaving || !algorithmParametersValid} onClick={() => void saveAlgorithmParameters()}>{algorithmSaving ? "应用中" : "立即应用"}</button></div>
                 {algorithmMessage && <small className="task-parameter-message" role="status">{algorithmMessage}</small>}
               </section>
 
@@ -1140,8 +1205,6 @@ function Dashboard({
                       <small>{currentTask.tunnelCode} · {currentTask.tunnelName} · {taskLocked ? (currentTask.lane ?? operationLane) : operationLane}</small>
                       <div className="task-current-card__runtime">
                         <span>当前阶段 {taskPhaseLabels[currentTask.operationPhase]}</span>
-                        <span>入口 RTK {rtkCaptureLabels[currentTask.entryRtkStatus]}</span>
-                        <span>出口 RTK {rtkCaptureLabels[currentTask.exitRtkStatus]}</span>
                       </div>
                       {currentTask.lastErrorMessage && (
                         <small className="task-current-card__error">{currentTask.lastErrorMessage}</small>
@@ -1200,35 +1263,32 @@ function Dashboard({
             </div>
 
             <footer className="task-operation-actions" aria-label="采集控制">
-              {taskRunning ? (
-                <div className={`task-running-state${currentTask?.status === "已暂停" ? " task-running-state--paused" : ""}`}>
-                  <i />
-                  <span>{currentTask ? taskPhaseLabels[currentTask.operationPhase] : "任务处理中"}</span>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  className="button button--green task-start-button"
-                  disabled={
-                    !currentTask ||
-                    currentTask.status !== "待执行" ||
-                    taskBusy ||
-                    !controlAvailable ||
-                    !heightRangeValid ||
-                    !mountHeightValid
-                  }
-                  title={!currentTask
-                    ? "请先创建任务"
+              <button
+                type="button"
+                className="button button--green task-start-button"
+                disabled={
+                  !currentTask ||
+                  currentTask.status !== "待执行" ||
+                  taskBusy ||
+                  !controlAvailable ||
+                  !heightRangeValid ||
+                  !mountHeightValid ||
+                  !algorithmParametersLoaded ||
+                  !algorithmParametersValid
+                }
+                title={!currentTask
+                  ? "请先创建任务"
+                  : taskRunning
+                    ? "当前任务已经开始"
                     : !heightRangeValid
                       ? "请确认高度下限阈值不大于高度上限阈值"
                       : !mountHeightValid
                         ? "请输入有效的雷达安装高度"
                         : !controlAvailable
                           ? controlDetail
-                          : "雷达与RTK均已上线，可以开始采集"}
-                  onClick={startTask}
-                >{controlSubmitting === "start" ? "正在开始" : "开始采集"}</button>
-              )}
+                          : "开始采集；入口和出口RTK在任务中手动记录"}
+                onClick={startTask}
+              >{controlSubmitting === "start" ? "正在开始" : taskRunning ? (currentTask?.status === "已暂停" ? "采集已暂停" : "采集中") : "开始采集"}</button>
               <button
                 type="button"
                 className="button task-pause-button"
@@ -1244,10 +1304,35 @@ function Dashboard({
                   : currentTask?.status === "已暂停" ? "继续" : "暂停"}</button>
               <button
                 type="button"
+                className={`button task-rtk-button${nextRtkEndpoint ? ` task-rtk-button--${nextRtkEndpoint}` : ""}`}
+                disabled={
+                  !nextRtkEndpoint || !canCaptureNextRtk || controlSubmitting !== null ||
+                  (
+                    !(currentTask?.status === "待执行" && nextRtkEndpoint === "entry") &&
+                    !(currentTask?.status === "已停止" && nextRtkEndpoint === "exit") &&
+                    activeControlTaskId !== currentTask?.taskId
+                  )
+                }
+                title={rtkSnapshotsComplete
+                  ? "入口和出口RTK快照均已记录"
+                  : nextRtkEndpoint === "entry"
+                    ? "记录当前最新坐标作为隧道入口RTK"
+                    : nextRtkEndpoint === "exit"
+                      ? currentTask?.status === "已停止"
+                        ? "测量数据已封存；记录当前最新坐标作为隧道出口RTK"
+                        : "记录当前最新坐标作为隧道出口RTK"
+                      : prestartEntryRecorded
+                        ? "入口RTK快照已记录，开始采集后可记录出口RTK"
+                        : "选择待执行任务后可在开始采集前记录入口RTK"}
+                onClick={() => void captureNextRtkEndpoint()}
+              >{rtkButtonLabel}</button>
+              <button
+                type="button"
                 className="button task-stop-button"
                 disabled={
                   !currentTask || controlSubmitting !== null ||
-                  !canStop || activeControlTaskId !== currentTask.taskId
+                  !canStop || activeControlTaskId !== currentTask.taskId ||
+                  taskBusy
                 }
                 onClick={stopTask}
               >{controlSubmitting === "stop" ? "正在停止" : "停止"}</button>
@@ -1258,6 +1343,11 @@ function Dashboard({
                   disabled={controlSubmitting !== null}
                   onClick={recoverTask}
                 >{controlSubmitting === "recover" ? "正在恢复" : "恢复控制"}</button>
+              )}
+              {rtkCaptureMessage && (
+                <div className="task-operation-actions__message task-operation-actions__message--rtk" role="status">
+                  {rtkCaptureMessage}
+                </div>
               )}
               {(controlError || (!controlAvailable && currentTask?.status === "待执行")) && (
                 <div className="task-operation-actions__message" role={controlError ? "alert" : "status"}>

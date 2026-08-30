@@ -53,20 +53,17 @@ type DragState = {
 type HoverPoint = {
   x: number;
   y: number;
-  sample: ClearanceSample;
-};
-
-const PLOT = {
-  left: 72,
-  right: 28,
-  top: 30,
-  bottom: 52,
+  heightM: number;
+  timestampMs: number;
+  horizontal: "left" | "center" | "right";
+  vertical: "above" | "below";
 };
 
 const formatTimestamp = (timestampMs: number) => {
   const date = new Date(timestampMs);
   return date.toLocaleTimeString("zh-CN", {
-    hour12: false,
+    timeZone: "Asia/Shanghai",
+    hourCycle: "h23",
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
@@ -77,7 +74,8 @@ const formatTimestamp = (timestampMs: number) => {
 const formatAxisTime = (timestampMs: number) => {
   const date = new Date(timestampMs);
   return date.toLocaleTimeString("zh-CN", {
-    hour12: false,
+    timeZone: "Asia/Shanghai",
+    hourCycle: "h23",
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
@@ -95,6 +93,7 @@ export default function InteractiveClearanceChart({
   emptyDescription,
 }: InteractiveClearanceChartProps) {
   const chartRef = useRef<HTMLDivElement>(null);
+  const plotRef = useRef<SVGSVGElement>(null);
   const dragRef = useRef<DragState | null>(null);
   const dragFrameRef = useRef<number | null>(null);
   const pendingDragViewRef = useRef<NormalizedViewWindow | null>(null);
@@ -211,47 +210,66 @@ export default function InteractiveClearanceChart({
   };
 
   const plotMetrics = () => {
-    const rect = chartRef.current?.getBoundingClientRect();
-    if (!rect) return null;
-    const width = Math.max(1, rect.width - PLOT.left - PLOT.right);
-    const height = Math.max(1, rect.height - PLOT.top - PLOT.bottom);
-    return { rect, width, height };
+    const chart = chartRef.current;
+    const plot = plotRef.current;
+    if (!chart || !plot) return null;
+    const rect = chart.getBoundingClientRect();
+    const plotRect = plot.getBoundingClientRect();
+    const left = plotRect.left - rect.left - chart.clientLeft;
+    const top = plotRect.top - rect.top - chart.clientTop;
+    return {
+      rect,
+      plotRect,
+      left,
+      top,
+      width: Math.max(1, plotRect.width),
+      height: Math.max(1, plotRect.height),
+    };
   };
 
-  const pointerToPlotRatio = (clientX: number) => {
-    const metrics = plotMetrics();
-    if (!metrics) return 0.5;
-    return clampChartValue((clientX - metrics.rect.left - PLOT.left) / metrics.width, 0, 1);
-  };
-
-  const updateHover = (clientX: number) => {
+  const updateHover = (clientX: number, clientY: number) => {
     if (!hasData || dragging || visibleSamples.length === 0) return;
     const metrics = plotMetrics();
     if (!metrics) return;
 
-    const ratio = pointerToPlotRatio(clientX);
-    const targetTime = windowStart + (windowEnd - windowStart) * ratio;
-    let nearest = visibleSamples[0];
-    let nearestDistance = Math.abs(nearest.timestampMs - targetTime);
-
-    visibleSamples.forEach((sample) => {
-      const distance = Math.abs(sample.timestampMs - targetTime);
-      if (distance < nearestDistance) {
-        nearest = sample;
-        nearestDistance = distance;
+    const mouseX = clientX - metrics.rect.left - chartRef.current!.clientLeft;
+    const mouseY = clientY - metrics.rect.top - chartRef.current!.clientTop;
+    let best: HoverPoint | null = null;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    for (let index = 1; index < visibleSamples.length; index += 1) {
+      const left = visibleSamples[index - 1];
+      const right = visibleSamples[index];
+      if (!left.valid || !right.valid || left.heightM === null || right.heightM === null) continue;
+      const x1 = metrics.left + (xToPercent(left.timestampMs) / 100) * metrics.width;
+      const y1 = metrics.top + (yToPercent(left.heightM) / 100) * metrics.height;
+      const x2 = metrics.left + (xToPercent(right.timestampMs) / 100) * metrics.width;
+      const y2 = metrics.top + (yToPercent(right.heightM) / 100) * metrics.height;
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      const denominator = dx * dx + dy * dy;
+      const projection = denominator <= 0 ? 0 : clampChartValue(
+        ((mouseX - x1) * dx + (mouseY - y1) * dy) / denominator,
+        0,
+        1,
+      );
+      const x = x1 + projection * dx;
+      const y = y1 + projection * dy;
+      if (x < metrics.left || x > metrics.left + metrics.width || y < metrics.top || y > metrics.top + metrics.height) continue;
+      const distance = Math.hypot(mouseX - x, mouseY - y);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = {
+          x,
+          y,
+          heightM: left.heightM + projection * (right.heightM - left.heightM),
+          timestampMs: left.timestampMs + projection * (right.timestampMs - left.timestampMs),
+          horizontal: x < metrics.left + 80 ? "right" :
+            x > metrics.left + metrics.width - 80 ? "left" : "center",
+          vertical: y < metrics.top + 70 ? "below" : "above",
+        };
       }
-    });
-
-    if (!nearest.valid || nearest.heightM === null) {
-      setHover(null);
-      return;
     }
-
-    setHover({
-      x: PLOT.left + (xToPercent(nearest.timestampMs) / 100) * metrics.width,
-      y: PLOT.top + (yToPercent(nearest.heightM) / 100) * metrics.height,
-      sample: nearest,
-    });
+    setHover(bestDistance <= 14 ? best : null);
   };
 
   useEffect(() => {
@@ -268,10 +286,10 @@ export default function InteractiveClearanceChart({
         );
         return;
       }
-      const rect = chart.getBoundingClientRect();
-      const plotWidth = Math.max(1, rect.width - PLOT.left - PLOT.right);
+      const plotRect = plotRef.current?.getBoundingClientRect();
+      if (!plotRect) return;
       const anchor = clampChartValue(
-        (event.clientX - rect.left - PLOT.left) / plotWidth,
+        (event.clientX - plotRect.left) / Math.max(1, plotRect.width),
         0,
         1,
       );
@@ -339,7 +357,7 @@ export default function InteractiveClearanceChart({
   const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) {
-      updateHover(event.clientX);
+      updateHover(event.clientX, event.clientY);
       return;
     }
 
@@ -436,7 +454,7 @@ export default function InteractiveClearanceChart({
         onDoubleClick={resetView}
         onKeyDown={handleKeyDown}
       >
-        <svg className="interactive-clearance-chart__svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+        <svg ref={plotRef} className="interactive-clearance-chart__svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
           <defs>
             <clipPath id="clearance-chart-clip">
               <rect x="0" y="0" width="100" height="100" />
@@ -490,11 +508,14 @@ export default function InteractiveClearanceChart({
         )}
 
         {hover && (
-          <div className="interactive-clearance-chart__hover" style={{ left: hover.x, top: hover.y }}>
+          <div
+            className={`interactive-clearance-chart__hover is-${hover.horizontal} is-${hover.vertical}`}
+            style={{ left: hover.x, top: hover.y }}
+          >
             <i />
             <div>
-              <strong>{hover.sample.heightM?.toFixed(3)} m</strong>
-              <span>{formatTimestamp(hover.sample.timestampMs)}</span>
+              <strong>{hover.heightM.toFixed(3)} m</strong>
+              <span>{formatTimestamp(hover.timestampMs)}</span>
             </div>
           </div>
         )}

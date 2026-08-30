@@ -17,7 +17,7 @@ type TaskApiResponse = {
   lidar_mount_height_m: number | null; clearance_threshold_m: number | null; clearance_upper_limit_m: number | null; schema_version: number;
 };
 
-const operationPhases = new Set<TaskOperationPhase>(["idle","radar_initializing","entry_rtk_capture","recorder_preparing","recording","pausing","paused","resuming","stop_requested","exit_rtk_capture","finalizing","completed","interrupted","failed"]);
+const operationPhases = new Set<TaskOperationPhase>(["idle","radar_initializing","entry_rtk_capture","recorder_preparing","recording","pausing","paused","resuming","stop_requested","exit_rtk_capture","awaiting_exit_rtk","finalizing","completed","interrupted","failed"]);
 const rtkCaptureStatuses = new Set<RtkCaptureStatus>(["not_requested","pending","confirmed","unconfirmed"]);
 const statusLabels: Record<TaskApiStatus, CollectionTask["status"]> = { pending:"待执行", running:"采集中", paused:"已暂停", completed:"已停止", interrupted:"异常中断", failed:"失败" };
 
@@ -73,5 +73,5 @@ export const createTaskBatch=async(drafts:TaskCreateDraft[],idempotencyKey:strin
 
 export const deleteTask=async(taskId:string):Promise<void>=>{const response=await fetch(`/api/v1/tasks/${encodeURIComponent(taskId)}`,{method:"DELETE",headers:{Accept:"application/json"}});if(!response.ok)throw new TaskApiError(await readErrorMessage(response),response.status);};
 
-export type DeleteSelectedTasksResult={deletedTaskCount:number;taskIds:string[]};
-export const deleteSelectedTasks=async(taskIds:string[]):Promise<DeleteSelectedTasksResult>=>{const payload=await requestJson("/api/v1/tasks/delete-selected",{method:"POST",headers:{Accept:"application/json","Content-Type":"application/json"},body:JSON.stringify({task_ids:taskIds})});if(!isObject(payload)||!Array.isArray(payload.task_ids))throw new TaskApiError("批量删除任务接口返回无效对象");return {deletedTaskCount:readNumber(payload.deleted_task_count,"deleted_task_count"),taskIds:payload.task_ids.map((item,index)=>readString(item,`task_ids.${index}`))};};
+export type DeleteSelectedTasksResult={deletedTaskCount:number;releasedBytes:number;taskIds:string[]};
+export const deleteSelectedTasks=async(taskIds:string[]):Promise<DeleteSelectedTasksResult>=>{const payload=await requestJson("/api/v1/tasks/delete-selected",{method:"POST",headers:{Accept:"application/json","Content-Type":"application/json"},body:JSON.stringify({task_ids:taskIds})});if(!isObject(payload)||!Array.isArray(payload.task_ids))throw new TaskApiError("批量删除任务接口返回无效对象");return {deletedTaskCount:readNumber(payload.deleted_task_count,"deleted_task_count"),releasedBytes:readNumber(payload.released_bytes,"released_bytes"),taskIds:payload.task_ids.map((item,index)=>readString(item,`task_ids.${index}`))};};

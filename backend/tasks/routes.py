@@ -441,9 +441,10 @@ def get_task_measurements(task_id: str, request: Request) -> MeasurementHistoryR
 @router.post("/delete-selected", response_model=TaskDeleteManyResponse)
 def delete_selected_tasks(payload: TaskDeleteManyRequest, request: Request) -> TaskDeleteManyResponse:
     try:
-        records = _repository(request).soft_delete_tasks(payload.task_ids)
+        records, released_bytes = _repository(request).delete_tasks_and_data(payload.task_ids)
         return TaskDeleteManyResponse(
             deleted_task_count=len(records),
+            released_bytes=released_bytes,
             task_ids=[record.task_id for record in records],
         )
     except TaskNotFoundError as error:
@@ -487,7 +488,7 @@ def get_task(task_id: str, request: Request) -> TaskResponse:
 @router.delete("/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_task(task_id: str, request: Request) -> Response:
     try:
-        _repository(request).soft_delete_task(task_id)
+        _repository(request).delete_tasks_and_data([task_id])
         return Response(status_code=status.HTTP_204_NO_CONTENT)
     except TaskNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务不存在") from error

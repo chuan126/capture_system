@@ -11,11 +11,32 @@ tools/                      # 标定、分析、仿真和导出工具根目录
 ├── analysis/                # MCAP、轨迹、净空和诊断分析
 ├── simulation/              # 合成数据与故障注入
 └── export/                  # PCD、PLY、LAS、CSV 和报告导出
+    └── organize_runtime_tasks.py # 按日期整理正式任务和元数据副本
 ```
 
 工具可以读取任务数据，但默认不得原地修改原始 MCAP、配置快照或标定结果。
 导出格式是派生数据，不能替代原始记录。可复用的核心算法应放进对应 ROS 2 包的
 库中，工具调用该库，避免形成第二套算法实现。
+
+## 正式任务整理
+
+`organize_runtime_tasks.py`只读打开中央索引和每任务SQLite数据库，使用SQLite备份接口
+生成包含WAL已提交内容的一致副本，按网页显示编号的本地日期分组。原始`runtime`保持不变，
+`dev-tests`和MCAP不会进入整理结果。输出目录必须不存在，避免覆盖既有整理结果。
+
+```bash
+python3 tools/export/organize_runtime_tasks.py \
+  /path/to/runtime \
+  /path/to/runtime_整理结果
+```
+
+在Windows PowerShell中可直接传入盘符路径：
+
+```powershell
+python tools/export/organize_runtime_tasks.py `
+  "E:\Project\capture-system\集美隧道测试\runtime" `
+  "E:\Project\capture-system\集美隧道测试\runtime_整理结果"
+```
 
 ## 回放界面测试数据
 

@@ -112,3 +112,17 @@ def test_build_guard_explains_how_to_stop_autostart_before_ros_rebuild() -> None
     assert 'systemctl is-active --quiet capture-system.service' in source
     assert 'scripts/operation/stop_capture_system.sh' in source
     assert '不会关闭下次开机自启' in source
+
+
+def test_workspace_build_repairs_stale_rosidl_python_directory() -> None:
+    source = (BUILD_DIR / "build.sh").read_text()
+    function = source[
+        source.index("repair_interfaces_python_symlink_conflict()") : source.index("clean_all()")
+    ]
+    workspace = source[source.index("build_workspace()") : source.index("backend_fingerprint()")]
+
+    assert 'ament_cmake_python/interfaces/interfaces' in function
+    assert '[[ -d "$link_path" && ! -L "$link_path" ]]' in function
+    assert 'rm -rf -- "$link_path"' in function
+    assert "repair_interfaces_python_symlink_conflict" in workspace
+    assert workspace.index("repair_interfaces_python_symlink_conflict") < workspace.index("colcon build")

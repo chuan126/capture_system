@@ -14,6 +14,7 @@ from backend.exports.deepseek_report import (
     DeepSeekReportError,
     DeepSeekReportService,
     _parse_completion,
+    _strip_rtk_sentences,
 )
 from backend.exports import deepseek_report as deepseek_report_module
 from backend.exports import deepseek_payload as deepseek_payload_module
@@ -35,6 +36,16 @@ from backend.tests.test_report_export_api import (
 )
 
 HEIGHT_BOUNDS = {"clearance_threshold_m": 0.0, "clearance_upper_limit_m": 20.0}
+
+
+def test_deepseek_visible_analysis_removes_rtk_sentences_but_keeps_clearance_conclusion() -> None:
+    value = "最低净空为5.18米。RTK无效，卫星数量不足。建议复核连续低值。"
+    filtered = _strip_rtk_sentences(value)
+
+    assert "最低净空为5.18米" in filtered
+    assert "建议复核连续低值" in filtered
+    assert "RTK" not in filtered
+    assert "卫星" not in filtered
 
 
 def test_measurements_db_is_reduced_to_a_bounded_source_frame_audit_package(
@@ -72,7 +83,9 @@ def test_measurements_db_is_reduced_to_a_bounded_source_frame_audit_package(
     assert len(payload["lowest_20_real_frames"]) == 3
     assert len(payload["candidate_contexts"]) <= 3
     assert payload["data_quality"]["imu_samples"]["rows"] == 2
+    assert "rtk" not in json.dumps(payload, ensure_ascii=False).lower()
     assert "database_path" not in payload["task"]
+    assert result.source_minimum_m == 5.18
     assert result.byte_count < 100_000
 
 
@@ -395,6 +408,8 @@ def test_deepseek_report_uses_one_database_request_and_generates_pdf(tmp_path: P
     assert analysis_payload["format"] == "capture-clearance-audit-v2"
     assert analysis_payload["data_quality"]["clearance_samples"]["rows"] == 4
     assert captured["local_summary"]["task_sequence"] == task.display_id
+    assert "entry_rtk" not in captured["local_summary"]
+    assert "exit_rtk" not in captured["local_summary"]
     assert captured["local_summary"]["skill_prompt"].startswith("数据库=")
     assert generated.export_format == "deepseek_pdf"
     assert generated.path.name.endswith("_大模型辅助分析报告.pdf")
@@ -479,6 +494,92 @@ def test_deepseek_report_keeps_task_when_height_range_has_no_minimum(tmp_path: P
     manifest = json.loads((generated.path.parent / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["analysis"]["raw_minimum_m"] is None
     assert manifest["analysis"]["effective_minimum_m"] is None
+
+
+def test_deepseek_report_validates_against_its_source_frames_not_local_pdf_minimum(tmp_path: Path) -> None:
+    data_root = tmp_path / "runtime"
+
+    class EchoSourceMinimumClient:
+        def analyze(self, analysis_json: str, _local_summary: dict[str, object]) -> DeepSeekCompletion:
+            payload = json.loads(analysis_json)
+            minimum = payload["source_frame_statistics"]["raw_min_m"]
+            return DeepSeekCompletion(
+                response_id="response-source-tail",
+                model="deepseek-v4-flash",
+                finish_reason="stop",
+                usage={},
+                analysis=DeepSeekAnalysis(
+                    report_analysis="真实源帧最低值已按设备统计原样返回。",
+                    data_quality_analysis="停止尾帧已纳入分析。",
+                    effective_minimum_m=minimum,
+                    raw_minimum_m=minimum,
+                    confidence_score=80,
+                ),
+            )
+
+    task_repository = TaskRepository(data_root / "capture.db", data_root / "tasks")
+    task_repository.initialize()
+    created = task_repository.create_tasks([
+        TaskCreateRequest(tunnel_code="AI-SOURCE-TAIL", tunnel_name="大模型尾帧测试隧道")
+    ])[0]
+    relative_path = f"{created.task_id}/measurements.db"
+    database_path = data_root / "tasks" / relative_path
+    create_measurement_database(database_path, created.task_id)
+    with sqlite3.connect(database_path) as connection:
+        connection.execute("ALTER TABLE recording_metadata ADD COLUMN lidar_mount_height_m REAL")
+        connection.execute("UPDATE recording_metadata SET lidar_mount_height_m=2.35 WHERE id=1")
+        connection.execute(
+            """
+            CREATE TABLE clearance_source_frames (
+                source_sequence INTEGER PRIMARY KEY,
+                source_timestamp_ns INTEGER NOT NULL,
+                valid INTEGER NOT NULL,
+                lidar_to_top_m REAL
+            )
+            """
+        )
+        connection.executemany(
+            "INSERT INTO clearance_source_frames VALUES (?, ?, ?, ?)",
+            [
+                (100, 1_785_978_000_000_000_000, 1, 2.85),
+                (101, 1_785_978_000_100_000_000, 1, 2.83),
+                (102, 1_785_978_000_200_000_000, 1, 2.80),
+            ],
+        )
+    with sqlite3.connect(data_root / "capture.db") as connection:
+        connection.execute(
+            """
+            UPDATE tasks SET status='completed', operation_phase='completed', has_measurements=1,
+                recording_path=?, started_at='2026-08-06T01:00:00Z',
+                completed_at='2026-08-06T01:00:00.060Z' WHERE task_id=?
+            """,
+            (relative_path, created.task_id),
+        )
+    task = task_repository.get_task(created.task_id)
+    measurement_repository = MeasurementRepository(data_root / "tasks")
+    report_service = ReportExportService(
+        data_root, task_repository, measurement_repository, pdf_font_path=PDF_FONT,
+    )
+    assessment = report_service.assess_task(task)
+    assert assessment.normal_height_statistics is not None
+    assert assessment.normal_height_statistics.minimum_height_m == 5.18
+
+    service = DeepSeekReportService(
+        data_root,
+        report_service,
+        measurement_repository,
+        pdf_font_path=PDF_FONT,
+        client_factory=lambda _api_key, _model: EchoSourceMinimumClient(),
+    )
+    generated = service.generate(
+        task,
+        "sk-source-tail",
+        "deepseek-v4-flash",
+        skill_prompt="分析真实源帧。",
+    )
+
+    manifest = json.loads((generated.path.parent / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["analysis"]["raw_minimum_m"] == 5.15
 
 
 def test_deepseek_report_endpoint_creates_a_new_job_with_display_key(tmp_path: Path) -> None:

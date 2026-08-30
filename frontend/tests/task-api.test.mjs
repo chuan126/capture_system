@@ -135,14 +135,14 @@ test("keeps batch creation only as a compatibility API", async () => {
   }
 });
 
-test("deletes selected tasks through one FastAPI transaction endpoint", async () => {
+test("permanently deletes selected tasks through one FastAPI endpoint", async () => {
   const originalFetch = globalThis.fetch;
   let capturedInput;
   let capturedInit;
   globalThis.fetch = async (input, init) => {
     capturedInput = input;
     capturedInit = init;
-    return jsonResponse({ deleted_task_count: 1, task_ids: [apiTask.task_id] });
+    return jsonResponse({ deleted_task_count: 1, released_bytes: 2048, task_ids: [apiTask.task_id] });
   };
   try {
     const result = await deleteSelectedTasks([apiTask.task_id]);
@@ -150,6 +150,7 @@ test("deletes selected tasks through one FastAPI transaction endpoint", async ()
     assert.equal(capturedInit.method, "POST");
     assert.deepEqual(JSON.parse(capturedInit.body), { task_ids: [apiTask.task_id] });
     assert.equal(result.deletedTaskCount, 1);
+    assert.equal(result.releasedBytes, 2048);
   } finally {
     globalThis.fetch = originalFetch;
   }

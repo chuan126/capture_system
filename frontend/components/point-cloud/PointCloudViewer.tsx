@@ -6,6 +6,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
 import { PCV1_MAX_POINTS } from "./cloudPreviewProtocol";
 import type { CloudPreviewFrame } from "./cloudPreviewProtocol";
+import { mapSensorPointToDisplay } from "./pointCloudCoordinates";
 import { useCloudPreviewSocket } from "./useCloudPreviewSocket";
 
 type ViewerResources = {
@@ -68,7 +69,17 @@ export default function PointCloudViewer({
     if (!resources) return;
 
     const target = resources.positionAttribute.array as Float32Array;
-    target.set(frame.positions, 0);
+    for (let index = 0; index < frame.pointCount; index += 1) {
+      const offset = index * 3;
+      const [x, y, z] = mapSensorPointToDisplay(
+        frame.positions[offset],
+        frame.positions[offset + 1],
+        frame.positions[offset + 2],
+      );
+      target[offset] = x;
+      target[offset + 1] = y;
+      target[offset + 2] = z;
+    }
     resources.positionAttribute.needsUpdate = true;
     const colors = resources.colorAttribute.array as Float32Array;
     if (frame.colors) colors.set(frame.colors, 0);
@@ -111,12 +122,12 @@ export default function PointCloudViewer({
       scene.background = new THREE.Color(0xf5f8fc);
       scene.fog = new THREE.FogExp2(0xf5f8fc, 0.01);
       const rawSceneRoot = new THREE.Group();
-      rawSceneRoot.name = "lidar-raw-xyz";
+      rawSceneRoot.name = "display-x-neg-y-neg-z";
       scene.add(rawSceneRoot);
 
       const camera = new THREE.PerspectiveCamera(48, 1, 0.01, 2_000);
-      camera.up.set(1, 0, 0);
-      camera.position.set(8, -12, 12);
+      camera.up.set(0, 0, 1);
+      camera.position.set(8, -12, 8);
 
       const positions = new Float32Array(PCV1_MAX_POINTS * 3);
       const positionAttribute = new THREE.BufferAttribute(positions, 3);
@@ -139,7 +150,7 @@ export default function PointCloudViewer({
       rawSceneRoot.add(points);
 
       const grid = new THREE.GridHelper(100, 100, 0x9fb8d8, 0xd8e2ef);
-      grid.rotation.z = Math.PI / 2;
+      grid.rotation.x = Math.PI / 2;
       grid.material.transparent = true;
       grid.material.opacity = 0.68;
       rawSceneRoot.add(grid);
@@ -157,7 +168,7 @@ export default function PointCloudViewer({
       const controls = new OrbitControls(camera, renderer.domElement);
       controls.enableDamping = false;
       controls.screenSpacePanning = true;
-      controls.target.set(3, 1, 1);
+      controls.target.set(0, 3, 0);
 
       const render = () => {
         animationFrame = null;
@@ -192,7 +203,7 @@ export default function PointCloudViewer({
         camera.position.set(
           center.x + distance * 0.75,
           center.y - distance,
-          center.z + distance,
+          center.z + distance * 0.65,
         );
         controls.target.copy(center);
         controls.update();

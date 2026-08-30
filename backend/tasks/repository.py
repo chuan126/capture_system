@@ -453,6 +453,85 @@ class TaskRepository:
         finally:
             connection.close()
 
+    def delete_tasks_and_data(
+        self, task_ids: Sequence[str], *, reason: str = "user_request"
+    ) -> tuple[list[TaskRecord], int]:
+        """删除任务本地目录，同时保留带清理审计字段的中央任务索引。"""
+        self._ensure_initialized()
+        identifiers = list(dict.fromkeys(task_ids))
+        if not identifiers:
+            raise ValueError("至少需要一个任务ID")
+        connection = self._connect()
+        released_bytes = 0
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            placeholders = ",".join("?" for _ in identifiers)
+            rows = connection.execute(
+                f"SELECT {_TASK_SELECT_COLUMNS} {_TASK_JOIN} WHERE tasks.task_id IN ({placeholders}) AND tasks.deleted_at IS NULL",
+                identifiers,
+            ).fetchall()
+            row_by_id = {row["task_id"]: row for row in rows}
+            missing = [task_id for task_id in identifiers if task_id not in row_by_id]
+            if missing:
+                raise TaskNotFoundError(missing[0])
+            blocked = [
+                task_id
+                for task_id in identifiers
+                if row_by_id[task_id]["status"] in {"running", "paused"}
+                or row_by_id[task_id]["active_slot"] is not None
+            ]
+            if blocked:
+                raise TaskDeleteConflictError("采集中或已暂停的任务不能删除，请先正常结束任务")
+
+            # 全部任务通过状态和路径检查后才开始删除，避免活动任务导致部分清理。
+            directories: dict[str, Path] = {}
+            sizes: dict[str, int] = {}
+            tasks_directory = self.tasks_directory.resolve()
+            for task_id in identifiers:
+                directory = (self.tasks_directory / task_id).resolve()
+                try:
+                    directory.relative_to(tasks_directory)
+                except ValueError as error:
+                    raise TaskStorageError("任务数据目录超出配置的数据根目录") from error
+                directories[task_id] = directory
+                sizes[task_id] = _directory_size(directory)
+
+            for task_id in identifiers:
+                directory = directories[task_id]
+                if directory.exists():
+                    try:
+                        shutil.rmtree(directory)
+                    except OSError as error:
+                        raise TaskStorageError(f"删除任务 {task_id} 本地数据失败：{error}") from error
+                released_bytes += sizes[task_id]
+
+            now = _utc_now_text()
+            for task_id in identifiers:
+                connection.execute(
+                    """
+                    UPDATE tasks
+                    SET deleted_at=?, delete_reason=?, has_measurements=0, recording_path=NULL,
+                        local_data_purged_at=?, purged_bytes=COALESCE(purged_bytes,0)+?, updated_at=?
+                    WHERE task_id=? AND deleted_at IS NULL
+                    """,
+                    (now, reason, now, sizes[task_id], now, task_id),
+                )
+            deleted_rows = connection.execute(
+                f"SELECT {_TASK_SELECT_COLUMNS} {_TASK_JOIN} WHERE tasks.task_id IN ({placeholders})",
+                identifiers,
+            ).fetchall()
+            deleted_by_id = {row["task_id"]: self._row_to_record(row) for row in deleted_rows}
+            connection.commit()
+            return [deleted_by_id[task_id] for task_id in identifiers], released_bytes
+        except (TaskNotFoundError, TaskDeleteConflictError, TaskStorageError):
+            connection.rollback()
+            raise
+        except (OSError, sqlite3.Error) as error:
+            connection.rollback()
+            raise TaskStorageError(f"删除任务及本地数据失败：{error}") from error
+        finally:
+            connection.close()
+
     def purge_task_data(self, task_ids: Sequence[str]) -> tuple[list[str], int]:
         self._ensure_initialized()
         identifiers = list(dict.fromkeys(task_ids))

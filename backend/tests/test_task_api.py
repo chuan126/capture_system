@@ -1,5 +1,6 @@
 from pathlib import Path
 import re
+import sqlite3
 
 from fastapi.testclient import TestClient
 
@@ -180,6 +181,14 @@ def test_delete_task_hides_it_from_all_normal_queries(tmp_path: Path) -> None:
             "/api/v1/tasks",
             json={"tunnel_code": "T-201", "tunnel_name": "待删除任务"},
         ).json()
+        first_directory = data_root / "tasks" / first["task_id"]
+        first_directory.mkdir(parents=True)
+        (first_directory / "measurements.db").write_bytes(b"measurement" * 128)
+        with sqlite3.connect(data_root / "capture.db") as connection:
+            connection.execute(
+                "UPDATE tasks SET status='completed', has_measurements=1, recording_path=? WHERE task_id=?",
+                (f"{first['task_id']}/measurements.db", first["task_id"]),
+            )
         second = client.post(
             "/api/v1/tasks",
             json={"tunnel_code": "T-202", "tunnel_name": "保留任务"},
@@ -193,6 +202,7 @@ def test_delete_task_hides_it_from_all_normal_queries(tmp_path: Path) -> None:
         ).json()
 
     assert deleted.status_code == 204
+    assert not first_directory.exists()
     assert [task["task_id"] for task in listed.json()] == [second["task_id"]]
     assert missing.status_code == 404
     assert third["sequence"] == 3
@@ -230,13 +240,29 @@ def test_delete_selected_tasks_is_one_transaction_and_hides_all_selected(tmp_pat
         first = client.post("/api/v1/tasks", json={"tunnel_code": "T-301", "tunnel_name": "批量删除一"}).json()
         second = client.post("/api/v1/tasks", json={"tunnel_code": "T-302", "tunnel_name": "批量删除二"}).json()
         third = client.post("/api/v1/tasks", json={"tunnel_code": "T-303", "tunnel_name": "保留任务"}).json()
+        first_directory = data_root / "tasks" / first["task_id"]
+        second_directory = data_root / "tasks" / second["task_id"]
+        first_directory.mkdir(parents=True)
+        second_directory.mkdir(parents=True)
+        (first_directory / "measurements.db").write_bytes(b"a" * 2048)
+        (second_directory / "measurements.db").write_bytes(b"b" * 4096)
         response = client.post("/api/v1/tasks/delete-selected", json={"task_ids": [first["task_id"], second["task_id"]]})
         listed = client.get("/api/v1/tasks").json()
 
     assert response.status_code == 200
     assert response.json()["deleted_task_count"] == 2
+    assert response.json()["released_bytes"] == 6144
     assert response.json()["task_ids"] == [first["task_id"], second["task_id"]]
     assert [task["task_id"] for task in listed] == [third["task_id"]]
+    assert not first_directory.exists()
+    assert not second_directory.exists()
+    repository = TaskRepository(data_root / "capture.db", data_root / "tasks")
+    first_deleted = repository.get_task(first["task_id"], include_deleted=True)
+    second_deleted = repository.get_task(second["task_id"], include_deleted=True)
+    assert first_deleted.local_data_purged_at is not None
+    assert second_deleted.local_data_purged_at is not None
+    assert first_deleted.purged_bytes == 2048
+    assert second_deleted.purged_bytes == 4096
 
 
 def test_delete_selected_tasks_rolls_back_when_one_task_is_active(tmp_path: Path) -> None:
@@ -249,6 +275,9 @@ def test_delete_selected_tasks_rolls_back_when_one_task_is_active(tmp_path: Path
     with TestClient(create_app(static_dir, data_root=data_root, start_ros_bridge=False)) as client:
         first = client.post("/api/v1/tasks", json={"tunnel_code": "T-311", "tunnel_name": "应保留"}).json()
         second = client.post("/api/v1/tasks", json={"tunnel_code": "T-312", "tunnel_name": "活动任务"}).json()
+        first_directory = data_root / "tasks" / first["task_id"]
+        first_directory.mkdir(parents=True)
+        (first_directory / "measurements.db").write_bytes(b"must remain")
         with sqlite3.connect(data_root / "capture.db") as connection:
             connection.execute("UPDATE tasks SET status='running' WHERE task_id=?", (second["task_id"],))
         response = client.post("/api/v1/tasks/delete-selected", json={"task_ids": [first["task_id"], second["task_id"]]})
@@ -256,6 +285,7 @@ def test_delete_selected_tasks_rolls_back_when_one_task_is_active(tmp_path: Path
 
     assert response.status_code == 409
     assert {task["task_id"] for task in listed} == {first["task_id"], second["task_id"]}
+    assert (first_directory / "measurements.db").read_bytes() == b"must remain"
 
 
 def test_task_creation_without_batch_input_generates_time_identifier(tmp_path: Path) -> None:
@@ -306,7 +336,7 @@ def test_legacy_batch_mode_field_is_rejected_from_task_creation(tmp_path: Path) 
     assert tasks == []
 
 
-def test_purge_task_data_accepts_logically_deleted_task(tmp_path: Path) -> None:
+def test_purge_task_data_is_idempotent_after_frontend_delete(tmp_path: Path) -> None:
     import sqlite3
 
     static_dir = tmp_path / "site"
@@ -336,7 +366,7 @@ def test_purge_task_data_accepts_logically_deleted_task(tmp_path: Path) -> None:
     assert deleted.status_code == 204
     assert purge.status_code == 200
     assert purge.json()["removed_task_count"] == 1
-    assert purge.json()["released_bytes"] == 2048
+    assert purge.json()["released_bytes"] == 0
     assert not task_dir.exists()
 
     repository = TaskRepository(data_root / "capture.db", data_root / "tasks")

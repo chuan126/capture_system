@@ -6,6 +6,7 @@ import {
   parseCloudPreviewBinary,
   parseCloudPreviewText,
 } from "../components/point-cloud/cloudPreviewProtocol.ts";
+import { mapSensorPointToDisplay } from "../components/point-cloud/pointCloudCoordinates.ts";
 
 const viewerSource = fs.readFileSync(
   new URL("../components/point-cloud/PointCloudViewer.tsx", import.meta.url),
@@ -51,6 +52,26 @@ test("parses a valid PCV1 frame", () => {
   assert.equal(frame.sensorStampNs, 123n);
   assert.equal(frame.pointCount, 2);
   assert.equal(frame.positions.length, 6);
+});
+
+test("viewer remaps sensor XYZ only at display time", () => {
+  assert.match(viewerSource, /mapSensorPointToDisplay/);
+  const displayX = mapSensorPointToDisplay(0, -1, 0);
+  const displayY = mapSensorPointToDisplay(0, 0, -1);
+  const displayZ = mapSensorPointToDisplay(1, 0, 0);
+  assert.deepEqual(displayX, [1, 0, 0]);
+  assert.deepEqual(displayY, [0, 1, 0]);
+  assert.deepEqual(displayZ, [0, 0, 1]);
+  assert.deepEqual([
+    displayX[1] * displayY[2] - displayX[2] * displayY[1],
+    displayX[2] * displayY[0] - displayX[0] * displayY[2],
+    displayX[0] * displayY[1] - displayX[1] * displayY[0],
+  ], displayZ);
+  assert.match(viewerSource, /camera\.up\.set\(0, 0, 1\)/);
+  assert.match(viewerSource, /camera\.position\.set\(8, -12, 8\)/);
+  assert.match(viewerSource, /grid\.rotation\.x = Math\.PI \/ 2/);
+  assert.match(viewerSource, /center\.y - distance/);
+  assert.match(viewerSource, /center\.z \+ distance \* 0\.65/);
 });
 
 test("rejects truncated and oversized PCV1 frames", () => {

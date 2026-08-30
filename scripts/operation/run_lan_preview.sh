@@ -236,6 +236,10 @@ required_task_services=(
   /capture/task/resume
   /capture/task/stop
 )
+required_recorder_services=(
+  /capture/recording/prepare
+  /capture/recording/control
+)
 optional_task_services=(/capture/task/recover)
 task_control_ready=0
 for _ in {1..100}; do
@@ -244,6 +248,7 @@ for _ in {1..100}; do
     exit 1
   fi
   task_manager_info="$(ros2 node info /task_manager_node 2>/dev/null || true)"
+  data_recorder_info="$(ros2 node info /data_recorder_node 2>/dev/null || true)"
   task_manager_servers="$(
     awk '
       /Service Servers:/ { in_servers=1; next }
@@ -258,6 +263,12 @@ for _ in {1..100}; do
       break
     fi
   done
+  for service_name in "${required_recorder_services[@]}"; do
+    if ! grep -q -- "${service_name}:" <<<"${data_recorder_info}"; then
+      all_required_ready=0
+      break
+    fi
+  done
   if (( all_required_ready )); then
     task_control_ready=1
     break
@@ -265,7 +276,7 @@ for _ in {1..100}; do
   sleep 0.1
 done
 if (( ! task_control_ready )); then
-  print_error "核心任务控制Service在10秒内未全部就绪。"
+  print_error "任务控制或记录器Service在10秒内未全部就绪。"
   exit 1
 fi
 

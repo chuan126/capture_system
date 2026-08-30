@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cctype>
 #include <cstdlib>
 #include <ctime>
 #include <functional>
@@ -284,6 +285,18 @@ private:
     double track_degrees{0.0};
   };
 
+  struct StagedEntrySnapshot
+  {
+    std::int64_t requested_timestamp_ns{0};
+    bool coordinate_available{false};
+    std::int64_t coordinate_timestamp_ns{0};
+    double latitude_deg{0.0};
+    double longitude_deg{0.0};
+    std::optional<double> altitude_m;
+    std::string fix_type{"UNKNOWN"};
+    bool valid{false};
+  };
+
   struct ImuAccumulator
   {
     std::uint64_t count{0};
@@ -520,10 +533,17 @@ private:
 
       open_database();
       create_schema();
+      const auto staged_entry = load_staged_entry_snapshot(task_id_);
+      if (staged_entry.has_value()) {
+        entry_rtk_status_ = staged_entry->valid ? "confirmed" : "unconfirmed";
+      }
+      execute(database_, "BEGIN IMMEDIATE");
       insert_metadata();
+      if (staged_entry.has_value()) {
+        import_staged_entry_snapshot(*staged_entry);
+      }
+      execute(database_, "COMMIT");
       begin_transaction();
-      entry_rtk_status_ = capture_endpoint("entry", start_requested_ns_);
-      update_endpoint_status("entry_rtk_status", entry_rtk_status_);
       insert_event("recording_started", start_requested_ns_, "正式记录已启动", "");
 
       active_ = true;
@@ -532,9 +552,21 @@ private:
       response->recording_path = relative_recording_path();
       response->entry_rtk_status = entry_rtk_status_;
       response->error_code.clear();
-      response->message = entry_rtk_status_ == "confirmed" ?
-        "记录文件已创建，入口RTK已记录" :
-        "记录文件已创建，入口RTK坐标未确认，任务继续记录";
+      response->message = staged_entry.has_value() ?
+        "记录文件已创建，开始前入口RTK快照已载入；出口RTK由操作员手动记录" :
+        "记录文件已创建，入口和出口RTK由操作员手动记录";
+      if (staged_entry.has_value()) {
+        const auto staging_path = staged_entry_path(task_id_);
+        for (const auto * suffix : {"", "-wal", "-shm"}) {
+          std::error_code remove_error;
+          fs::remove(fs::path(staging_path.string() + suffix), remove_error);
+          if (remove_error) {
+            RCLCPP_WARN(
+              get_logger(), "入口RTK暂存文件已导入但清理失败（%s%s）：%s",
+              staging_path.c_str(), suffix, remove_error.message().c_str());
+          }
+        }
+      }
       publish_status("recording", response->message, "");
     } catch (const std::exception & error) {
       close_database_noexcept();
@@ -549,16 +581,46 @@ private:
     std::shared_ptr<interfaces::srv::RecordingCommand::Response> response)
   {
     std::lock_guard<std::mutex> lock(mutex_);
+    const auto requested_ns = request->requested_at_ns > 0 ? request->requested_at_ns : system_now_ns();
+    if (!active_ && request->command == "capture_entry_rtk") {
+      try {
+        capture_prestart_entry(request->task_id, requested_ns, *response);
+      } catch (const std::exception & error) {
+        reject_command(*response, "storage_error", error.what());
+      }
+      return;
+    }
+    if (!active_ && request->command == "capture_exit_rtk") {
+      try {
+        capture_poststop_exit(request->task_id, requested_ns, *response);
+      } catch (const std::exception & error) {
+        close_database_noexcept();
+        reset_session_state();
+        response->success = false;
+        response->recording_path = request->task_id + "/measurements.db";
+        response->rtk_status = "not_requested";
+        response->total_samples = 0;
+        response->valid_samples = 0;
+        response->invalid_samples = 0;
+        response->complete = true;
+        response->error_code = "storage_error";
+        response->message = error.what();
+      }
+      return;
+    }
     if (!active_ || request->task_id != task_id_) {
       reject_command(*response, "recorder_not_active", "指定任务当前未在记录");
       return;
     }
-    const auto requested_ns = request->requested_at_ns > 0 ? request->requested_at_ns : system_now_ns();
     try {
       if (request->command == "pause") {
         pause_recording(requested_ns, *response);
       } else if (request->command == "resume") {
         resume_recording(requested_ns, *response);
+      } else if (request->command == "capture_entry_rtk") {
+        capture_manual_endpoint("entry", requested_ns, *response);
+      } else if (request->command == "capture_exit_rtk") {
+        capture_manual_endpoint("exit", requested_ns, *response);
       } else if (request->command == "finalize") {
         finalize_recording(requested_ns, true, *response);
       } else if (request->command == "abort") {
@@ -570,6 +632,304 @@ private:
       handle_runtime_storage_error(error.what());
       reject_command(*response, "storage_error", error.what());
     }
+  }
+
+  static bool safe_task_id(const std::string & task_id)
+  {
+    return !task_id.empty() && task_id.size() <= 128U &&
+      std::all_of(task_id.begin(), task_id.end(), [](unsigned char character) {
+        return std::isalnum(character) != 0 || character == '-' || character == '_';
+      });
+  }
+
+  fs::path staged_entry_path(const std::string & task_id) const
+  {
+    if (!safe_task_id(task_id)) {
+      throw std::runtime_error("任务UUID格式无效");
+    }
+    return fs::path(data_root_) / "tasks" / task_id / "entry_rtk_snapshot.db";
+  }
+
+  void capture_prestart_entry(
+    const std::string & task_id, std::int64_t requested_ns,
+    interfaces::srv::RecordingCommand::Response & response)
+  {
+    const bool fresh = latest_fix_is_fresh();
+    StagedEntrySnapshot snapshot;
+    snapshot.requested_timestamp_ns = requested_ns;
+    snapshot.coordinate_available = latest_fix_.available;
+    snapshot.coordinate_timestamp_ns = latest_fix_.timestamp_ns;
+    snapshot.latitude_deg = latest_fix_.latitude_deg;
+    snapshot.longitude_deg = latest_fix_.longitude_deg;
+    snapshot.altitude_m = latest_fix_.altitude_m;
+    snapshot.fix_type = latest_fix_.fix_type;
+    snapshot.valid = latest_fix_.available && latest_fix_.valid && fresh;
+
+    const auto path = staged_entry_path(task_id);
+    fs::create_directories(path.parent_path());
+    sqlite3 * staging_database = nullptr;
+    try {
+      check_sqlite(
+        sqlite3_open_v2(
+          path.c_str(), &staging_database,
+          SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX, nullptr),
+        staging_database, "创建入口RTK暂存数据库失败");
+      execute(staging_database, "PRAGMA journal_mode=WAL");
+      execute(staging_database, "PRAGMA synchronous=FULL");
+      execute(staging_database, "PRAGMA busy_timeout=5000");
+      execute(
+        staging_database,
+        "CREATE TABLE IF NOT EXISTS entry_rtk_snapshot ("
+        "id INTEGER PRIMARY KEY CHECK(id=1), requested_timestamp_ns INTEGER NOT NULL, "
+        "coordinate_timestamp_ns INTEGER, latitude_deg REAL, longitude_deg REAL, "
+        "altitude_m REAL, fix_type TEXT, valid INTEGER NOT NULL CHECK(valid IN (0,1)))");
+      execute(staging_database, "BEGIN IMMEDIATE");
+      sqlite3_stmt * statement = nullptr;
+      check_sqlite(
+        sqlite3_prepare_v2(
+          staging_database,
+          "INSERT OR REPLACE INTO entry_rtk_snapshot ("
+          "id,requested_timestamp_ns,coordinate_timestamp_ns,latitude_deg,longitude_deg,"
+          "altitude_m,fix_type,valid) VALUES (1,?,?,?,?,?,?,?)",
+          -1, &statement, nullptr),
+        staging_database, "准备入口RTK暂存写入失败");
+      check_sqlite(
+        sqlite3_bind_int64(statement, 1, snapshot.requested_timestamp_ns),
+        staging_database, "绑定入口按钮时间失败");
+      if (snapshot.coordinate_available) {
+        check_sqlite(
+          sqlite3_bind_int64(statement, 2, snapshot.coordinate_timestamp_ns),
+          staging_database, "绑定入口坐标时间失败");
+        check_sqlite(
+          sqlite3_bind_double(statement, 3, snapshot.latitude_deg),
+          staging_database, "绑定入口纬度失败");
+        check_sqlite(
+          sqlite3_bind_double(statement, 4, snapshot.longitude_deg),
+          staging_database, "绑定入口经度失败");
+        bind_nullable_double(statement, 5, snapshot.altitude_m);
+        bind_text(statement, 6, snapshot.fix_type);
+      } else {
+        for (int index = 2; index <= 6; ++index) {
+          check_sqlite(
+            sqlite3_bind_null(statement, index), staging_database, "绑定入口空快照失败");
+        }
+      }
+      check_sqlite(
+        sqlite3_bind_int(statement, 7, snapshot.valid ? 1 : 0),
+        staging_database, "绑定入口快照有效性失败");
+      check_sqlite(sqlite3_step(statement), staging_database, "写入入口RTK暂存失败");
+      sqlite3_finalize(statement);
+      execute(staging_database, "COMMIT");
+      execute(staging_database, "PRAGMA wal_checkpoint(TRUNCATE)");
+      verify_recovery_integrity(staging_database);
+      sqlite3_close(staging_database);
+      staging_database = nullptr;
+    } catch (...) {
+      if (staging_database != nullptr) {
+        try {execute(staging_database, "ROLLBACK");} catch (...) {}
+        sqlite3_close(staging_database);
+      }
+      throw;
+    }
+
+    const std::string message = snapshot.valid ?
+      "入口RTK快照已在开始采集前记录（定位有效）" :
+      "入口RTK快照已在开始采集前记录（当前无有效定位）";
+    populate_command_success(
+      response, message, snapshot.valid ? "confirmed" : "unconfirmed", false);
+  }
+
+  void capture_poststop_exit(
+    const std::string & task_id, std::int64_t requested_ns,
+    interfaces::srv::RecordingCommand::Response & response)
+  {
+    task_id_ = task_id;
+    task_directory_ = fs::path(data_root_) / "tasks" / task_id_;
+    final_database_path_ = task_directory_ / "measurements.db";
+    if (!safe_task_id(task_id_) || !fs::is_regular_file(final_database_path_)) {
+      throw std::runtime_error("任务正式测量文件不存在，无法补录出口RTK");
+    }
+
+    // 只以读写方式打开现有正式文件，不携带CREATE标志，避免删除竞态下误建空库。
+    check_sqlite(
+      sqlite3_open_v2(
+        final_database_path_.c_str(), &database_,
+        SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX, nullptr),
+      database_, "打开已完成任务测量数据库失败");
+    execute(database_, "PRAGMA journal_mode=WAL");
+    execute(database_, "PRAGMA synchronous=FULL");
+    execute(database_, "PRAGMA foreign_keys=ON");
+    execute(database_, "PRAGMA busy_timeout=5000");
+    sqlite3_stmt * metadata = nullptr;
+    check_sqlite(
+      sqlite3_prepare_v2(
+        database_,
+        "SELECT task_id,complete,entry_rtk_status,exit_rtk_status "
+        "FROM recording_metadata WHERE id=1",
+        -1, &metadata, nullptr),
+      database_, "准备已完成任务元数据校验失败");
+    if (sqlite3_step(metadata) != SQLITE_ROW) {
+      sqlite3_finalize(metadata);
+      throw std::runtime_error("任务正式测量文件缺少元数据");
+    }
+    const auto * stored_task_id = reinterpret_cast<const char *>(sqlite3_column_text(metadata, 0));
+    const bool complete = sqlite3_column_int(metadata, 1) != 0;
+    const auto * entry_status = reinterpret_cast<const char *>(sqlite3_column_text(metadata, 2));
+    const auto * exit_status = reinterpret_cast<const char *>(sqlite3_column_text(metadata, 3));
+    entry_rtk_status_ = entry_status != nullptr ? entry_status : "not_requested";
+    exit_rtk_status_ = exit_status != nullptr ? exit_status : "not_requested";
+    const bool task_matches = stored_task_id != nullptr && task_id_ == stored_task_id;
+    sqlite3_finalize(metadata);
+    if (!task_matches || !complete) {
+      throw std::runtime_error("任务测量文件身份不匹配或尚未完成，拒绝补录出口RTK");
+    }
+
+    total_samples_ = static_cast<std::uint64_t>(recovery_scalar(
+      database_, "SELECT COALESCE(total_samples,0) FROM recording_counters WHERE id=1"));
+    valid_samples_ = static_cast<std::uint64_t>(recovery_scalar(
+      database_, "SELECT COALESCE(valid_samples,0) FROM recording_counters WHERE id=1"));
+    invalid_samples_ = static_cast<std::uint64_t>(recovery_scalar(
+      database_, "SELECT COALESCE(invalid_samples,0) FROM recording_counters WHERE id=1"));
+
+    execute(database_, "BEGIN IMMEDIATE");
+    transaction_open_ = true;
+    const auto previous_status = exit_rtk_status_;
+    const auto captured_status = capture_endpoint("exit", requested_ns);
+    exit_rtk_status_ = captured_status == "confirmed" || previous_status != "confirmed" ?
+      captured_status : previous_status;
+    update_endpoint_status("exit_rtk_status", exit_rtk_status_);
+    const std::string message = captured_status == "confirmed" ?
+      "出口RTK快照已在停止后记录（定位有效）" :
+      (previous_status == "confirmed" ?
+        "本次停止后出口RTK快照无效，已保留此前有效坐标" :
+        "出口RTK快照已在停止后记录（当前无有效定位）");
+    insert_event(
+      "exit_rtk_poststop_capture", requested_ns, message,
+      captured_status == "confirmed" ? "" : "invalid_fix");
+    execute(database_, "COMMIT");
+    transaction_open_ = false;
+    execute(database_, "PRAGMA wal_checkpoint(TRUNCATE)");
+    verify_integrity();
+
+    response.success = true;
+    response.recording_path = relative_recording_path();
+    response.rtk_status = exit_rtk_status_;
+    response.total_samples = total_samples_;
+    response.valid_samples = valid_samples_;
+    response.invalid_samples = invalid_samples_;
+    response.complete = true;
+    response.error_code.clear();
+    response.message = message;
+    publish_status("completed", message, "");
+    close_database_noexcept();
+    reset_session_state();
+  }
+
+  std::optional<StagedEntrySnapshot> load_staged_entry_snapshot(const std::string & task_id)
+  {
+    const auto path = staged_entry_path(task_id);
+    if (!fs::exists(path)) {
+      return std::nullopt;
+    }
+    sqlite3 * staging_database = nullptr;
+    sqlite3_stmt * statement = nullptr;
+    try {
+      check_sqlite(
+        sqlite3_open_v2(
+          path.c_str(), &staging_database,
+          SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX, nullptr),
+        staging_database, "打开入口RTK暂存数据库失败");
+      execute(staging_database, "PRAGMA busy_timeout=5000");
+      check_sqlite(
+        sqlite3_prepare_v2(
+          staging_database,
+          "SELECT requested_timestamp_ns,coordinate_timestamp_ns,latitude_deg,longitude_deg,"
+          "altitude_m,fix_type,valid FROM entry_rtk_snapshot WHERE id=1",
+          -1, &statement, nullptr),
+        staging_database, "准备读取入口RTK暂存失败");
+      if (sqlite3_step(statement) != SQLITE_ROW) {
+        throw std::runtime_error("入口RTK暂存数据库缺少快照记录");
+      }
+      StagedEntrySnapshot snapshot;
+      snapshot.requested_timestamp_ns = sqlite3_column_int64(statement, 0);
+      snapshot.coordinate_available = sqlite3_column_type(statement, 1) != SQLITE_NULL;
+      if (snapshot.coordinate_available) {
+        snapshot.coordinate_timestamp_ns = sqlite3_column_int64(statement, 1);
+        snapshot.latitude_deg = sqlite3_column_double(statement, 2);
+        snapshot.longitude_deg = sqlite3_column_double(statement, 3);
+        if (sqlite3_column_type(statement, 4) != SQLITE_NULL) {
+          snapshot.altitude_m = sqlite3_column_double(statement, 4);
+        }
+        const auto * fix_type = reinterpret_cast<const char *>(sqlite3_column_text(statement, 5));
+        snapshot.fix_type = fix_type != nullptr ? fix_type : "UNKNOWN";
+      }
+      snapshot.valid = sqlite3_column_int(statement, 6) != 0;
+      sqlite3_finalize(statement);
+      statement = nullptr;
+      sqlite3_close(staging_database);
+      return snapshot;
+    } catch (...) {
+      if (statement != nullptr) {
+        sqlite3_finalize(statement);
+      }
+      if (staging_database != nullptr) {
+        sqlite3_close(staging_database);
+      }
+      throw;
+    }
+  }
+
+  void import_staged_entry_snapshot(const StagedEntrySnapshot & snapshot)
+  {
+    sqlite3_stmt * event = nullptr;
+    check_sqlite(
+      sqlite3_prepare_v2(
+        database_,
+        "INSERT INTO event_rtk_snapshots (event_type,requested_timestamp_ns,"
+        "coordinate_timestamp_ns,latitude_deg,longitude_deg,altitude_m,fix_type,valid) "
+        "VALUES ('entry',?,?,?,?,?,?,?)",
+        -1, &event, nullptr),
+      database_, "准备导入入口RTK快照失败");
+    check_sqlite(
+      sqlite3_bind_int64(event, 1, snapshot.requested_timestamp_ns),
+      database_, "绑定暂存入口按钮时间失败");
+    if (snapshot.coordinate_available) {
+      check_sqlite(sqlite3_bind_int64(event, 2, snapshot.coordinate_timestamp_ns), database_, "绑定暂存入口坐标时间失败");
+      check_sqlite(sqlite3_bind_double(event, 3, snapshot.latitude_deg), database_, "绑定暂存入口纬度失败");
+      check_sqlite(sqlite3_bind_double(event, 4, snapshot.longitude_deg), database_, "绑定暂存入口经度失败");
+      bind_nullable_double(event, 5, snapshot.altitude_m);
+      bind_text(event, 6, snapshot.fix_type);
+    } else {
+      for (int index = 2; index <= 6; ++index) {
+        check_sqlite(sqlite3_bind_null(event, index), database_, "绑定暂存入口空快照失败");
+      }
+    }
+    check_sqlite(sqlite3_bind_int(event, 7, snapshot.valid ? 1 : 0), database_, "绑定暂存入口有效性失败");
+    check_sqlite(sqlite3_step(event), database_, "导入入口RTK快照失败");
+    sqlite3_finalize(event);
+
+    if (snapshot.valid && snapshot.coordinate_available) {
+      sqlite3_stmt * endpoint = nullptr;
+      check_sqlite(
+        sqlite3_prepare_v2(
+          database_,
+          "INSERT OR REPLACE INTO rtk_endpoints (role,timestamp_ns,latitude_deg,"
+          "longitude_deg,altitude_m,fix_type,valid) VALUES ('entry',?,?,?,?,?,1)",
+          -1, &endpoint, nullptr),
+        database_, "准备导入有效入口RTK失败");
+      check_sqlite(sqlite3_bind_int64(endpoint, 1, snapshot.coordinate_timestamp_ns), database_, "绑定有效入口时间失败");
+      check_sqlite(sqlite3_bind_double(endpoint, 2, snapshot.latitude_deg), database_, "绑定有效入口纬度失败");
+      check_sqlite(sqlite3_bind_double(endpoint, 3, snapshot.longitude_deg), database_, "绑定有效入口经度失败");
+      bind_nullable_double(endpoint, 4, snapshot.altitude_m);
+      bind_text(endpoint, 5, snapshot.fix_type);
+      check_sqlite(sqlite3_step(endpoint), database_, "导入有效入口RTK失败");
+      sqlite3_finalize(endpoint);
+    }
+
+    insert_event(
+      "entry_rtk_prestart_imported", snapshot.requested_timestamp_ns,
+      snapshot.valid ? "开始采集前入口RTK有效快照已导入" : "开始采集前入口RTK无效快照已导入",
+      snapshot.valid ? "" : "invalid_fix");
   }
 
   void pause_recording(
@@ -608,6 +968,35 @@ private:
     publish_status("recording", response.message, "");
   }
 
+  void capture_manual_endpoint(
+    const std::string & role,
+    std::int64_t requested_ns,
+    interfaces::srv::RecordingCommand::Response & response)
+  {
+    const auto previous_status = role == "entry" ? entry_rtk_status_ : exit_rtk_status_;
+    const auto captured_status = capture_endpoint(role, requested_ns);
+    // 失败的重录不能覆盖此前已确认坐标；每次尝试仍由event_rtk_snapshots留痕。
+    const auto effective_status =
+      captured_status == "confirmed" || previous_status != "confirmed" ?
+      captured_status : previous_status;
+    if (role == "entry") {
+      entry_rtk_status_ = effective_status;
+      update_endpoint_status("entry_rtk_status", entry_rtk_status_);
+    } else {
+      exit_rtk_status_ = effective_status;
+      update_endpoint_status("exit_rtk_status", exit_rtk_status_);
+    }
+    const bool captured = captured_status == "confirmed";
+    const std::string endpoint_name = role == "entry" ? "入口" : "出口";
+    const std::string message = captured ?
+      endpoint_name + "RTK快照已记录（定位有效）" :
+      (previous_status == "confirmed" ?
+        "本次RTK快照已留痕但定位无效，已保留此前有效的" + endpoint_name + "RTK" :
+        endpoint_name + "RTK快照已记录（当前无有效定位）");
+    populate_command_success(response, message, effective_status, false);
+    publish_status(paused_ ? "paused" : "recording", message, "");
+  }
+
   void finalize_recording(
     std::int64_t requested_ns,
     bool complete,
@@ -621,8 +1010,6 @@ private:
     }
     flush_transaction();
     trim_samples_after(requested_ns);
-    exit_rtk_status_ = capture_endpoint("exit", requested_ns);
-    update_endpoint_status("exit_rtk_status", exit_rtk_status_);
     insert_event(
       complete ? "completed" : "interrupted", requested_ns,
       complete ? "任务记录正常完成" : "任务记录异常收尾", "");
@@ -643,9 +1030,7 @@ private:
     response.invalid_samples = invalid_samples_;
     response.complete = complete;
     response.error_code.clear();
-    response.message = exit_rtk_status_ == "confirmed" ?
-      "任务文件已完成，出口RTK已记录" :
-      "任务文件已完成，出口RTK坐标未确认";
+    response.message = "任务文件已完成";
     publish_status(complete ? "completed" : "interrupted", response.message, "");
     reset_session_state();
   }
@@ -1221,7 +1606,7 @@ private:
         clearance_upper_limit_m REAL,
         detection_radius_m REAL,
         min_support_points INTEGER,
-        entry_rtk_status TEXT NOT NULL DEFAULT 'pending',
+        entry_rtk_status TEXT NOT NULL DEFAULT 'not_requested',
         exit_rtk_status TEXT NOT NULL DEFAULT 'not_requested'
       );
       CREATE TABLE clearance_samples (
@@ -1272,6 +1657,7 @@ private:
         odin_qw REAL
       );
       CREATE INDEX clearance_samples_timestamp_idx ON clearance_samples(source_timestamp_ns);
+      CREATE INDEX clearance_samples_recorded_timestamp_idx ON clearance_samples(recorded_timestamp_ns);
       CREATE TABLE imu_samples (
         sample_index INTEGER PRIMARY KEY CHECK (sample_index >= 0),
         imu_timestamp_ns INTEGER NOT NULL,
@@ -1448,7 +1834,7 @@ private:
         "clearance_upper_limit_m, detection_radius_m, min_support_points, "
         "entry_rtk_status, exit_rtk_status) "
         "VALUES (1, 14, ?, 'recorded', ?, ?, ?, ?, NULL, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
-        "'pending', 'not_requested')",
+        "?, 'not_requested')",
         -1, &statement, nullptr),
       database_, "准备任务元数据写入失败");
     bind_text(statement, 1, task_id_);
@@ -1465,6 +1851,7 @@ private:
     check_sqlite(sqlite3_bind_double(statement, 12, clearance_upper_limit_m_), database_, "绑定高度上限阈值失败");
     check_sqlite(sqlite3_bind_double(statement, 13, detection_radius_m_), database_, "绑定检测半径失败");
     check_sqlite(sqlite3_bind_int64(statement, 14, static_cast<sqlite3_int64>(min_support_points_)), database_, "绑定最低支持点数失败");
+    bind_text(statement, 15, entry_rtk_status_);
     check_sqlite(sqlite3_step(statement), database_, "写入任务元数据失败");
     sqlite3_finalize(statement);
   }

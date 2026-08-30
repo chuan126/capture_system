@@ -133,8 +133,8 @@ public:
     memory_warn_percent_ = bounded_percent("memory_warn_percent", 85.0);
     cpu_warn_percent_ = bounded_percent("cpu_warn_percent", 90.0);
     temperature_warn_celsius_ = declare_parameter<double>("temperature_warn_celsius", 80.0);
-    storage_warn_bytes_ = gibibytes("storage_warn_available_gib", 20.0);
-    storage_error_bytes_ = gibibytes("storage_error_available_gib", 5.0);
+    storage_warn_bytes_ = gibibytes("storage_warn_available_gib", 5.0);
+    storage_error_bytes_ = gibibytes("storage_error_available_gib", 1.0);
     if (lidar_device_online_topic_.empty() || lidar_raw_topic_.empty() || raw_diagnostics_topic_.empty() || output_topic_.empty() ||
       storage_path_.empty() || storage_error_bytes_ > storage_warn_bytes_)
     {

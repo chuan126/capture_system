@@ -3,6 +3,8 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
+  captureEntryRtk,
+  captureExitRtk,
   getTaskControlReadiness,
   pauseTaskControl,
   recoverTaskControl,
@@ -69,7 +71,7 @@ test("starts a task only through FastAPI HTTP and forwards frozen parameters", a
   }
 });
 
-test("pause resume and stop use revisioned FastAPI commands", async () => {
+test("pause resume stop and manual RTK endpoints use revisioned FastAPI commands", async () => {
   const originalFetch = globalThis.fetch;
   const calls = [];
   globalThis.fetch = async (input, init) => {
@@ -81,25 +83,29 @@ test("pause resume and stop use revisioned FastAPI commands", async () => {
     await resumeTaskControl("task-001", 3, "resume-1");
     await stopTaskControl("task-001", 4, "stop-1");
     await recoverTaskControl("task-001", 5, "recover-1");
+    await captureEntryRtk("task-001", 6, "entry-1");
+    await captureExitRtk("task-001", 7, "exit-1");
     assert.deepEqual(calls, [
       ["/api/v1/tasks/task-001/pause", { expected_revision: 2 }],
       ["/api/v1/tasks/task-001/resume", { expected_revision: 3 }],
       ["/api/v1/tasks/task-001/stop", { expected_revision: 4 }],
       ["/api/v1/tasks/task-001/recover", { expected_revision: 5 }],
+      ["/api/v1/tasks/task-001/rtk/entry", { expected_revision: 6 }],
+      ["/api/v1/tasks/task-001/rtk/exit", { expected_revision: 7 }],
     ]);
   } finally {
     globalThis.fetch = originalFetch;
   }
 });
 
-test("readiness requires both lidar and RTK online before start", async () => {
+test("readiness exposes manual RTK endpoint capabilities", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => jsonResponse({
     ready: true,
     state: "ready",
-    detail: "任务控制可用，雷达与RTK均已上线",
+    detail: "任务控制可用；RTK端点由操作员手动记录",
     bridge_available: true,
-    services: { start: true, pause: true, resume: true, stop: true, recover: true },
+    services: { start: true, pause: true, resume: true, stop: true, recover: true, capture_entry_rtk: true, capture_exit_rtk: true },
     missing_services: [],
     active_task_id: null,
     active_phase: null,
@@ -112,6 +118,8 @@ test("readiness requires both lidar and RTK online before start", async () => {
     can_resume: false,
     can_stop: false,
     can_recover: false,
+    can_capture_entry_rtk: false,
+    can_capture_exit_rtk: false,
   });
   try {
     const readiness = await getTaskControlReadiness();
@@ -122,7 +130,8 @@ test("readiness requires both lidar and RTK online before start", async () => {
     assert.deepEqual(readiness.sensorBlockers, []);
     assert.equal(readiness.canStart, true);
     assert.equal(readiness.canStop, false);
-    assert.match(readiness.detail, /雷达与RTK均已上线/);
+    assert.match(readiness.detail, /RTK端点由操作员手动记录/);
+    assert.equal(readiness.canCaptureEntryRtk, false);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -136,7 +145,7 @@ test("readiness exposes recovery and stop capabilities for a stuck transition", 
     state: "busy",
     detail: "任务 02 正在创建正式测量文件",
     bridge_available: true,
-    services: { start: true, pause: true, resume: true, stop: true, recover: true },
+    services: { start: true, pause: true, resume: true, stop: true, recover: true, capture_entry_rtk: true, capture_exit_rtk: true },
     missing_services: [],
     active_task_id: "task-002",
     active_phase: "recorder_preparing",
@@ -169,7 +178,7 @@ test("readiness keeps normal controls available when recover service is missing"
     state: "degraded",
     detail: "任务控制可用；恢复服务不可用",
     bridge_available: true,
-    services: { start: true, pause: true, resume: true, stop: true, recover: false },
+    services: { start: true, pause: true, resume: true, stop: true, recover: false, capture_entry_rtk: true, capture_exit_rtk: true },
     missing_services: ["recover"],
     active_task_id: null,
     active_phase: null,
@@ -197,22 +206,22 @@ test("readiness keeps normal controls available when recover service is missing"
 });
 
 
-test("readiness exposes the exact offline sensor blocker", async () => {
+test("RTK offline is diagnostic and does not become a start blocker", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => jsonResponse({
-    ready: false,
-    state: "sensor_offline",
-    detail: "RTK未上线，等待设备上线后才能开始采集",
+    ready: true,
+    state: "ready",
+    detail: "任务控制可用；RTK端点由操作员手动记录",
     bridge_available: true,
-    services: { start: true, pause: true, resume: true, stop: true, recover: true },
+    services: { start: true, pause: true, resume: true, stop: true, recover: true, capture_entry_rtk: true, capture_exit_rtk: true },
     missing_services: [],
     active_task_id: null,
     active_phase: null,
     sensor_data_checked: true,
     lidar_online: true,
     rtk_online: false,
-    sensor_blockers: ["rtk"],
-    can_start: false,
+    sensor_blockers: [],
+    can_start: true,
     can_pause: false,
     can_resume: false,
     can_stop: false,
@@ -220,10 +229,10 @@ test("readiness exposes the exact offline sensor blocker", async () => {
   });
   try {
     const readiness = await getTaskControlReadiness();
-    assert.equal(readiness.canStart, false);
+    assert.equal(readiness.canStart, true);
     assert.equal(readiness.lidarOnline, true);
     assert.equal(readiness.rtkOnline, false);
-    assert.deepEqual(readiness.sensorBlockers, ["rtk"]);
+    assert.deepEqual(readiness.sensorBlockers, []);
   } finally {
     globalThis.fetch = originalFetch;
   }

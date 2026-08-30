@@ -46,6 +46,32 @@ def test_task_manager_releases_stuck_transitions_without_system_restart() -> Non
     assert "transition_started_at=NULL, transition_deadline_at=NULL" in source
 
 
+def test_task_manager_exposes_manual_rtk_services_and_stops_without_waiting() -> None:
+    source = (
+        Path(__file__).parents[2]
+        / "ros2_ws/src/task_manager/src/task_manager_node.cpp"
+    ).read_text(encoding="utf-8")
+
+    assert '"/capture/task/rtk/entry"' in source
+    assert '"/capture/task/rtk/exit"' in source
+    assert 'handle_manual_rtk_capture("entry"' in source
+    assert 'handle_manual_rtk_capture("exit"' in source
+    assert 'call_recorder_command(request.task_id, command' in source
+    assert 'const bool prestart_entry = role == "entry" && !task->active' in source
+    assert 'task->status == "pending" && task->phase == "idle"' in source
+    assert 'const bool poststop_exit = role == "exit" && !task->active' in source
+    assert 'task->status == "completed" && task->phase == "completed"' in source
+    assert '"exit_rtk_poststop_capture"' in source
+    assert '"active_task_exists", "当前已有活动任务，结束后才能补录历史任务出口RTK"' in source
+    assert 'entry_rtk_status=\'pending\'' not in source
+    assert '"exit_rtk_status=\'not_requested\', last_error_code=NULL, "' in source
+    assert 'set_phase(\n          request.task_id, "exit_rtk_capture"' not in source
+    assert 'set_phase(\n            request.task_id, "awaiting_exit_rtk"' not in source
+    assert 'recorder_call_failure_ = "service_unavailable"' in source
+    assert 'recorder_call_failure_ = "response_timeout"' in source
+    assert '"recorder_response_timeout"' in source
+
+
 def test_task_manager_accepts_zero_mount_height_and_height_bounds() -> None:
     source = (
         Path(__file__).parents[2]

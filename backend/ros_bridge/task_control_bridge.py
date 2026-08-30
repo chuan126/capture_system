@@ -9,7 +9,10 @@ from typing import Any, Callable, Literal
 
 from backend.protocols.task_status_v1 import TaskStatusSnapshot, from_ros_message
 
-TaskCommandName = Literal["start", "pause", "resume", "stop", "recover"]
+TaskCommandName = Literal[
+    "start", "pause", "resume", "stop", "recover",
+    "capture_entry_rtk", "capture_exit_rtk",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,6 +57,8 @@ class TaskControlBridge:
         resume_service: str = "/capture/task/resume",
         stop_service: str = "/capture/task/stop",
         recover_service: str = "/capture/task/recover",
+        capture_entry_rtk_service: str = "/capture/task/rtk/entry",
+        capture_exit_rtk_service: str = "/capture/task/rtk/exit",
     ) -> None:
         self._snapshot_sink = snapshot_sink
         self._status_topic = status_topic
@@ -63,6 +68,8 @@ class TaskControlBridge:
             "resume": resume_service,
             "stop": stop_service,
             "recover": recover_service,
+            "capture_entry_rtk": capture_entry_rtk_service,
+            "capture_exit_rtk": capture_exit_rtk_service,
         }
         self._thread: threading.Thread | None = None
         self._started = threading.Event()
@@ -209,6 +216,12 @@ class TaskControlBridge:
                 "resume": node.create_client(TaskCommand, self._service_names["resume"]),
                 "stop": node.create_client(TaskCommand, self._service_names["stop"]),
                 "recover": node.create_client(TaskCommand, self._service_names["recover"]),
+                "capture_entry_rtk": node.create_client(
+                    TaskCommand, self._service_names["capture_entry_rtk"]
+                ),
+                "capture_exit_rtk": node.create_client(
+                    TaskCommand, self._service_names["capture_exit_rtk"]
+                ),
             }
             self._start_request_type = StartTask.Request
             self._command_request_type = TaskCommand.Request

@@ -24,7 +24,9 @@ export type TaskControlResult = {
   errorCode: string | null;
 };
 
-export type TaskControlServiceName = "start" | "pause" | "resume" | "stop" | "recover";
+export type TaskControlServiceName =
+  | "start" | "pause" | "resume" | "stop" | "recover"
+  | "capture_entry_rtk" | "capture_exit_rtk";
 
 export type TaskControlReadiness = {
   ready: boolean;
@@ -40,6 +42,8 @@ export type TaskControlReadiness = {
   canResume: boolean;
   canStop: boolean;
   canRecover: boolean;
+  canCaptureEntryRtk: boolean;
+  canCaptureExitRtk: boolean;
   sensorDataChecked: boolean;
   lidarOnline: boolean;
   rtkOnline: boolean;
@@ -157,6 +161,20 @@ export const stopTaskControl = (taskId: string, expectedRevision: number, idempo
 export const recoverTaskControl = (taskId: string, expectedRevision: number, idempotencyKey: string) =>
   simpleCommand(taskId, "recover", expectedRevision, idempotencyKey);
 
+export const captureEntryRtk = (taskId: string, expectedRevision: number, idempotencyKey: string) =>
+  requestControl(
+    `/api/v1/tasks/${encodeURIComponent(taskId)}/rtk/entry`,
+    { expected_revision: expectedRevision },
+    idempotencyKey,
+  );
+
+export const captureExitRtk = (taskId: string, expectedRevision: number, idempotencyKey: string) =>
+  requestControl(
+    `/api/v1/tasks/${encodeURIComponent(taskId)}/rtk/exit`,
+    { expected_revision: expectedRevision },
+    idempotencyKey,
+  );
+
 export const getTaskControlReadiness = async (): Promise<TaskControlReadiness> => {
   let response: Response;
   try {
@@ -174,7 +192,10 @@ export const getTaskControlReadiness = async (): Promise<TaskControlReadiness> =
   if (!isObject(payload) || typeof payload.ready !== "boolean" || typeof payload.detail !== "string") {
     throw new TaskControlApiError("任务控制准备状态无效", response.status);
   }
-  const serviceNames: TaskControlServiceName[] = ["start", "pause", "resume", "stop", "recover"];
+  const serviceNames: TaskControlServiceName[] = [
+    "start", "pause", "resume", "stop", "recover",
+    "capture_entry_rtk", "capture_exit_rtk",
+  ];
   const rawServices = isObject(payload.services) ? payload.services : {};
   const services = Object.fromEntries(serviceNames.map((name) => [name, rawServices[name] === true])) as Record<TaskControlServiceName, boolean>;
   const missingServices = Array.isArray(payload.missing_services)
@@ -195,6 +216,8 @@ export const getTaskControlReadiness = async (): Promise<TaskControlReadiness> =
     canResume: payload.can_resume === true,
     canStop: payload.can_stop === true,
     canRecover: payload.can_recover === true,
+    canCaptureEntryRtk: payload.can_capture_entry_rtk === true,
+    canCaptureExitRtk: payload.can_capture_exit_rtk === true,
     sensorDataChecked: payload.sensor_data_checked === true,
     lidarOnline: payload.lidar_online === true,
     rtkOnline: payload.rtk_online === true,

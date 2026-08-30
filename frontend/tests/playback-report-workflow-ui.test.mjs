@@ -88,6 +88,14 @@ test("interactive clearance chart supports pan, zoom, reset and hover without mo
   assert.match(interactiveChart, /setPointerCapture/);
   assert.match(interactiveChart, /onDoubleClick=\{resetView\}/);
   assert.match(interactiveChart, /拖拽：左右、上下平移/);
+  assert.match(interactiveChart, /Math\.hypot\(mouseX - x, mouseY - y\)/);
+  assert.match(interactiveChart, /bestDistance <= 14/);
+  assert.match(interactiveChart, /plotRef\.current/);
+  assert.match(interactiveChart, /plot\.getBoundingClientRect\(\)/);
+  assert.match(interactiveChart, /chart\.clientLeft/);
+  assert.match(interactiveChart, /chart\.clientTop/);
+  assert.match(interactiveChart, /ref=\{plotRef\}/);
+  assert.match(page, /mountHeightM=\{mountHeightValid \? parsedMountHeight : null\}/);
   assert.match(interactiveChart, /滚轮：横向缩放/);
   assert.match(interactiveChart, /Shift\+滚轮：纵向缩放/);
   assert.match(interactiveChart, /zoomVertically/);
@@ -105,7 +113,7 @@ test("interactive clearance chart supports pan, zoom, reset and hover without mo
   assert.match(interactiveChart, /heightM:\s*number \| null/);
   assert.match(interactiveChart, /sampleIndex:\s*number/);
   assert.match(interactiveChart, /sample\.timestampMs - windowStart/);
-  assert.match(interactiveChart, /Math\.abs\(sample\.timestampMs - targetTime\)/);
+  assert.match(interactiveChart, /projection \* \(right\.timestampMs - left\.timestampMs\)/);
   assert.doesNotMatch(interactiveChart, /xToPercent\(sample\.sampleIndex\)/);
   assert.match(playback, /startTimestampMs: request\.startTimestampMs/);
   assert.match(playback, /endTimestampMs: request\.endTimestampMs/);
@@ -140,11 +148,19 @@ test("interactive clearance chart supports pan, zoom, reset and hover without mo
   assert.doesNotMatch(playback, /\}, \[selectedTask\]\)/);
 });
 
-test("playback removes physical cleanup from customer UI and deletes selected tasks logically", () => {
-  assert.match(playback, /确定删除所选 \${deleteIds\.length} 个任务吗？/);
+test("playback clearance chart uses China Standard Time with a 24-hour clock", () => {
+  assert.equal((interactiveChart.match(/timeZone:\s*"Asia\/Shanghai"/g) ?? []).length, 2);
+  assert.equal((interactiveChart.match(/hourCycle:\s*"h23"/g) ?? []).length, 2);
+  assert.doesNotMatch(interactiveChart, /hour12:\s*true/);
+});
+
+test("playback permanently deletes selected task data for ordinary users", () => {
+  assert.match(playback, /确定永久删除所选 \${deleteIds\.length} 个任务吗？本地测量数据和分析文件将立即删除，无法恢复。/);
   assert.match(playback, /deleteSelectedTasks\(deleteIds\)/);
   assert.match(taskApi, /\/api\/v1\/tasks\/delete-selected/);
-  assert.doesNotMatch(playback, /清理所选数据|purgeTaskData|任务索引|measurements\.db/);
+  assert.match(playback, /已永久删除 \${result\.deletedTaskCount} 个任务，释放 \${formatStorageBytes\(result\.releasedBytes\)}/);
+  assert.match(taskApi, /releasedBytes:readNumber\(payload\.released_bytes,"released_bytes"\)/);
+  assert.doesNotMatch(playback, /purgeTaskData|任务索引|measurements\.db/);
   assert.doesNotMatch(taskApi, /\/api\/v1\/tasks\/purge-data/);
   assert.match(taskBrowser, /disabledTaskIds/);
   assert.match(css, /\.button--danger-outline/);
@@ -241,7 +257,7 @@ test("report adds one-shot DeepSeek export beside the existing PDF export", () =
   assert.match(report, /capture-clearance-audit-v2 analysis_package/);
   assert.match(report, /n必须原样取source_frame_statistics\.valid_frames/);
   assert.match(report, /对V\/R\/O判定结论的可信程度/);
-  assert.match(report, /合计影响不得超过0\.05/);
+  assert.match(report, /不得分析、评价或推断RTK状态/);
   assert.match(css, /\.deepseek-report-config\s*\{[^}]*box-sizing:\s*border-box;[^}]*max-width:\s*100%;/i);
   assert.match(css, /\.deepseek-report-config__fields\s*\{[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/i);
   assert.match(css, /\.deepseek-report-config__fields textarea\s*\{[^}]*height:\s*132px;[^}]*min-height:\s*112px;/i);

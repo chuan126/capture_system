@@ -99,6 +99,8 @@ type AmapMapLike = {
   destroy?: () => void;
   remove?: (overlay: unknown) => void;
   resize?: () => void;
+  on?: (event: string, handler: () => void) => void;
+  off?: (event: string, handler: () => void) => void;
   setCenter?: (center: [number, number]) => void;
   setZoomAndCenter?: (zoom: number, center: [number, number]) => void;
 };
@@ -229,12 +231,36 @@ export default function RealtimeAmap({
   const [settingsSecurityCode, setSettingsSecurityCode] = useState("");
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
+  const [followSuspended, setFollowSuspended] = useState(false);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<AmapMapLike | null>(null);
   const markerRef = useRef<unknown>(null);
   const polylineRefs = useRef<Array<{ source: TrackSource; overlay: unknown }>>([]);
   const lastPositionRef = useRef<[number, number] | null>(null);
+  const followSuspendedRef = useRef(false);
+  const followTimerRef = useRef<number | null>(null);
+
+  const returnToLatestPosition = useCallback(() => {
+    if (followTimerRef.current !== null) window.clearTimeout(followTimerRef.current);
+    followTimerRef.current = null;
+    followSuspendedRef.current = false;
+    setFollowSuspended(false);
+    const latest = lastPositionRef.current;
+    if (latest) mapRef.current?.setCenter?.(latest);
+  }, []);
+
+  const suspendFollow = useCallback(() => {
+    if (followTimerRef.current !== null) window.clearTimeout(followTimerRef.current);
+    followTimerRef.current = null;
+    followSuspendedRef.current = true;
+    setFollowSuspended(true);
+  }, []);
+
+  const scheduleFollowReturn = useCallback(() => {
+    if (followTimerRef.current !== null) window.clearTimeout(followTimerRef.current);
+    followTimerRef.current = window.setTimeout(returnToLatestPosition, 10_000);
+  }, [returnToLatestPosition]);
 
   const loadDeviceConfig = useCallback(async () => {
     if (typeof window === "undefined") return;
@@ -317,6 +343,10 @@ export default function RealtimeAmap({
         resizeEnable: true,
       });
       mapRef.current = mapInstance;
+      mapInstance.on?.("dragstart", suspendFollow);
+      mapInstance.on?.("zoomstart", suspendFollow);
+      mapInstance.on?.("dragend", scheduleFollowReturn);
+      mapInstance.on?.("zoomend", scheduleFollowReturn);
 
       const Scale = AMap.Scale as (new (...args: unknown[]) => unknown) | undefined;
       const ToolBar = AMap.ToolBar as (new (...args: unknown[]) => unknown) | undefined;
@@ -338,7 +368,7 @@ export default function RealtimeAmap({
       setMapError(error instanceof Error ? error.message : "高德地图初始化失败");
       setMapState("error");
     }
-  }, []);
+  }, [scheduleFollowReturn, suspendFollow]);
 
   useEffect(() => {
     if (config) {
@@ -421,6 +451,9 @@ export default function RealtimeAmap({
       overlays.splice(index, 0, { source: segment.source, overlay: polyline });
     });
 
+    if (followSuspendedRef.current) {
+      return;
+    }
     if (points.length === 1) {
       map.setZoomAndCenter?.(17, gcj);
     } else {
@@ -435,6 +468,7 @@ export default function RealtimeAmap({
   }, []);
 
   useEffect(() => () => {
+    if (followTimerRef.current !== null) window.clearTimeout(followTimerRef.current);
     mapRef.current?.destroy?.();
     mapRef.current = null;
     markerRef.current = null;
@@ -491,6 +525,9 @@ export default function RealtimeAmap({
             <p>{mapSubtitle}</p>
           </div>
           <div className="map-panel-actions">
+            {followSuspended && (
+              <button className="button button--quiet" type="button" onClick={returnToLatestPosition}>回到车辆</button>
+            )}
             <button className="button button--quiet" type="button" onClick={() => { setSettingsError(null); setSettingsOpen(true); }}>地图设置</button>
             <MapExpandButton expanded={expanded} onClick={onToggleExpanded} />
           </div>
@@ -546,7 +583,7 @@ export default function RealtimeAmap({
               作业车道 <strong>{laneLabel}</strong>
             </span>
             <span className="amap-chip">
-              轨迹 <strong>{trackStateText}</strong>
+              轨迹 <strong>{followSuspended ? "暂停跟随 · 10秒后自动返回" : trackStateText}</strong>
             </span>
           </div>
 

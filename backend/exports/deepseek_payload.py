@@ -26,6 +26,7 @@ class BoundedAnalysisPayload:
     database_size_bytes: int
     source_frame_count: int
     valid_source_frame_count: int
+    source_minimum_m: float | None
 
 
 def build_bounded_analysis_payload(
@@ -77,7 +78,7 @@ def build_bounded_analysis_payload(
         )
         _attach_candidate_snapshots(connection, tables, lowest_frames, candidate_contexts)
         if progress:
-            progress("汇总IMU与RTK数据质量", 0.48)
+            progress("汇总IMU与净空数据质量", 0.48)
         data_quality = _data_quality(connection, tables, source_summary)
         payload = {
             "format": "capture-clearance-audit-v2",
@@ -121,6 +122,11 @@ def build_bounded_analysis_payload(
             database_size_bytes=database_size,
             source_frame_count=int(source_summary["total_frames"]),
             valid_source_frame_count=int(source_summary["valid_frames"]),
+            source_minimum_m=(
+                float(source_summary["raw_min_m"])
+                if source_summary["raw_min_m"] is not None
+                else None
+            ),
         )
     except sqlite3.Error as error:
         raise DeepSeekPayloadError(f"读取measurements.db失败：{error}") from error
@@ -248,7 +254,7 @@ def _analyze_source_frames(
     ).fetchone()[0])
     total_count = _source_total_count(connection, frame_source, valid_count)
     if valid_count <= 0:
-        # 区间内没有样本本身就是需要进入报告的异常事实。保留任务、RTK和
+        # 区间内没有样本本身就是需要进入报告的异常事实。保留任务和
         # 数据质量信息，最低值相关统计明确置空，不把整份报告误判为不可生成。
         return ({
             "total_frames": total_count,
@@ -467,10 +473,6 @@ def _attach_candidate_snapshots(
         "minimum_point_x_m",
         "minimum_point_y_m",
         "minimum_point_z_m",
-        "rtk_valid",
-        "rtk_satellite_count",
-        "rtk_hdop",
-        "rtk_pdop",
         "odin_position_x_m",
         "odin_position_y_m",
         "odin_position_z_m",
@@ -503,10 +505,6 @@ def _attach_candidate_snapshots(
                 _rounded(_finite(row["minimum_point_y_m"]), 4),
                 _rounded(_finite(row["minimum_point_z_m"]), 4),
             ],
-            "rtk_valid": bool(row["rtk_valid"]) if row["rtk_valid"] is not None else None,
-            "rtk_satellite_count": row["rtk_satellite_count"],
-            "rtk_hdop": _rounded(_finite(row["rtk_hdop"]), 3),
-            "rtk_pdop": _rounded(_finite(row["rtk_pdop"]), 3),
             "odin_position_xyz_m": [
                 _rounded(_finite(row["odin_position_x_m"]), 4),
                 _rounded(_finite(row["odin_position_y_m"]), 4),
@@ -552,16 +550,11 @@ def _data_quality(
             f"MAX({timestamp})" if timestamp else "NULL",
             "SUM(CASE WHEN clearance_height_m IS NOT NULL THEN 1 ELSE 0 END)"
             if "clearance_height_m" in columns else "0",
-            "SUM(CASE WHEN rtk_valid=1 THEN 1 ELSE 0 END)"
-            if "rtk_valid" in columns else "0",
             "SUM(CASE WHEN minimum_point_x_m IS NOT NULL AND minimum_point_y_m IS NOT NULL "
             "AND minimum_point_z_m IS NOT NULL AND NOT (minimum_point_x_m=0 AND "
             "minimum_point_y_m=0 AND minimum_point_z_m=0) THEN 1 ELSE 0 END)"
             if {"minimum_point_x_m", "minimum_point_y_m", "minimum_point_z_m"}.issubset(columns)
             else "0",
-            "AVG(rtk_satellite_count)" if "rtk_satellite_count" in columns else "NULL",
-            "AVG(rtk_hdop)" if "rtk_hdop" in columns else "NULL",
-            "AVG(rtk_pdop)" if "rtk_pdop" in columns else "NULL",
         ])
         row = connection.execute(f"SELECT {', '.join(expressions)} FROM imu_samples").fetchone()
         count = int(row[0] or 0)
@@ -577,19 +570,7 @@ def _data_quality(
                 3,
             ),
             "clearance_snapshot_ratio": _ratio(int(row[3] or 0), count),
-            "rtk_valid_ratio": _ratio(int(row[4] or 0), count),
-            "minimum_point_evidence_ratio": _ratio(int(row[5] or 0), count),
-            "average_satellite_count": _rounded(_finite(row[6]), 2),
-            "average_hdop": _rounded(_finite(row[7]), 3),
-            "average_pdop": _rounded(_finite(row[8]), 3),
-        }
-    if "rtk_samples" in tables:
-        row = connection.execute(
-            "SELECT COUNT(*), SUM(CASE WHEN valid=1 THEN 1 ELSE 0 END) FROM rtk_samples"
-        ).fetchone()
-        quality["rtk_samples"] = {
-            "rows": int(row[0] or 0),
-            "valid_ratio": _ratio(int(row[1] or 0), int(row[0] or 0)),
+            "minimum_point_evidence_ratio": _ratio(int(row[4] or 0), count),
         }
     return quality
 

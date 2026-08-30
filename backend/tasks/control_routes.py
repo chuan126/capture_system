@@ -23,6 +23,8 @@ _SERVICE_LABELS = {
     "resume": "继续",
     "stop": "停止",
     "recover": "恢复",
+    "capture_entry_rtk": "记录入口RTK",
+    "capture_exit_rtk": "记录出口RTK",
 }
 
 
@@ -67,16 +69,13 @@ def _sensor_start_readiness(request: Request) -> tuple[bool, bool, bool, list[st
     blockers: list[str] = []
     if not lidar_online:
         blockers.append("lidar")
-    if not rtk_online:
-        blockers.append("rtk")
     if not blockers:
-        return True, True, True, [], "雷达与RTK均已上线"
+        detail = "雷达已上线；RTK端点由操作员手动记录"
+        return True, lidar_online, rtk_online, [], detail
 
     names = []
     if "lidar" in blockers:
         names.append("雷达")
-    if "rtk" in blockers:
-        names.append("RTK")
     return False, lidar_online, rtk_online, blockers, "、".join(names) + "未上线"
 
 
@@ -113,7 +112,10 @@ def _raise_rejected(result: TaskControlResult) -> None:
         http_status = status.HTTP_409_CONFLICT
     elif code == "invalid_parameters":
         http_status = status.HTTP_422_UNPROCESSABLE_ENTITY
-    elif code in {"recorder_unavailable", "storage_error", "task_database_unavailable"}:
+    elif code in {
+        "recorder_unavailable", "recorder_response_timeout", "storage_error",
+        "task_database_unavailable",
+    }:
         http_status = status.HTTP_503_SERVICE_UNAVAILABLE
     else:
         http_status = status.HTTP_409_CONFLICT
@@ -186,9 +188,31 @@ def task_control_readiness(request: Request) -> TaskControlReadinessResponse:
         and active
         and active.active_slot is not None
     )
+    can_capture_rtk = bool(
+        bridge_available
+        and active
+        and active.active_slot is not None
+        and (
+            (active.status == "running" and active.operation_phase == "recording")
+            or (active.status == "paused" and active.operation_phase == "paused")
+        )
+    )
+    # 入口RTK允许在待执行任务开始前预记录；具体任务状态仍由task_manager校验。
+    can_capture_entry_rtk = bool(
+        bridge_available
+        and services["capture_entry_rtk"]
+        and (active is None or can_capture_rtk)
+    )
+    # 没有活动任务时，允许为已完成且尚未记录出口的选中任务补录；
+    # 具体任务状态、正式测量文件与并发条件仍由task_manager和记录器校验。
+    can_capture_exit_rtk = bool(
+        bridge_available
+        and services["capture_exit_rtk"]
+        and (active is None or can_capture_rtk)
+    )
     recoverable_phases = {
         "radar_initializing", "entry_rtk_capture", "recorder_preparing",
-        "pausing", "resuming", "stop_requested", "exit_rtk_capture", "finalizing",
+        "pausing", "resuming", "stop_requested", "exit_rtk_capture", "awaiting_exit_rtk", "finalizing",
     }
     can_recover = bool(
         bridge_available
@@ -223,7 +247,7 @@ def task_control_readiness(request: Request) -> TaskControlReadinessResponse:
         readiness_detail = f"任务控制可用；{_missing_service_detail(services)}"
     else:
         readiness_state = "ready"
-        readiness_detail = "任务控制可用，雷达与RTK均已上线"
+        readiness_detail = "任务控制可用；RTK端点由操作员手动记录"
 
     return TaskControlReadinessResponse(
         ready=can_start,
@@ -239,6 +263,8 @@ def task_control_readiness(request: Request) -> TaskControlReadinessResponse:
         can_resume=can_resume,
         can_stop=can_stop,
         can_recover=can_recover,
+        can_capture_entry_rtk=can_capture_entry_rtk,
+        can_capture_exit_rtk=can_capture_exit_rtk,
         sensor_data_checked=True,
         lidar_online=lidar_online,
         rtk_online=rtk_online,
@@ -376,3 +402,31 @@ def recover_task(
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> TaskControlResponse:
     return _simple_command("recover", task_id, payload, request, idempotency_key)
+
+
+@router.post(
+    "/api/v1/tasks/{task_id}/rtk/entry",
+    response_model=TaskControlResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def capture_entry_rtk(
+    task_id: str,
+    payload: TaskCommandRequest,
+    request: Request,
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+) -> TaskControlResponse:
+    return _simple_command("capture_entry_rtk", task_id, payload, request, idempotency_key)
+
+
+@router.post(
+    "/api/v1/tasks/{task_id}/rtk/exit",
+    response_model=TaskControlResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def capture_exit_rtk(
+    task_id: str,
+    payload: TaskCommandRequest,
+    request: Request,
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+) -> TaskControlResponse:
+    return _simple_command("capture_exit_rtk", task_id, payload, request, idempotency_key)

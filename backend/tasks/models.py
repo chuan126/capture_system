@@ -25,6 +25,7 @@ TaskOperationPhase = Literal[
     "resuming",
     "stop_requested",
     "exit_rtk_capture",
+    "awaiting_exit_rtk",
     "finalizing",
     "completed",
     "interrupted",
@@ -94,6 +95,7 @@ class TaskDeleteManyRequest(BaseModel):
 
 class TaskDeleteManyResponse(BaseModel):
     deleted_task_count: int
+    released_bytes: int
     task_ids: list[str]
 
 
@@ -165,6 +167,8 @@ class TaskControlReadinessResponse(BaseModel):
     can_resume: bool = False
     can_stop: bool = False
     can_recover: bool = False
+    can_capture_entry_rtk: bool = False
+    can_capture_exit_rtk: bool = False
     sensor_data_checked: bool = False
     lidar_online: bool = False
     rtk_online: bool = False

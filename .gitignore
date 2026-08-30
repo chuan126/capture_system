@@ -61,6 +61,7 @@ pnpm-debug.log*
 # -----------------------------------------------------------------------------
 /data/**
 /runtime/**
+/runtime_整理结果/**
 
 # Keep empty runtime directory structure where placeholders are provided.
 !/data/**/

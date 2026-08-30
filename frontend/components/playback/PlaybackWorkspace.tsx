@@ -50,6 +50,17 @@ const formatDuration = (value: number | null) => {
   return `${String(Math.floor(milliseconds / 60000)).padStart(2, "0")}:${String(Math.floor((milliseconds % 60000) / 1000)).padStart(2, "0")}.${String(milliseconds % 1000).padStart(3, "0")}`;
 };
 const formatRate = (value: number | null) => value === null ? "-- Hz" : `${value.toFixed(2)} Hz`;
+const formatStorageBytes = (bytes: number) => {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KiB", "MiB", "GiB", "TiB"];
+  let value = bytes / 1024;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  return `${value.toFixed(value >= 10 ? 1 : 2)} ${units[unitIndex]}`;
+};
 const formatRtk = (endpoint: MeasurementRtkEndpoint | null) => !endpoint || !endpoint.valid
   ? "--"
   : `${endpoint.latitudeDeg.toFixed(7)}, ${endpoint.longitudeDeg.toFixed(7)}`;
@@ -307,7 +318,7 @@ export default function PlaybackWorkspace({
   const deleteIds = [...checked];
   const deleteSelected = async () => {
     if (deleteIds.length === 0 || deleting) return;
-    const confirmed = window.confirm(`确定删除所选 ${deleteIds.length} 个任务吗？`);
+    const confirmed = window.confirm(`确定永久删除所选 ${deleteIds.length} 个任务吗？本地测量数据和分析文件将立即删除，无法恢复。`);
     if (!confirmed) return;
     setDeleting(true);
     setDeleteMessage(null);
@@ -315,7 +326,7 @@ export default function PlaybackWorkspace({
     try {
       const result = await deleteSelectedTasks(deleteIds);
       setChecked(new Set());
-      setDeleteMessage(`已删除 ${result.deletedTaskCount} 个任务`);
+      setDeleteMessage(`已永久删除 ${result.deletedTaskCount} 个任务，释放 ${formatStorageBytes(result.releasedBytes)}`);
       await onDataChanged();
     } catch (error) {
       setDeleteError(true);

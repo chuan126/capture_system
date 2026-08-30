@@ -58,12 +58,12 @@ const DEFAULT_DEEPSEEK_SETTINGS: DeepSeekSettings = {
 
 判定时以点云证据为主体：综合raw_min_m、median_m、mad_m、p01_m、p05_m、rolling3_median_min_m、rolling5_median_min_m、lowest_20_real_frames的重复低值、selected_inlier_count以及candidate_contexts前后连续性。只有同时满足“孤立、明显突降、前后立即恢复、无连续或周期结构支持”才判O。连续低值、风机、横梁或周期结构判V；证据确实矛盾或不足时判R。V或R时eff必须等于raw，只有O允许从输入已有滚动统计或候选值中选择eff。
 
-可信度c表示“对V/R/O判定结论的可信程度”，不是净空精度、RTK有效率或数据字段完整率。R表示有充分理由需要复核，结论明确时c可以较高，不能因为状态是R就自动限制在0.5以下。
+可信度c表示“对V/R/O判定结论的可信程度”，不是净空精度或数据字段完整率。R表示有充分理由需要复核，结论明确时c可以较高，不能因为状态是R就自动限制在0.5以下。
 
 评分时遵守以下规则：
 - 真实有效源帧不少于20且source_valid_ratio不低于0.95，是强基础证据；不少于100帧且频率稳定时可进一步提高可信度。
 - 多个相近低值、连续低值、3帧或5帧滚动统计支持、较高inlier数量，均应提高结论可信度；单个最低帧inlier偏少只降低该帧权重，不得抹去其他低值帧证据。
-- RTK无效、continuous_distance_m为null只影响空间定位，不直接否定点云高度，对c的合计影响不得超过0.05。
+- continuous_distance_m为null不直接否定点云高度，对c的影响不得超过0.05。不得分析、评价或推断RTK状态、坐标、定位质量及其对净空结论的影响。
 - selected_grid_area_m2、selected_residual_p95_m或最低点XYZ等辅助字段缺失只写入q；已有帧数、连续性和inlier证据可用时，对c的合计影响不得超过0.10。
 - 同一缺项不得通过多个描述重复扣分。q用于披露数据问题，不要求每个q都降低c。
 - 证据一致的V通常为0.80–0.98；证据清楚但仍需现场确认的R通常为0.65–0.85；证据充分的O通常为0.80–0.98。

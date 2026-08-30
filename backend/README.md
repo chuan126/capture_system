@@ -21,20 +21,22 @@ FastAPI 是浏览器访问 RK3588 的唯一 HTTP 和 WebSocket 入口。当前�
 | `/api/v1/tasks` | HTTP JSON | SQLite 任务元数据创建和查询 |
 | `/api/v1/tasks/batch` | HTTP JSON | SQLite 批量创建事务 |
 | `/api/v1/tasks/{task_id}` | HTTP JSON | SQLite 单任务查询 |
-| `/api/v1/tasks/{task_id}` | HTTP DELETE | 任务逻辑删除，运行中和暂停任务拒绝删除 |
-| `/api/v1/tasks/delete-selected` | HTTP POST JSON | 单事务逻辑删除所选任务，活动任务导致整批拒绝 |
-| `/api/v1/tasks/purge-data` | HTTP POST JSON | 维护接口，物理清理所选任务本地数据并保留任务索引，已逻辑删除任务也可按 UUID 清理 |
-| `/api/v1/task-control/readiness` | HTTP JSON | 任务控制桥、各控制 Service 及开始采集所需的雷达/RTK上线状态 |
+| `/api/v1/tasks/{task_id}` | HTTP DELETE | 永久删除任务本地目录并保留删除审计索引，运行中和暂停任务拒绝删除 |
+| `/api/v1/tasks/delete-selected` | HTTP POST JSON | 校验全部所选任务后永久删除本地目录，返回释放空间，活动任务导致整批拒绝 |
+| `/api/v1/tasks/purge-data` | HTTP POST JSON | 旧调用兼容的独立物理清理接口，保留任务索引 |
+| `/api/v1/task-control/readiness` | HTTP JSON | 任务控制桥、各控制 Service、雷达诊断及手动RTK端点能力 |
 | `/api/v1/tasks/{task_id}/start` | HTTP POST | 冻结作业参数并调用 ROS 2 开始 Service |
 | `/api/v1/algorithm-parameters` | HTTP GET/PUT | 读取或原子应用检测半径与最低簇支持点数；活动任务期间禁止修改 |
 | `/api/v1/tasks/{task_id}/pause` | HTTP POST | 调用 ROS 2 暂停 Service |
 | `/api/v1/tasks/{task_id}/resume` | HTTP POST | 调用 ROS 2 继续 Service |
 | `/api/v1/tasks/{task_id}/stop` | HTTP POST | 调用 ROS 2 停止和文件收尾 Service |
 | `/api/v1/tasks/{task_id}/recover` | HTTP POST | 调用 ROS 2 维护级恢复 Service；不可用时不影响其他控制命令 |
+| `/api/v1/tasks/{task_id}/rtk/entry` | HTTP POST | 为待执行或活动任务手动记录隧道入口RTK端点；支持开始采集前预记录 |
+| `/api/v1/tasks/{task_id}/rtk/exit` | HTTP POST | 为活动任务记录出口，或在无其他活动任务时为已完成任务补录出口RTK |
 | `/api/v1/tasks/{task_id}/measurements` | HTTP JSON | 每任务独立 SQLite 测量文件，只读返回完整高度序列、统计和 RTK 端点 |
 | `/api/v1/tasks/{task_id}/measurements/summary` | HTTP JSON | 回放轻量摘要，返回统计、RTK、样本边界，不返回完整采样序列 |
 | `/api/v1/tasks/{task_id}/measurements/series-prefix` | HTTP JSON | 回放首屏固定读取任务开头样本，不扫描整条曲线；默认 2000 条 |
-| `/api/v1/tasks/{task_id}/measurements/series` | HTTP JSON | 按源时间戳窗口返回回放曲线；大窗口使用保留局部极值和无效断点的限点序列 |
+| `/api/v1/tasks/{task_id}/measurements/series` | HTTP JSON | 按设备端记录时间窗口返回回放曲线；大窗口使用保留局部极值和无效断点的限点序列 |
 | `/ws/v1/cloud-preview` | WebSocket 文本和二进制 | `/capture/visualization/cloud_preview` |
 | `/ws/v1/clearance` | WebSocket JSON | `/capture/clearance/result` |
 | `/ws/v1/rtk` | WebSocket JSON | `/capture/rtk/status`、`/capture/rtk/fix` |
@@ -113,10 +115,10 @@ WebSocket 实际存在客户端时运行。
 
 当前已经实现：
 
-- 任务创建、查询、逻辑删除和重启持久化；
+- 任务创建、查询、永久删除和重启持久化；
 - 批量创建使用单个 SQLite 事务和幂等键；
-- `/api/v1/tasks/delete-selected` 在单个 SQLite 事务中逻辑删除多个任务，任一任务活动、已删除或不存在时整批拒绝；
-- `/api/v1/tasks/purge-data` 作为维护接口按所选任务物理删除任务目录，保留任务元数据和清理时间；逻辑删除后的任务仍可按 UUID 清理；
+- `/api/v1/tasks/delete-selected` 先校验全部任务，再删除所选任务目录并在单个 SQLite 事务中保存删除时间、清理时间和释放空间；任一任务活动、已删除或不存在时整批拒绝；
+- `/api/v1/tasks/purge-data` 仅作为旧调用兼容入口，按 UUID 清理仍存在的任务目录并保留任务元数据；
 - FastAPI 使用独立 `rclpy.Context` 将开始、暂停、继续、停止和恢复请求转发给 `task_manager`；
 - 各任务控制 Service 独立判定可用性，辅助 Service 不会锁死其他控制按钮；
 - 每个控制请求携带任务状态版本和幂等键；
@@ -132,7 +134,7 @@ PDF 报告由客户端显式提交任务 ID 集合，后端汇总其中满足正
 
 大模型辅助报告同样通过该队列运行，但每次提交都新建作业，不按任务去重。DeepSeek API地址、API Key、模型和可编辑“大模型Skill”保存于`CAPTURE_DATA_ROOT/settings/device_settings.json`，前端修改后自动写回设备端。工作进程可只读扫描最大2 GiB的任务`measurements.db`：按真实净空源帧去重，在设备端计算原始最低值、中位数、MAD、P01、P05及3帧/5帧滚动中位数，只读取最低20帧和3组候选前后各5帧，并汇总IMU、RTK质量；高频明细和SQLite文件均不上传。固定大小的`capture-clearance-audit-v2`证据包通过一次非流式请求发送。思考模式的内部推理与最终JSON共用`CAPTURE_DEEPSEEK_MAX_TOKENS`额度，默认384000，即当前V4模型384K输出上限。可编辑Skill只控制分析规则；后端始终在其后附加固定审计JSON契约，避免用户删改提示词后导致报告无法解析。解析端兼容常见外层包装、数字字符串、中文状态和单条文本列表。模型按Skill返回紧凑审计JSON，PDF表格后只生成“报告分析结果”和“数据质量分析”两节。作业运行副本中的API Key在完成、失败、取消和服务重启恢复时删除，且不进入报告 manifest。
 
-大模型审计包在所有最低值、分位数、滚动统计、最低20帧和候选连续证据计算前，强制应用任务冻结的高度闭区间；区间外帧只计入剔除数量，不降低源数据有效率。大模型PDF表格最低值始终使用设备端区间统计，不信任模型自由改写。
+大模型审计包在所有最低值、分位数、滚动统计、最低20帧和候选连续证据计算前，强制应用任务冻结的高度闭区间；区间外帧只计入剔除数量，不降低源数据有效率。大模型返回的原始最低值只与本次发送的源帧统计核对；本地汇总PDF继续按`clearance_samples`统计，两条链路不强制输出相同最低值。大模型PDF表格最低值始终使用设备端区间统计，不信任模型自由改写。
 
 现有汇总 PDF 与大模型 PDF 共用混合字体模块：中文使用 `CAPTURE_PDF_FONT_PATH` 指定的宋体，ASCII 使用 `CAPTURE_PDF_LATIN_FONT_PATH` 指定的 Times New Roman。因字体授权不随仓库分发；未配置 Times New Roman 时回退为 PDF 标准 Times-Roman。
 

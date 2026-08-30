@@ -170,6 +170,14 @@ public:
       "/capture/task/recover",
       std::bind(&TaskManagerNode::recover_task, this, std::placeholders::_1, std::placeholders::_2),
       rmw_qos_profile_services_default, callback_group_);
+    capture_entry_rtk_service_ = create_service<interfaces::srv::TaskCommand>(
+      "/capture/task/rtk/entry",
+      std::bind(&TaskManagerNode::capture_entry_rtk, this, std::placeholders::_1, std::placeholders::_2),
+      rmw_qos_profile_services_default, callback_group_);
+    capture_exit_rtk_service_ = create_service<interfaces::srv::TaskCommand>(
+      "/capture/task/rtk/exit",
+      std::bind(&TaskManagerNode::capture_exit_rtk, this, std::placeholders::_1, std::placeholders::_2),
+      rmw_qos_profile_services_default, callback_group_);
 
     recording_status_subscription_ = create_subscription<interfaces::msg::RecordingStatus>(
       "/capture/recording/status",
@@ -235,11 +243,6 @@ private:
       publish_task(result.task, request->command_id, "开始命令已接受，执行雷达初始化阶段", "");
 
       result.task = set_phase(
-        request->task_id, "entry_rtk_capture", request->command_id,
-        "开始时同步记录入口RTK快照，不等待坐标确认");
-      publish_task(result.task, request->command_id, "正在记录入口RTK快照", "");
-
-      result.task = set_phase(
         request->task_id, "recorder_preparing", request->command_id,
         "正在创建正式测量文件");
       publish_task(result.task, request->command_id, "正在创建正式测量文件", "");
@@ -247,8 +250,8 @@ private:
       auto recorder_response = call_prepare_recorder(*request, result.task);
       if (!recorder_response.has_value()) {
         result = recover_active_task(
-          request->task_id, request->command_id, "recorder_unavailable",
-          "记录器Service不可用或响应超时，系统已执行启动失败收尾");
+          request->task_id, request->command_id, recorder_failure_code(),
+          recorder_failure_message("创建正式测量文件") + "，系统已执行启动失败收尾");
         result.accepted = false;
         publish_task(result.task, request->command_id, result.message, result.error_code);
         fill_response(*response, result);
@@ -338,6 +341,156 @@ private:
     fill_response(*response, result);
   }
 
+  void capture_entry_rtk(
+    const std::shared_ptr<interfaces::srv::TaskCommand::Request> request,
+    std::shared_ptr<interfaces::srv::TaskCommand::Response> response)
+  {
+    handle_manual_rtk_capture("entry", *request, *response);
+  }
+
+  void capture_exit_rtk(
+    const std::shared_ptr<interfaces::srv::TaskCommand::Request> request,
+    std::shared_ptr<interfaces::srv::TaskCommand::Response> response)
+  {
+    handle_manual_rtk_capture("exit", *request, *response);
+  }
+
+  void handle_manual_rtk_capture(
+    const std::string & role,
+    const interfaces::srv::TaskCommand::Request & request,
+    interfaces::srv::TaskCommand::Response & response)
+  {
+    std::lock_guard<std::mutex> command_lock(command_mutex_);
+    const std::string command = role == "entry" ? "capture_entry_rtk" : "capture_exit_rtk";
+    const std::string endpoint_name = role == "entry" ? "入口" : "出口";
+    TransitionResult result;
+    try {
+      sqlite3 * database = open_database();
+      try {
+        execute(database, "BEGIN IMMEDIATE");
+        const auto duplicate = load_duplicate_command(
+          database, request.command_id, request.task_id, command);
+        if (duplicate.has_value()) {
+          execute(database, "COMMIT");
+          sqlite3_close(database);
+          fill_response(response, *duplicate);
+          return;
+        }
+        const auto task = load_task(database, request.task_id);
+        if (!task.has_value()) {
+          execute(database, "ROLLBACK");
+          sqlite3_close(database);
+          fill_response(response, reject_without_task("task_not_found", "任务不存在"));
+          return;
+        }
+        if (task->revision != request.expected_revision) {
+          result = reject_with_task(*task, "revision_conflict", "任务状态已经变化，请刷新后重试");
+        } else {
+          const bool prestart_entry = role == "entry" && !task->active &&
+            task->status == "pending" && task->phase == "idle";
+          const bool poststop_exit = role == "exit" && !task->active &&
+            task->status == "completed" && task->phase == "completed" &&
+            !task->recording_path.empty();
+          const bool active_capture = task->active &&
+            ((task->status == "running" && task->phase == "recording") ||
+            (task->status == "paused" && task->phase == "paused"));
+          const bool another_task_active = poststop_exit && scalar_int64(
+            database,
+            "SELECT COUNT(*) FROM tasks WHERE active_slot IS NOT NULL AND deleted_at IS NULL") > 0;
+          if (another_task_active) {
+            result = reject_with_task(
+              *task, "active_task_exists", "当前已有活动任务，结束后才能补录历史任务出口RTK");
+          } else if (!prestart_entry && !poststop_exit && !active_capture) {
+            result = reject_with_task(
+              *task, "state_conflict",
+              role == "entry" ?
+              "仅待执行、采集中或已暂停任务可以记录入口RTK快照" :
+              "仅采集中、已暂停或已完成且测量文件仍存在的任务可以记录出口RTK快照");
+          } else {
+            result = TransitionResult{true, *task, "", "正在记录" + endpoint_name + "RTK"};
+          }
+        }
+        if (!result.accepted) {
+          store_control_request(database, request.command_id, request.task_id, command, false, result);
+        }
+        execute(database, "COMMIT");
+        sqlite3_close(database);
+      } catch (...) {
+        try {execute(database, "ROLLBACK");} catch (...) {}
+        sqlite3_close(database);
+        throw;
+      }
+      if (!result.accepted) {
+        fill_response(response, result);
+        return;
+      }
+
+      const auto recorder = call_recorder_command(request.task_id, command, system_now_ns());
+      if (!recorder.has_value() || !recorder->success) {
+        result.accepted = false;
+        result.error_code = recorder.has_value() && !recorder->error_code.empty() ?
+          recorder->error_code : recorder_failure_code();
+        result.message = recorder.has_value() ? recorder->message : recorder_failure_message("记录RTK端点");
+      } else {
+        database = open_database();
+        try {
+          execute(database, "BEGIN IMMEDIATE");
+          const auto current = load_task(database, request.task_id).value();
+          const std::string field = role == "entry" ? "entry_rtk_status" : "exit_rtk_status";
+          const std::string endpoint_status =
+            recorder->rtk_status.empty() ? "unconfirmed" : recorder->rtk_status;
+          const bool poststop_exit = role == "exit" && !current.active &&
+            current.status == "completed" && current.phase == "completed";
+          const auto now_text = iso_utc_from_ns(system_now_ns());
+          sqlite3_stmt * statement = nullptr;
+          const std::string sql = poststop_exit ?
+            "UPDATE tasks SET exit_rtk_status=?, warning_code=?, "
+            "status_revision=status_revision+1, updated_at=?, "
+            "last_error_code=NULL, last_error_message=NULL WHERE task_id=?" :
+            "UPDATE tasks SET " + field + "=?, status_revision=status_revision+1, "
+            "updated_at=?, last_error_code=NULL, last_error_message=NULL WHERE task_id=?";
+          check_sqlite(sqlite3_prepare_v2(database, sql.c_str(), -1, &statement, nullptr), database,
+            "准备RTK端点状态更新失败");
+          bind_text(statement, 1, endpoint_status);
+          if (poststop_exit) {
+            const std::string warning =
+              current.entry_rtk_status == "not_requested" ? "rtk_endpoint_missing" :
+              (current.entry_rtk_status != "confirmed" || endpoint_status != "confirmed" ?
+              "rtk_endpoint_unconfirmed" : "");
+            if (warning.empty()) sqlite3_bind_null(statement, 2); else bind_text(statement, 2, warning);
+            bind_text(statement, 3, now_text);
+            bind_text(statement, 4, request.task_id);
+          } else {
+            bind_text(statement, 2, now_text);
+            bind_text(statement, 3, request.task_id);
+          }
+          check_sqlite(sqlite3_step(statement), database, "更新RTK端点状态失败");
+          sqlite3_finalize(statement);
+          insert_event(
+            database, request.task_id,
+            poststop_exit ? "exit_rtk_poststop_capture" : role + "_rtk_manual_capture",
+            current.status, current.status,
+            current.phase, request.command_id, now_text, recorder->message, "");
+          result.task = load_task(database, request.task_id).value();
+          result.accepted = true;
+          result.error_code.clear();
+          result.message = recorder->message;
+          store_control_request(database, request.command_id, request.task_id, command, true, result);
+          execute(database, "COMMIT");
+          sqlite3_close(database);
+        } catch (...) {
+          try {execute(database, "ROLLBACK");} catch (...) {}
+          sqlite3_close(database);
+          throw;
+        }
+      }
+      publish_task(result.task, request.command_id, result.message, result.error_code);
+    } catch (const std::exception & error) {
+      result = reject_without_task("task_database_unavailable", error.what());
+    }
+    fill_response(response, result);
+  }
+
   void handle_simple_command(
     const std::string & command,
     const interfaces::srv::TaskCommand::Request & request,
@@ -366,10 +519,6 @@ private:
       const bool cancelling_start = command == "stop" && result.task.status == "pending";
       if (command == "stop" && !cancelling_start) {
         result.task = set_phase(
-          request.task_id, "exit_rtk_capture", request.command_id,
-          "停止时同步记录出口RTK快照，不等待坐标确认");
-        publish_task(result.task, request.command_id, "正在记录出口RTK快照", "");
-        result.task = set_phase(
           request.task_id, "finalizing", request.command_id,
           "正在完成任务测量文件");
         publish_task(result.task, request.command_id, "正在完成任务测量文件", "");
@@ -383,12 +532,13 @@ private:
         request.task_id, recorder_command, recorder_requested_ns);
       if (!recorder_response.has_value()) {
         result = cancelling_start ?
-          recover_active_task(request.task_id, request.command_id, "recorder_unavailable",
-            "记录器Service不可用，开始流程已由任务管理器解除") :
+          recover_active_task(request.task_id, request.command_id, recorder_failure_code(),
+            recorder_failure_message("取消开始流程") + "，活动状态已由任务管理器解除") :
           fail_active_command(
             request.task_id, request.command_id,
             command == "stop" ? "interrupted" : stable_phase_for_command(command),
-            "recorder_unavailable", "记录器Service不可用或响应超时",
+            recorder_failure_code(), recorder_failure_message(
+              command == "stop" ? "完成任务文件" : (command == "pause" ? "暂停记录" : "继续记录")),
             command == "stop");
         publish_task(result.task, request.command_id, result.message, result.error_code);
         fill_response(response, result);
@@ -531,7 +681,7 @@ private:
           "UPDATE tasks SET operation_phase='radar_initializing', status_revision=status_revision+1, "
           "active_session_id=?, active_slot=1, start_requested_at=?, updated_at=?, "
           "transition_started_at=?, transition_deadline_at=?, "
-          "entry_rtk_status='pending', exit_rtk_status='not_requested', last_error_code=NULL, "
+          "exit_rtk_status='not_requested', last_error_code=NULL, "
           "last_error_message=NULL, warning_code=NULL WHERE task_id=?",
           -1, &update, nullptr), database, "准备开始状态更新失败");
       bind_text(update, 1, session_id);
@@ -813,8 +963,7 @@ private:
       insert_event(
         database, task_id, "recording_started", previous.status, "running", "recording",
         command_id, now_text,
-        entry_rtk_status == "confirmed" ? "采集已开始，入口RTK已记录" :
-        "采集已开始，入口RTK坐标未确认", "");
+        "采集已开始，入口和出口RTK由操作员手动记录", "");
       const auto updated = load_task(database, task_id).value();
       execute(database, "COMMIT");
       sqlite3_close(database);
@@ -874,9 +1023,11 @@ private:
       const auto now_ns = system_now_ns();
       const auto now_text = iso_utc_from_ns(now_ns);
       const std::string exit_status = recorder.rtk_status.empty() ? "unconfirmed" : recorder.rtk_status;
-      const std::string warning =
-        previous.entry_rtk_status != "confirmed" || exit_status != "confirmed" ?
-        "rtk_endpoint_unconfirmed" : "";
+      const bool endpoint_missing =
+        previous.entry_rtk_status == "not_requested" || exit_status == "not_requested";
+      const std::string warning = endpoint_missing ? "rtk_endpoint_missing" :
+        (previous.entry_rtk_status != "confirmed" || exit_status != "confirmed" ?
+        "rtk_endpoint_unconfirmed" : "");
       sqlite3_stmt * statement = nullptr;
       check_sqlite(
         sqlite3_prepare_v2(
@@ -958,7 +1109,9 @@ private:
   std::optional<interfaces::srv::PrepareRecording::Response> call_prepare_recorder(
     const interfaces::srv::StartTask::Request & request, const TaskRow & task)
   {
-    if (!prepare_client_->wait_for_service(250ms)) {
+    recorder_call_failure_.clear();
+    if (!prepare_client_->wait_for_service(2000ms)) {
+      recorder_call_failure_ = "service_unavailable";
       return std::nullopt;
     }
     auto recorder_request = std::make_shared<interfaces::srv::PrepareRecording::Request>();
@@ -979,6 +1132,7 @@ private:
       task.start_requested_ns : system_now_ns();
     auto future = prepare_client_->async_send_request(recorder_request);
     if (future.wait_for(std::chrono::milliseconds(recorder_service_timeout_ms_)) != std::future_status::ready) {
+      recorder_call_failure_ = "response_timeout";
       return std::nullopt;
     }
     return *future.get();
@@ -987,7 +1141,9 @@ private:
   std::optional<interfaces::srv::RecordingCommand::Response> call_recorder_command(
     const std::string & task_id, const std::string & command, std::int64_t requested_at_ns)
   {
-    if (!recorder_control_client_->wait_for_service(250ms)) {
+    recorder_call_failure_.clear();
+    if (!recorder_control_client_->wait_for_service(2000ms)) {
+      recorder_call_failure_ = "service_unavailable";
       return std::nullopt;
     }
     auto recorder_request = std::make_shared<interfaces::srv::RecordingCommand::Request>();
@@ -996,9 +1152,23 @@ private:
     recorder_request->requested_at_ns = requested_at_ns;
     auto future = recorder_control_client_->async_send_request(recorder_request);
     if (future.wait_for(std::chrono::milliseconds(recorder_service_timeout_ms_)) != std::future_status::ready) {
+      recorder_call_failure_ = "response_timeout";
       return std::nullopt;
     }
     return *future.get();
+  }
+
+  std::string recorder_failure_code() const
+  {
+    return recorder_call_failure_ == "response_timeout" ?
+      "recorder_response_timeout" : "recorder_unavailable";
+  }
+
+  std::string recorder_failure_message(const std::string & action) const
+  {
+    return recorder_call_failure_ == "response_timeout" ?
+      "记录器Service已发现，但" + action + "响应超时" :
+      "记录器Service未就绪，无法" + action;
   }
 
   void on_recording_status(const interfaces::msg::RecordingStatus::SharedPtr message)
@@ -1506,6 +1676,22 @@ private:
         if (!recorder->rtk_status.empty()) rtk_status = recorder->rtk_status;
       }
     } catch (...) {}
+    if (total_samples == 0) {
+      try {
+        const fs::path recovered_file =
+          fs::path(data_root_) / "tasks" / task.task_id / "measurements.db";
+        if (fs::is_regular_file(recovered_file)) {
+          const auto recovered = inspect_recovered_file(recovered_file);
+          total_samples = recovered.total_samples;
+          recording_path = task.task_id + "/measurements.db";
+          rtk_status = recovered.exit_rtk_status;
+        }
+      } catch (const std::exception & error) {
+        RCLCPP_WARN(
+          get_logger(), "恢复任务测量文件失败（%s）：%s",
+          task.task_id.c_str(), error.what());
+      }
+    }
     const auto updated = interrupt_active_task(
       task.task_id, command_id, error_code, message,
       total_samples, recording_path, rtk_status);
@@ -1728,6 +1914,7 @@ private:
   int start_transition_timeout_ms_{8000};
   int pause_resume_timeout_ms_{5000};
   int stop_transition_timeout_ms_{20000};
+  std::string recorder_call_failure_;
   rclcpp::CallbackGroup::SharedPtr callback_group_;
   rclcpp::Publisher<interfaces::msg::TaskStatus>::SharedPtr status_publisher_;
   rclcpp::Client<interfaces::srv::PrepareRecording>::SharedPtr prepare_client_;
@@ -1737,6 +1924,8 @@ private:
   rclcpp::Service<interfaces::srv::TaskCommand>::SharedPtr resume_service_;
   rclcpp::Service<interfaces::srv::TaskCommand>::SharedPtr stop_service_;
   rclcpp::Service<interfaces::srv::TaskCommand>::SharedPtr recover_service_;
+  rclcpp::Service<interfaces::srv::TaskCommand>::SharedPtr capture_entry_rtk_service_;
+  rclcpp::Service<interfaces::srv::TaskCommand>::SharedPtr capture_exit_rtk_service_;
   rclcpp::Subscription<interfaces::msg::RecordingStatus>::SharedPtr recording_status_subscription_;
   rclcpp::TimerBase::SharedPtr recovery_timer_;
   rclcpp::TimerBase::SharedPtr transition_watchdog_timer_;

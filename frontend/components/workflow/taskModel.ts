@@ -11,7 +11,7 @@ export type CollectionTaskStatus =
 export type TaskOperationPhase =
   | "idle" | "radar_initializing" | "entry_rtk_capture" | "recorder_preparing"
   | "recording" | "pausing" | "paused" | "resuming" | "stop_requested"
-  | "exit_rtk_capture" | "finalizing" | "completed" | "interrupted" | "failed";
+  | "exit_rtk_capture" | "awaiting_exit_rtk" | "finalizing" | "completed" | "interrupted" | "failed";
 
 export type RtkCaptureStatus = "not_requested" | "pending" | "confirmed" | "unconfirmed";
 export type TaskTravelDirection = "up" | "down";
@@ -77,7 +77,7 @@ export const taskPhaseLabels: Record<TaskOperationPhase, string> = {
   idle: "等待开始", radar_initializing: "雷达初始化", entry_rtk_capture: "记录入口 RTK",
   recorder_preparing: "创建记录文件", recording: "正式记录", pausing: "正在暂停",
   paused: "暂停等待", resuming: "正在继续", stop_requested: "停止记录",
-  exit_rtk_capture: "记录出口 RTK", finalizing: "文件收尾", completed: "任务完成",
+  exit_rtk_capture: "记录出口 RTK（历史流程）", awaiting_exit_rtk: "等待出口 RTK（历史流程）", finalizing: "文件收尾", completed: "任务完成",
   interrupted: "异常中断", failed: "操作失败",
 };
 
@@ -87,7 +87,7 @@ export const rtkCaptureLabels: Record<RtkCaptureStatus, string> = {
 
 export const isTaskControlBusy = (task: CollectionTask | null | undefined) => {
   if (!task) return false;
-  return ["radar_initializing", "entry_rtk_capture", "recorder_preparing", "pausing", "resuming", "stop_requested", "exit_rtk_capture", "finalizing"].includes(task.operationPhase);
+  return ["radar_initializing", "entry_rtk_capture", "recorder_preparing", "pausing", "resuming", "stop_requested", "exit_rtk_capture", "awaiting_exit_rtk", "finalizing"].includes(task.operationPhase);
 };
 
 export const isTaskActive = (task: CollectionTask | null | undefined) => {

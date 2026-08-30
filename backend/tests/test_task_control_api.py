@@ -30,6 +30,8 @@ class FakeTaskControlBridge(DummyBridge):
             "resume": True,
             "stop": True,
             "recover": True,
+            "capture_entry_rtk": True,
+            "capture_exit_rtk": True,
         }
 
     @property
@@ -55,6 +57,8 @@ class FakeTaskControlBridge(DummyBridge):
             "resume": "recording",
             "stop": "completed",
             "recover": "idle",
+            "capture_entry_rtk": "recording",
+            "capture_exit_rtk": "recording",
         }[command]
         state = {
             "start": "running",
@@ -62,6 +66,8 @@ class FakeTaskControlBridge(DummyBridge):
             "resume": "running",
             "stop": "completed",
             "recover": "pending",
+            "capture_entry_rtk": "running",
+            "capture_exit_rtk": "running",
         }[command]
         return TaskControlResult(
             command_id=str(kwargs["command_id"]),
@@ -104,7 +110,7 @@ def publish_sensor_status(application, *, lidar_online: bool, rtk_online: bool) 
     )
 
 
-def test_task_control_requires_lidar_and_rtk_online_before_start(tmp_path: Path) -> None:
+def test_task_control_requires_lidar_but_not_rtk_before_start(tmp_path: Path) -> None:
     static_dir = tmp_path / "site"
     make_static_site(static_dir)
     created_bridges: list[FakeTaskControlBridge] = []
@@ -142,7 +148,7 @@ def test_task_control_requires_lidar_and_rtk_online_before_start(tmp_path: Path)
                 "expected_revision": 0,
             },
         )
-        publish_sensor_status(application, lidar_online=True, rtk_online=True)
+        publish_sensor_status(application, lidar_online=True, rtk_online=False)
         readiness = client.get("/api/v1/task-control/readiness")
         response = client.post(
             f"/api/v1/tasks/{task['task_id']}/start",
@@ -168,9 +174,9 @@ def test_task_control_requires_lidar_and_rtk_online_before_start(tmp_path: Path)
     assert readiness.json()["ready"] is True
     assert readiness.json()["sensor_data_checked"] is True
     assert readiness.json()["lidar_online"] is True
-    assert readiness.json()["rtk_online"] is True
+    assert readiness.json()["rtk_online"] is False
     assert readiness.json()["sensor_blockers"] == []
-    assert "雷达与RTK均已上线" in readiness.json()["detail"]
+    assert "RTK端点由操作员手动记录" in readiness.json()["detail"]
     assert response.status_code == 202
     assert response.json()["operation_phase"] == "recording"
     bridge = created_bridges[0]
@@ -317,9 +323,68 @@ def test_readiness_exposes_pause_and_resume_capabilities(tmp_path: Path) -> None
     assert running["can_pause"] is True
     assert running["can_resume"] is False
     assert running["can_stop"] is True
+    assert running["can_capture_entry_rtk"] is True
+    assert running["can_capture_exit_rtk"] is True
     assert paused["can_pause"] is False
     assert paused["can_resume"] is True
     assert paused["can_stop"] is True
+    assert paused["can_capture_entry_rtk"] is True
+    assert paused["can_capture_exit_rtk"] is True
+
+
+def test_manual_rtk_endpoint_routes_forward_revisioned_commands(tmp_path: Path) -> None:
+    import sqlite3
+
+    static_dir = tmp_path / "site-rtk-endpoints"
+    make_static_site(static_dir)
+    data_root = tmp_path / "runtime-rtk-endpoints"
+    created_bridges: list[FakeTaskControlBridge] = []
+
+    def task_bridge_factory(sink):
+        bridge = FakeTaskControlBridge(sink)
+        created_bridges.append(bridge)
+        return bridge
+
+    application = create_app(
+        static_dir,
+        data_root=data_root,
+        start_ros_bridge=True,
+        bridge_factory=DummyBridge,
+        rtk_bridge_factory=DummyBridge,
+        system_status_bridge_factory=DummyBridge,
+        clearance_bridge_factory=DummyBridge,
+        task_control_bridge_factory=task_bridge_factory,
+    )
+    with TestClient(application) as client:
+        task = client.post(
+            "/api/v1/tasks",
+            json={"tunnel_code": "T-RTK", "tunnel_name": "手动端点测试"},
+        ).json()
+        pending_readiness = client.get("/api/v1/task-control/readiness").json()
+        entry = client.post(
+            f"/api/v1/tasks/{task['task_id']}/rtk/entry",
+            headers={"Idempotency-Key": "entry-rtk-001"},
+            json={"expected_revision": 0},
+        )
+        with sqlite3.connect(data_root / "capture.db") as connection:
+            connection.execute(
+                "UPDATE tasks SET status='running', active_slot=1, "
+                "active_session_id='session-rtk', operation_phase='recording' WHERE task_id=?",
+                (task["task_id"],),
+            )
+        exit_response = client.post(
+            f"/api/v1/tasks/{task['task_id']}/rtk/exit",
+            headers={"Idempotency-Key": "exit-rtk-001"},
+            json={"expected_revision": 1},
+        )
+
+    assert pending_readiness["can_capture_entry_rtk"] is True
+    assert pending_readiness["can_capture_exit_rtk"] is True
+    assert entry.status_code == 202
+    assert exit_response.status_code == 202
+    assert [call[0] for call in created_bridges[0].calls[-2:]] == [
+        "capture_entry_rtk", "capture_exit_rtk",
+    ]
 
 
 def test_missing_recover_service_does_not_disable_normal_task_control(tmp_path: Path) -> None:

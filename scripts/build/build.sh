@@ -409,6 +409,19 @@ clean_driver() { rm -rf -- "${THIRD_PARTY}/build" "${THIRD_PARTY}/install" "${TH
 clean_workspace() { rm -rf -- "${ROS2_WS}/build" "${ROS2_WS}/install" "${ROS2_WS}/log"; rm -f -- "$(mode_state workspace)" "$(legacy_mode workspace)"; }
 clean_web() { rm -rf -- "${FRONTEND}/out" "${FRONTEND}/.next"; }
 
+repair_interfaces_python_symlink_conflict() {
+  local package_build="${ROS2_WS}/build/interfaces"
+  local link_path="${package_build}/ament_cmake_python/interfaces/interfaces"
+
+  # rosidl 的 Python 生成目标要求此处是符号链接；旧版或中断构建可能残留同名实体目录。
+  # CMake 为避免误删目录会直接失败，因此只清理这个可再生的精确构建路径。
+  if [[ -d "$link_path" && ! -L "$link_path" ]]; then
+    warn "interfaces 检测到旧的 Python 生成目录，正在修复符号链接冲突"
+    rm -rf -- "$link_path"
+    ok "interfaces Python 生成目录冲突已修复"
+  fi
+}
+
 clean_all() {
   step "清理编译产物"
   clean_sdk; clean_driver; clean_workspace; clean_web
@@ -482,6 +495,7 @@ build_workspace() {
   require_file "${THIRD_PARTY}/install/setup.bash"
   prepare_mode workspace "${ROS2_WS}/build" "${ROS2_WS}/install" "${ROS2_WS}/log"
   (( CLEAN_FIRST == 0 )) || clean_workspace
+  repair_interfaces_python_symlink_conflict
   (
     source_ros; source_driver
     cd "$ROS2_WS"

@@ -30,6 +30,9 @@ def test_data_recorder_cpp_schema_executes_without_duplicate_columns() -> None:
         sample_columns = {
             row[1] for row in connection.execute("PRAGMA table_info(clearance_samples)")
         }
+        sample_indexes = {
+            row[1] for row in connection.execute("PRAGMA index_list(clearance_samples)")
+        }
         imu_columns = {
             row[1] for row in connection.execute("PRAGMA table_info(imu_samples)")
         }
@@ -47,6 +50,7 @@ def test_data_recorder_cpp_schema_executes_without_duplicate_columns() -> None:
         "is_repeated",
         "repeat_index",
     }.issubset(sample_columns)
+    assert "clearance_samples_recorded_timestamp_idx" in sample_indexes
     assert {
         "rtk_timestamp_ns",
         "rtk_latitude_deg",
@@ -126,6 +130,39 @@ def test_data_recorder_stores_mount_adjusted_clearance_and_keeps_raw_algorithm_v
     assert "sample_timer_" in source
     assert "latest.source_timestamp_ns == last_received_clearance_timestamp_ns_" in source
     assert "DELETE FROM imu_samples WHERE recorded_timestamp_ns > ?" in source
+
+
+def test_data_recorder_uses_manual_rtk_endpoints_and_stops_immediately() -> None:
+    source = (
+        Path(__file__).resolve().parents[2]
+        / "ros2_ws/src/data_recorder/src/data_recorder_node.cpp"
+    ).read_text(encoding="utf-8")
+
+    assert 'request->command == "capture_entry_rtk"' in source
+    assert 'request->command == "capture_exit_rtk"' in source
+    assert 'capture_manual_endpoint("entry"' in source
+    assert 'capture_manual_endpoint("exit"' in source
+    assert 'finalize_recording(requested_ns, true, *response)' in source
+    assert 'capture_endpoint("entry", start_requested_ns_)' not in source
+    finalize_body = source[source.index("void finalize_recording("):source.index("void on_clearance(")]
+    assert 'capture_endpoint("exit", requested_ns)' not in finalize_body
+    assert 'entry_rtk_snapshot.db' in source
+    assert 'capture_prestart_entry(request->task_id' in source
+    assert 'load_staged_entry_snapshot(task_id_)' in source
+    assert 'import_staged_entry_snapshot(*staged_entry)' in source
+    assert 'entry_rtk_status_ = staged_entry->valid ? "confirmed" : "unconfirmed"' in source
+    assert 'for (const auto * suffix : {"", "-wal", "-shm"})' in source
+    assert 'fs::remove(fs::path(staging_path.string() + suffix), remove_error)' in source
+    assert 'capture_poststop_exit(request->task_id, requested_ns' in source
+    assert 'SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX' in source
+    assert '"exit_rtk_poststop_capture"' in source
+    assert '"出口RTK快照已在停止后记录（定位有效）"' in source
+    assert '"?, \'not_requested\')"' in source
+    assert "waiting_exit_rtk_" not in source
+    assert "exit_rtk_wait_timeout_ms" not in source
+    assert "previous_status == \"confirmed\"" in source
+    assert 'endpoint_name + "RTK快照已记录（当前无有效定位）"' in source
+    assert 'endpoint_name + "RTK未记录"' not in source
 
 
 def test_recorder_keeps_raw_sensor_snapshots_without_fusion_localization_dependencies() -> None:
