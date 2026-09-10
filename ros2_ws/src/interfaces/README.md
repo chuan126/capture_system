@@ -30,8 +30,8 @@ interfaces/
 `TaskStatus`发布持久任务状态、执行阶段、状态版本、RTK端点状态、记录路径和错误。
 QoS由`task_manager`设置为reliable、transient local，使FastAPI重连后可获得最近状态。
 
-`StartTask`冻结实际行驶方向、左右车道、雷达安装高度、高度下限阈值和高度上限阈值；兼容字段 `lane` 继续承载左右车道。`TaskCommand`执行暂停、继续、停止、恢复以及手动入口/出口RTK记录。
-`PrepareRecording`把冻结后的实际行驶方向、左右车道和其他正式参数交给 `data_recorder`；`RecordingCommand`用于暂停、继续、停止和手动RTK端点记录。两者仅用于 `task_manager` 与 `data_recorder` 之间的内部记录控制。
+`StartTask`冻结实际行驶方向、右起车道编号、雷达安装高度、高度下限阈值和高度上限阈值。`lane_number_from_right` 取 1 至 4，右1为最右侧车道并向左递增；0 表示未使用编号字段。兼容字段 `lane` 和 `lane_side` 只承载历史左右车道，新编号车道不得同时填写兼容字段。`TaskCommand`执行暂停、继续、停止、恢复以及手动入口/出口RTK记录。
+`PrepareRecording`把冻结后的实际行驶方向、右起车道编号和其他正式参数交给 `data_recorder`；`RecordingCommand`用于暂停、继续、停止和手动RTK端点记录。两者仅用于 `task_manager` 与 `data_recorder` 之间的内部记录控制。
 
 RTK上线状态不阻塞浏览器开始请求。入口或出口RTK手动记录缺失、无效或超时时，任务保持可继续控制；停止不等待RTK。
 

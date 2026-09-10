@@ -16,21 +16,48 @@ export type TaskOperationPhase =
 export type RtkCaptureStatus = "not_requested" | "pending" | "confirmed" | "unconfirmed";
 export type TaskTravelDirection = "up" | "down";
 export type TaskLaneSide = "left" | "right";
-export type CollectionTaskLane = "上行左车道" | "上行右车道" | "下行左车道" | "下行右车道";
+export type TaskLaneNumberFromRight = 1 | 2 | 3 | 4;
+export type NumberedCollectionTaskLane =
+  | "上行右1车道" | "上行右2车道" | "上行右3车道" | "上行右4车道"
+  | "下行右1车道" | "下行右2车道" | "下行右3车道" | "下行右4车道";
+export type LegacyCollectionTaskLane = "上行左车道" | "上行右车道" | "下行左车道" | "下行右车道";
+export type CollectionTaskLane = NumberedCollectionTaskLane | LegacyCollectionTaskLane;
 export type CollectionTaskLaneDisplay = CollectionTaskLane | "左车道" | "右车道";
 
-export const laneSelectionParts: Record<CollectionTaskLane, { travelDirection: TaskTravelDirection; laneSide: TaskLaneSide }> = {
-  上行左车道: { travelDirection: "up", laneSide: "left" },
-  上行右车道: { travelDirection: "up", laneSide: "right" },
-  下行左车道: { travelDirection: "down", laneSide: "left" },
-  下行右车道: { travelDirection: "down", laneSide: "right" },
+export const numberedLaneOptions: NumberedCollectionTaskLane[] = [
+  "上行右1车道", "上行右2车道", "上行右3车道", "上行右4车道",
+  "下行右1车道", "下行右2车道", "下行右3车道", "下行右4车道",
+];
+
+export const laneSelectionParts: Record<CollectionTaskLane, {
+  travelDirection: TaskTravelDirection;
+  laneSide: TaskLaneSide | null;
+  laneNumberFromRight: TaskLaneNumberFromRight | null;
+}> = {
+  上行右1车道: { travelDirection: "up", laneSide: null, laneNumberFromRight: 1 },
+  上行右2车道: { travelDirection: "up", laneSide: null, laneNumberFromRight: 2 },
+  上行右3车道: { travelDirection: "up", laneSide: null, laneNumberFromRight: 3 },
+  上行右4车道: { travelDirection: "up", laneSide: null, laneNumberFromRight: 4 },
+  下行右1车道: { travelDirection: "down", laneSide: null, laneNumberFromRight: 1 },
+  下行右2车道: { travelDirection: "down", laneSide: null, laneNumberFromRight: 2 },
+  下行右3车道: { travelDirection: "down", laneSide: null, laneNumberFromRight: 3 },
+  下行右4车道: { travelDirection: "down", laneSide: null, laneNumberFromRight: 4 },
+  上行左车道: { travelDirection: "up", laneSide: "left", laneNumberFromRight: null },
+  上行右车道: { travelDirection: "up", laneSide: "right", laneNumberFromRight: null },
+  下行左车道: { travelDirection: "down", laneSide: "left", laneNumberFromRight: null },
+  下行右车道: { travelDirection: "down", laneSide: "right", laneNumberFromRight: null },
 };
 
 export const formatLaneDisplay = (
   travelDirection: string | null | undefined,
   laneSide: string | null | undefined,
   legacyLane?: string | null,
+  laneNumberFromRight?: number | null,
 ): CollectionTaskLaneDisplay | null => {
+  if ([1, 2, 3, 4].includes(laneNumberFromRight ?? 0)) {
+    if (travelDirection === "up") return `上行右${laneNumberFromRight}车道` as NumberedCollectionTaskLane;
+    if (travelDirection === "down") return `下行右${laneNumberFromRight}车道` as NumberedCollectionTaskLane;
+  }
   const side = laneSide === "left" || laneSide === "right" ? laneSide : legacyLane;
   if (travelDirection === "up" && side === "left") return "上行左车道";
   if (travelDirection === "up" && side === "right") return "上行右车道";

@@ -163,6 +163,25 @@ test("loads lightweight measurement summary without full sample payload", async 
   }
 });
 
+test("preserves the right-based lane number in playback", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => jsonResponse({
+    ...summaryPayload,
+    recording_schema_version: 15,
+    lane: "unknown",
+    travel_direction: "down",
+    lane_side: "unknown",
+    lane_number_from_right: 3,
+  });
+
+  try {
+    const summary = await loadMeasurementSummary(summaryPayload.task_id);
+    assert.equal(summary.lane, "下行右3车道");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("loads bounded adaptive series and preserves invalid gaps", async () => {
   const originalFetch = globalThis.fetch;
   let capturedInput;

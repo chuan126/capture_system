@@ -126,8 +126,9 @@ export const startTaskControl = (
   `/api/v1/tasks/${encodeURIComponent(taskId)}/start`,
   {
     travel_direction: laneSelectionParts[options.lane].travelDirection,
-    lane_side: laneSelectionParts[options.lane].laneSide,
-    lane: laneSelectionParts[options.lane].laneSide,
+    lane_side: laneSelectionParts[options.lane].laneSide ?? undefined,
+    lane: laneSelectionParts[options.lane].laneSide ?? undefined,
+    lane_number_from_right: laneSelectionParts[options.lane].laneNumberFromRight ?? undefined,
     lidar_mount_height_m: options.lidarMountHeightM,
     clearance_threshold_m: options.clearanceThresholdM,
     clearance_upper_limit_m: options.clearanceUpperLimitM,

@@ -36,6 +36,7 @@ class _QueuedCommand:
     travel_direction: str | None
     lane_side: str | None
     lane: str | None
+    lane_number_from_right: int | None
     lidar_mount_height_m: float | None
     clearance_threshold_m: float | None
     clearance_upper_limit_m: float | None
@@ -154,6 +155,7 @@ class TaskControlBridge:
         travel_direction: str | None = None,
         lane_side: str | None = None,
         lane: str | None = None,
+        lane_number_from_right: int | None = None,
         lidar_mount_height_m: float | None = None,
         clearance_threshold_m: float | None = None,
         clearance_upper_limit_m: float | None = None,
@@ -172,6 +174,7 @@ class TaskControlBridge:
             travel_direction=travel_direction,
             lane_side=lane_side,
             lane=lane,
+            lane_number_from_right=lane_number_from_right,
             lidar_mount_height_m=lidar_mount_height_m,
             clearance_threshold_m=clearance_threshold_m,
             clearance_upper_limit_m=clearance_upper_limit_m,
@@ -282,10 +285,11 @@ class TaskControlBridge:
                 request.task_id = command.task_id
                 request.command_id = command.command_id
                 request.expected_revision = command.expected_revision
-                resolved_lane = command.lane_side or command.lane or "right"
+                resolved_lane = command.lane_side or command.lane or ""
                 request.lane = resolved_lane
                 request.travel_direction = command.travel_direction or ""
                 request.lane_side = resolved_lane
+                request.lane_number_from_right = int(command.lane_number_from_right or 0)
                 request.lidar_mount_height_m = float(command.lidar_mount_height_m or 0.0)
                 request.clearance_threshold_m = float(command.clearance_threshold_m or 0.0)
                 request.clearance_upper_limit_m = float(

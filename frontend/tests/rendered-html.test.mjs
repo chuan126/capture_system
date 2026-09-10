@@ -30,11 +30,10 @@ test("renders the tunnel clearance terminal shell", async () => {
 
   const html = await response.text();
   assert.match(html, /<html[^>]*lang="zh-CN"/i);
-  assert.match(html, /<title>隧道净空测量显控终端<\/title>/i);
-  assert.match(html, /车载隧道净空高度测量/);
+  assert.match(html, /<title>交科净界-大件运输净空动态分析系统<\/title>/i);
+  assert.match(html, /蜀交科发 CTD GROUP/);
   assert.match(html, /RTK定位/);
-  assert.match(html, /融合定位/);
-  assert.match(html, /俯仰/);
+  assert.doesNotMatch(html, /融合定位|俯仰/);
   assert.match(html, /任务控制/);
   assert.match(html, /创建任务/);
   assert.match(html, /高度下限阈值/);
@@ -73,7 +72,7 @@ test("keeps the capture dashboard inside the viewport", async () => {
   assert.match(css, /@media \(max-width:\s*1180px\)[\s\S]*?\.main--dashboard\s*\{[^}]*overflow-y:\s*auto/i);
 });
 
-test("renders the local ENU point cloud as a three-dimensional view", async () => {
+test("renders the raw sensor point cloud as a three-dimensional view", async () => {
   const viewer = await readFile(
     new URL("../components/point-cloud/PointCloudViewer.tsx", import.meta.url),
     "utf8",
@@ -81,7 +80,7 @@ test("renders the local ENU point cloud as a three-dimensional view", async () =
 
   assert.match(viewer, /camera\.up\.set\(0, 0, 1\)/);
   assert.doesNotMatch(viewer, /OrthographicCamera|topCamera|沿X轴俯视/);
-  assert.match(viewer, /enuSceneRoot\.add\(points\)/);
+  assert.match(viewer, /rawSceneRoot\.add\(points\)/);
 });
 
 test("supports expanded point cloud and map panels", async () => {

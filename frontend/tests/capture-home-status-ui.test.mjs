@@ -5,6 +5,7 @@ import test from "node:test";
 const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
 const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
 const socket = await readFile(new URL("../components/system-status/useSystemStatusSocket.ts", import.meta.url), "utf8");
+const taskModel = await readFile(new URL("../components/workflow/taskModel.ts", import.meta.url), "utf8");
 
 const taskCardStart = page.indexOf('<article className="panel task-operation-panel">');
 const taskCardEnd = page.indexOf("</aside>", taskCardStart);
@@ -13,6 +14,20 @@ const taskCard = taskCardStart >= 0 && taskCardEnd > taskCardStart
   : "";
 const rtkSummary = page.match(/<article className="health-kpi-card health-kpi-card--rtk">([\s\S]*?)<\/article>/)?.[1] ?? "";
 const taskDialog = page.match(/function TaskCreateDialog\([\s\S]*?\nconst navigation:/)?.[0] ?? "";
+
+test("capture sidebar uses the customer product name and omits the legacy version label", () => {
+  assert.match(page, /<img className="brand__logo" src="\/ctd-group-logo\.png" alt="蜀交科发 CTD GROUP" \/>/);
+  assert.match(page, /className="brand__separator" aria-hidden="true"/);
+  assert.match(page, /className="brand__copy"><strong>交科净界<\/strong><span>大件运输净空动态分析系统<\/span>/);
+  assert.match(page, /交科净界-大件运输净空动态分析系统 \/ \{title\}/);
+  assert.doesNotMatch(page, /三维采集系统|隧道净空测量终端|CAPTURE SYSTEM · V1\.0|className="version"/);
+  assert.match(css, /\.brand\s*\{[^}]*grid-template-columns:\s*50px 1px minmax\(0, 1fr\);[^}]*border:\s*1px solid #dfe7f2;[^}]*background:\s*linear-gradient/);
+  assert.match(css, /\.brand__logo\s*\{[^}]*width:\s*50px;[^}]*height:\s*auto;/);
+  assert.match(css, /\.brand__separator\s*\{[^}]*width:\s*1px;[^}]*rgba\(242, 122, 0, \.72\)/);
+  assert.match(css, /\.brand strong\s*\{[^}]*color:\s*#26364d;[^}]*"Microsoft YaHei"[^}]*white-space:\s*nowrap;/);
+  assert.match(css, /\.brand span\s*\{[^}]*color:\s*#567093;[^}]*"Microsoft YaHei"/);
+  assert.match(css, /@media \(max-width:\s*760px\)[\s\S]*?\.brand\s*\{[^}]*grid-template-columns:\s*44px 1px minmax\(0, 1fr\)/);
+});
 
 test("system overview uses the revised labels and removes diagnostic helper copy", () => {
   assert.match(page, /warn: "系统告警"/);
@@ -118,9 +133,11 @@ test("task card shows frozen task and runtime algorithm parameters", () => {
   assert.match(page, /window\.setTimeout\(\(\) => void saveAlgorithmParameters\(true\), 500\)/);
   assert.match(taskCard, /onBlur=\{\(\) => void saveAlgorithmParameters\(\)\}/);
   assert.doesNotMatch(page, /下一帧实时检测和点云预览生效|参数已修改，正在等待自动应用/);
-  for (const lane of ["上行左车道", "上行右车道", "下行左车道", "下行右车道"]) {
-    assert.match(taskCard, new RegExp(`option value="${lane}"`));
+  assert.match(taskCard, /numberedLaneOptions\.map/);
+  for (const lane of ["上行右1车道", "上行右2车道", "上行右3车道", "上行右4车道", "下行右1车道", "下行右2车道", "下行右3车道", "下行右4车道"]) {
+    assert.match(taskModel, new RegExp(lane));
   }
+  assert.match(taskCard, /（历史）/);
   assert.match(taskCard, /当前任务参数/);
   assert.match(taskCard, /disabled=\{taskLocked\}/);
   assert.match(taskCard, /taskLocked \? \(currentTask\.lane \?\? operationLane\) : operationLane/);
@@ -140,8 +157,9 @@ test("task creation stores independent planned lane and height range", () => {
   assert.match(taskDialog, />作业车道</);
   assert.match(taskDialog, />高度下限阈值</);
   assert.match(taskDialog, />高度上限阈值</);
-  for (const lane of ["上行左车道", "上行右车道", "下行左车道", "下行右车道"]) {
-    assert.match(taskDialog, new RegExp(`option value="${lane}"`));
+  assert.match(taskDialog, /numberedLaneOptions\.map/);
+  for (const lane of ["上行右1车道", "上行右2车道", "上行右3车道", "上行右4车道", "下行右1车道", "下行右2车道", "下行右3车道", "下行右4车道"]) {
+    assert.match(taskModel, new RegExp(lane));
   }
   assert.match(taskDialog, /"保存并关闭"/);
   assert.match(taskDialog, /"保存并继续创建"/);

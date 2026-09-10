@@ -5,17 +5,17 @@ export const metadata: Metadata = {
   metadataBase: new URL(
     process.env.NEXT_PUBLIC_SITE_URL ?? "http://capture-system.local",
   ),
-  title: "隧道净空测量显控终端",
-  description: "Odin1 Lite 车载隧道净空高度测量显控界面",
+  title: "交科净界-大件运输净空动态分析系统",
+  description: "交科净界-大件运输净空动态分析系统",
   openGraph: {
-    title: "车载隧道净空高度测量",
-    description: "三维采集系统 · Odin1 Lite · RK3588",
+    title: "交科净界-大件运输净空动态分析系统",
+    description: "交科净界-大件运输净空动态分析系统",
     images: [{ url: "/og.png", width: 1731, height: 909 }],
   },
   twitter: {
     card: "summary_large_image",
-    title: "车载隧道净空高度测量",
-    description: "三维采集系统 · Odin1 Lite · RK3588",
+    title: "交科净界-大件运输净空动态分析系统",
+    description: "交科净界-大件运输净空动态分析系统",
     images: ["/og.png"],
   },
   icons: {

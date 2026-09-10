@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080" role="img" aria-labelledby="title">
+  <title id="title">采集首页区域标注</title>
+  <image href="图4-1_采集首页.png" x="0" y="0" width="1920" height="1080"/>
+  <g font-family="Arial, sans-serif" font-size="24" font-weight="700" text-anchor="middle" dominant-baseline="central">
+    <g fill="#e5484d" stroke="#fff" stroke-width="4">
+      <circle cx="246" cy="110" r="23"/><circle cx="262" cy="286" r="23"/>
+      <circle cx="900" cy="286" r="23"/><circle cx="262" cy="894" r="23"/>
+      <circle cx="1505" cy="349" r="23"/><circle cx="1505" cy="650" r="23"/>
+      <circle cx="1505" cy="785" r="23"/><circle cx="1505" cy="977" r="23"/>
+    </g>
+    <g fill="#fff" stroke="none">
+      <text x="246" y="110">1</text><text x="262" y="286">2</text>
+      <text x="900" y="286">3</text><text x="262" y="894">4</text>
+      <text x="1505" y="349">5</text><text x="1505" y="650">6</text>
+      <text x="1505" y="785">7</text><text x="1505" y="977">8</text>
+    </g>
+  </g>
+</svg>

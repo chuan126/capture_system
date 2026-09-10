@@ -104,6 +104,7 @@ def test_task_manager_freezes_actual_direction_lane_and_height_range_on_start() 
 
     assert "travel_direction=excluded.travel_direction" in source
     assert "lane_side=excluded.lane_side" in source
+    assert "lane_number_from_right=excluded.lane_number_from_right" in source
     assert "clearance_threshold_m=excluded.clearance_threshold_m" in source
     assert "clearance_upper_limit_m=excluded.clearance_upper_limit_m" in source
     assert "detection_radius_m=excluded.detection_radius_m" in source
@@ -111,8 +112,12 @@ def test_task_manager_freezes_actual_direction_lane_and_height_range_on_start() 
     assert "request.travel_direction == \"up\"" in source
     assert "request.travel_direction == \"down\"" in source
     assert "request.lane_side.empty() ? request.lane : request.lane_side" in source
+    assert "request.lane_number_from_right >= 1U && request.lane_number_from_right <= 4U" in source
+    assert "(legacy_lane_valid && numbered_lane_valid)" in source
+    assert "(numbered_lane_valid && request.travel_direction.empty())" in source
     assert "recorder_request->travel_direction = request.travel_direction" in source
     assert "recorder_request->lane_side = lane_side" in source
+    assert "recorder_request->lane_number_from_right = request.lane_number_from_right" in source
     assert "recorder_request->clearance_upper_limit_m = request.clearance_upper_limit_m" in source
     assert "recorder_request->detection_radius_m = request.detection_radius_m" in source
     assert "recorder_request->min_support_points = request.min_support_points" in source

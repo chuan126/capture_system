@@ -489,6 +489,105 @@ def test_task_creation_persists_independent_planned_lane_and_height_range(tmp_pa
     assert row == ("down", "left", 4.6, 5.8)
 
 
+def test_task_creation_persists_numbered_lane_without_legacy_side(tmp_path: Path) -> None:
+    static_dir = tmp_path / "site-numbered-lane"
+    make_static_site(static_dir)
+    data_root = tmp_path / "runtime-numbered-lane"
+
+    with TestClient(create_app(static_dir, data_root=data_root, start_ros_bridge=False)) as client:
+        response = client.post(
+            "/api/v1/tasks",
+            json={
+                "tunnel_code": "T-502",
+                "tunnel_name": "右起编号车道测试",
+                "travel_direction": "down",
+                "lane_number_from_right": 4,
+            },
+        )
+        missing_direction = client.post(
+            "/api/v1/tasks",
+            json={
+                "tunnel_code": "T-503",
+                "tunnel_name": "缺少方向",
+                "lane_number_from_right": 2,
+            },
+        )
+        conflicting_side = client.post(
+            "/api/v1/tasks",
+            json={
+                "tunnel_code": "T-504",
+                "tunnel_name": "冲突字段",
+                "travel_direction": "up",
+                "lane_side": "right",
+                "lane_number_from_right": 1,
+            },
+        )
+        out_of_range = client.post(
+            "/api/v1/tasks",
+            json={
+                "tunnel_code": "T-505",
+                "tunnel_name": "越界车道",
+                "travel_direction": "up",
+                "lane_number_from_right": 5,
+            },
+        )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["planned_travel_direction"] == "down"
+    assert payload["planned_lane_side"] is None
+    assert payload["planned_lane_number_from_right"] == 4
+    assert payload["lane_number_from_right"] is None
+    assert missing_direction.status_code == 422
+    assert conflicting_side.status_code == 422
+    assert out_of_range.status_code == 422
+
+    with sqlite3.connect(data_root / "capture.db") as connection:
+        row = connection.execute(
+            "SELECT planned_travel_direction, planned_lane_side, "
+            "planned_lane_number_from_right FROM tasks WHERE task_id=?",
+            (payload["task_id"],),
+        ).fetchone()
+    assert row == ("down", None, 4)
+
+
+def test_task_api_reads_frozen_numbered_lane_without_legacy_conversion(tmp_path: Path) -> None:
+    static_dir = tmp_path / "site-frozen-numbered-lane"
+    make_static_site(static_dir)
+    data_root = tmp_path / "runtime-frozen-numbered-lane"
+
+    with TestClient(create_app(static_dir, data_root=data_root, start_ros_bridge=False)) as client:
+        task = client.post(
+            "/api/v1/tasks",
+            json={
+                "tunnel_code": "T-506",
+                "tunnel_name": "冻结编号读取测试",
+                "travel_direction": "up",
+                "lane_number_from_right": 2,
+            },
+        ).json()
+        with sqlite3.connect(data_root / "capture.db") as connection:
+            connection.execute(
+                """
+                INSERT INTO task_parameters (
+                    task_id, lane, travel_direction, lane_side, lane_number_from_right,
+                    lidar_mount_height_m, clearance_threshold_m, captured_at,
+                    parameter_schema_version
+                ) VALUES (?, 'unknown', 'up', NULL, 2, 1.86, 4.5,
+                          '2026-08-30T00:00:00Z', 5)
+                """,
+                (task["task_id"],),
+            )
+        response = client.get(f"/api/v1/tasks/{task['task_id']}")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["travel_direction"] == "up"
+    assert payload["lane"] == "unknown"
+    assert payload["lane_side"] is None
+    assert payload["lane_number_from_right"] == 2
+
+
 def test_task_creation_rejects_height_threshold_above_upper_limit(tmp_path: Path) -> None:
     static_dir = tmp_path / "site-range"
     make_static_site(static_dir)

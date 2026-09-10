@@ -508,6 +508,8 @@ def test_report_lane_text_uses_actual_direction_and_lane_side() -> None:
     assert _lane_text("left", "down", "left") == "下行左车道"
     assert _lane_text("right", "down", "right") == "下行右车道"
     assert _lane_text("left", "unknown", "left") == "左车道"
+    assert _lane_text("unknown", "up", "unknown", 1) == "上行右1车道"
+    assert _lane_text("unknown", "down", "unknown", 4) == "下行右4车道"
 
 
 def test_report_uses_effective_minimum_and_writes_outlier_trace(tmp_path: Path) -> None:

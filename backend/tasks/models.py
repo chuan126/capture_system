@@ -40,7 +40,9 @@ RtkCaptureStatus = Literal[
 ]
 
 TaskLane = Literal["left", "right"]
+TaskStoredLane = Literal["left", "right", "unknown"]
 TaskTravelDirection = Literal["up", "down"]
+TaskLaneNumberFromRight = Literal[1, 2, 3, 4]
 
 
 def _normalize_required_text(value: str, field_name: str, maximum_length: int) -> str:
@@ -61,6 +63,10 @@ class TaskCreateRequest(BaseModel):
     tunnel_name: str = Field(description="隧道名称")
     travel_direction: TaskTravelDirection | None = Field(default=None, description="计划行驶方向")
     lane_side: TaskLane | None = Field(default=None, description="计划车道位置")
+    lane_number_from_right: TaskLaneNumberFromRight | None = Field(
+        default=None,
+        description="计划车道编号，右1为最右车道并向左递增",
+    )
     clearance_threshold_m: float = Field(default=0.0, ge=0.0, le=20.0, description="计划高度下限阈值")
     clearance_upper_limit_m: float = Field(default=20.0, ge=0.0, le=20.0, description="计划高度上限阈值")
 
@@ -78,6 +84,10 @@ class TaskCreateRequest(BaseModel):
     def validate_clearance_range(self) -> "TaskCreateRequest":
         if self.clearance_threshold_m > self.clearance_upper_limit_m:
             raise ValueError("高度下限阈值不能大于高度上限阈值")
+        if self.lane_number_from_right is not None and self.travel_direction is None:
+            raise ValueError("编号车道必须提供上行或下行方向")
+        if self.lane_number_from_right is not None and self.lane_side is not None:
+            raise ValueError("编号车道不能同时使用历史左右车道字段")
         return self
 
 
@@ -117,6 +127,7 @@ class TaskStartRequest(BaseModel):
     travel_direction: TaskTravelDirection | None = None
     lane_side: TaskLane | None = None
     lane: TaskLane | None = None
+    lane_number_from_right: TaskLaneNumberFromRight | None = None
     lidar_mount_height_m: float = Field(ge=0.0, le=20.0)
     clearance_threshold_m: float = Field(ge=0.0, le=20.0)
     clearance_upper_limit_m: float = Field(default=20.0, ge=0.0, le=20.0)
@@ -127,10 +138,14 @@ class TaskStartRequest(BaseModel):
     @model_validator(mode="after")
     def validate_lane_fields(self) -> "TaskStartRequest":
         resolved_lane = self.lane_side or self.lane
-        if resolved_lane is None:
+        if resolved_lane is None and self.lane_number_from_right is None:
             raise ValueError("必须提供作业车道")
         if self.lane_side is not None and self.lane is not None and self.lane_side != self.lane:
             raise ValueError("lane 与 lane_side 不一致")
+        if self.lane_number_from_right is not None and resolved_lane is not None:
+            raise ValueError("编号车道不能同时使用历史左右车道字段")
+        if self.lane_number_from_right is not None and self.travel_direction is None:
+            raise ValueError("编号车道必须提供上行或下行方向")
         if self.clearance_threshold_m > self.clearance_upper_limit_m:
             raise ValueError("高度下限阈值不能大于高度上限阈值")
         return self
@@ -208,11 +223,13 @@ class TaskResponse(BaseModel):
     warning_code: str | None
     planned_travel_direction: TaskTravelDirection | None = None
     planned_lane_side: TaskLane | None = None
+    planned_lane_number_from_right: TaskLaneNumberFromRight | None = None
     planned_clearance_threshold_m: float | None = None
     planned_clearance_upper_limit_m: float | None = None
     travel_direction: TaskTravelDirection | None = None
     lane_side: TaskLane | None = None
-    lane: TaskLane | None = None
+    lane: TaskStoredLane | None = None
+    lane_number_from_right: TaskLaneNumberFromRight | None = None
     lidar_mount_height_m: float | None = None
     clearance_threshold_m: float | None = None
     clearance_upper_limit_m: float | None = None

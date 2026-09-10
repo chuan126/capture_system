@@ -217,7 +217,7 @@ class DeepSeekReportService:
         local_summary["database_path"] = str(database_path)
         local_summary["task_range"] = (
             f"任务={task.display_id}；隧道={task.tunnel_code}；"
-            f"车道={_lane_text(assessment.summary.lane, assessment.summary.travel_direction, assessment.summary.lane_side)}；"
+            f"车道={_lane_text(assessment.summary.lane, assessment.summary.travel_direction, assessment.summary.lane_side, assessment.summary.lane_number_from_right)}；"
             f"时间={assessment.summary.started_at}至{assessment.summary.ended_at or '未结束'}"
         )
         try:
@@ -388,7 +388,12 @@ def _local_summary(assessment: TaskExportAssessment) -> dict[str, object]:
         "task_sequence": assessment.task.display_id,
         "tunnel_code": assessment.task.tunnel_code,
         "tunnel_name": assessment.task.tunnel_name,
-        "lane": _lane_text(summary.lane, summary.travel_direction, summary.lane_side),
+        "lane": _lane_text(
+            summary.lane,
+            summary.travel_direction,
+            summary.lane_side,
+            summary.lane_number_from_right,
+        ),
         "started_at": summary.started_at,
         "ended_at": summary.ended_at,
         "total_samples": summary.statistics.total_samples,
@@ -625,7 +630,12 @@ def _write_deepseek_pdf(
         [
             mixed_paragraph(assessment.task.display_id, table_style, fonts),
             mixed_paragraph(assessment.task.tunnel_code, table_style, fonts),
-            mixed_paragraph(_lane_text(summary.lane, summary.travel_direction, summary.lane_side), table_style, fonts),
+            mixed_paragraph(_lane_text(
+                summary.lane,
+                summary.travel_direction,
+                summary.lane_side,
+                summary.lane_number_from_right,
+            ), table_style, fonts),
             mixed_paragraph(_format_number(minimum, 3) or "—", table_style, fonts),
             mixed_paragraph(confidence_text, table_style, fonts),
             mixed_paragraph(record_time, table_style, fonts),

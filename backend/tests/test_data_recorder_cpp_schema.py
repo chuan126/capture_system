@@ -43,7 +43,7 @@ def test_data_recorder_cpp_schema_executes_without_duplicate_columns() -> None:
     assert "clearance_threshold_m" in metadata_columns
     assert "clearance_upper_limit_m" in metadata_columns
     assert {"detection_radius_m", "min_support_points"}.issubset(metadata_columns)
-    assert {"travel_direction", "lane_side"}.issubset(metadata_columns)
+    assert {"travel_direction", "lane_side", "lane_number_from_right"}.issubset(metadata_columns)
     assert {
         "source_sequence",
         "source_age_ms",
@@ -116,7 +116,7 @@ def test_data_recorder_stores_mount_adjusted_clearance_and_keeps_raw_algorithm_v
         / "data_recorder_node.cpp"
     ).read_text(encoding="utf-8")
 
-    assert "VALUES (1, 14, ?, 'recorded'" in source
+    assert "VALUES (1, 15, ?, 'recorded'" in source
     assert "clearance_height = *value + lidar_mount_height_m_" in source
     assert "bind_nullable_double(statement, 5, value);" in source
     assert "bind_nullable_double(statement, 6, clearance_height);" in source

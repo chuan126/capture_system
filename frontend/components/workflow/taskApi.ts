@@ -4,19 +4,6 @@ import type { CollectionTask, CollectionTaskLane, RtkCaptureStatus, TaskOperatio
 export type TaskCreateDraft = { tunnelCode: string; tunnelName: string; lane: CollectionTaskLane; clearanceThresholdM: number; clearanceUpperLimitM: number };
 type TaskApiStatus = "pending" | "running" | "paused" | "completed" | "interrupted" | "failed";
 
-type TaskApiResponse = {
-  task_id: string; display_id: string; tunnel_code: string; tunnel_name: string;
-  status: TaskApiStatus; operation_phase: TaskOperationPhase; status_revision: number;
-  created_at: string; updated_at: string; start_requested_at: string | null; started_at: string | null;
-  stop_requested_at: string | null; completed_at: string | null; entry_rtk_status: RtkCaptureStatus;
-  exit_rtk_status: RtkCaptureStatus; has_measurements: boolean; recording_path: string | null;
-  local_data_purged_at: string | null; purged_bytes: number; last_error_code: string | null;
-  last_error_message: string | null; warning_code: string | null;
-  planned_travel_direction: "up" | "down" | null; planned_lane_side: "left" | "right" | null; planned_clearance_threshold_m: number | null; planned_clearance_upper_limit_m: number | null;
-  travel_direction: "up" | "down" | null; lane_side: "left" | "right" | null; lane: "left" | "right" | null;
-  lidar_mount_height_m: number | null; clearance_threshold_m: number | null; clearance_upper_limit_m: number | null; schema_version: number;
-};
-
 const operationPhases = new Set<TaskOperationPhase>(["idle","radar_initializing","entry_rtk_capture","recorder_preparing","recording","pausing","paused","resuming","stop_requested","exit_rtk_capture","awaiting_exit_rtk","finalizing","completed","interrupted","failed"]);
 const rtkCaptureStatuses = new Set<RtkCaptureStatus>(["not_requested","pending","confirmed","unconfirmed"]);
 const statusLabels: Record<TaskApiStatus, CollectionTask["status"]> = { pending:"待执行", running:"采集中", paused:"已暂停", completed:"已停止", interrupted:"异常中断", failed:"失败" };
@@ -39,10 +26,13 @@ const parseTask=(value:unknown):CollectionTask=>{
     value.travel_direction as string|null|undefined,
     value.lane_side as string|null|undefined,
     value.lane as string|null|undefined,
+    value.lane_number_from_right as number|null|undefined,
   );
   const plannedLane=formatLaneDisplay(
     value.planned_travel_direction as string|null|undefined,
     value.planned_lane_side as string|null|undefined,
+    undefined,
+    value.planned_lane_number_from_right as number|null|undefined,
   );
   const actualThreshold=readNullableNumber(value.clearance_threshold_m,"clearance_threshold_m");
   const plannedThreshold=readNullableNumber(value.planned_clearance_threshold_m,"planned_clearance_threshold_m");
@@ -65,7 +55,7 @@ const requestJson=async(input:RequestInfo|URL,init?:RequestInit):Promise<unknown
 
 export const listTasks=async():Promise<CollectionTask[]>=>{const pageSize=500;const tasks:CollectionTask[]=[];for(let offset=0;;offset+=pageSize){const payload=await requestJson(`/api/v1/tasks?limit=${pageSize}&offset=${offset}&order=asc`,{method:"GET",headers:{Accept:"application/json"},cache:"no-store"});if(!Array.isArray(payload))throw new TaskApiError("任务列表接口返回了无效数据");tasks.push(...payload.map(parseTask));if(payload.length<pageSize)return tasks;}};
 
-const createPayload=(draft:TaskCreateDraft)=>{const parts=laneSelectionParts[draft.lane];return{tunnel_code:draft.tunnelCode,tunnel_name:draft.tunnelName,travel_direction:parts.travelDirection,lane_side:parts.laneSide,clearance_threshold_m:draft.clearanceThresholdM,clearance_upper_limit_m:draft.clearanceUpperLimitM};};
+const createPayload=(draft:TaskCreateDraft)=>{const parts=laneSelectionParts[draft.lane];return{tunnel_code:draft.tunnelCode,tunnel_name:draft.tunnelName,travel_direction:parts.travelDirection,lane_side:parts.laneSide??undefined,lane_number_from_right:parts.laneNumberFromRight??undefined,clearance_threshold_m:draft.clearanceThresholdM,clearance_upper_limit_m:draft.clearanceUpperLimitM};};
 
 export const createTask=async(draft:TaskCreateDraft,idempotencyKey:string):Promise<CollectionTask>=>{const payload=await requestJson("/api/v1/tasks",{method:"POST",headers:{Accept:"application/json","Content-Type":"application/json","Idempotency-Key":idempotencyKey},body:JSON.stringify(createPayload(draft))});return parseTask(payload);};
 

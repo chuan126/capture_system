@@ -324,6 +324,7 @@ def start_task(
         travel_direction=payload.travel_direction,
         lane_side=resolved_lane,
         lane=resolved_lane,
+        lane_number_from_right=payload.lane_number_from_right,
         lidar_mount_height_m=payload.lidar_mount_height_m,
         clearance_threshold_m=payload.clearance_threshold_m,
         clearance_upper_limit_m=payload.clearance_upper_limit_m,

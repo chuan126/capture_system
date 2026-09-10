@@ -10,7 +10,7 @@ SQLite 文件。写入由 ROS 2 记录器完成，FastAPI 只读加载。
 任务对外显示编号为 `display_id`，由创建时间生成，例如 `20260807_145601`。同秒创建多项任务
 时追加 `_02`、`_03`。内部状态、目录和接口路径始终使用稳定 `task_id` UUID。
 
-新任务创建请求同时保存计划 `travel_direction`、`lane_side`、`clearance_threshold_m` 和 `clearance_upper_limit_m`。两个高度边界范围均为 `[0, 20] m`，要求阈值不大于上限，上限默认 `20 m`。计划值保存在中央任务索引中；开始采集时，任务控制卡片当前值可以覆盖计划参数，设备端随后把实际执行方向、左右车道、阈值和上限冻结到 `task_parameters` 和每任务 `measurements.db`。
+新任务创建请求同时保存计划 `travel_direction`、`lane_number_from_right`、`clearance_threshold_m` 和 `clearance_upper_limit_m`。`lane_number_from_right` 只允许 1 至 4，右1为最右侧车道并向左递增，且必须同时提供上/下行方向。两个高度边界范围均为 `[0, 20] m`，要求阈值不大于上限，上限默认 `20 m`。计划值保存在中央任务索引中；开始采集时，任务控制卡片当前值可以覆盖计划参数，设备端随后把实际执行方向、右起车道编号、阈值和上限冻结到 `task_parameters` 和每任务 `measurements.db`。旧 `lane`/`lane_side` 仅用于兼容历史任务，不与编号字段同时提交，也不自动推断编号。
 
 ## 2. 单任务永久删除
 
@@ -138,7 +138,7 @@ CAPTURE_DATA_ROOT/
 
 | 表 | 内容 |
 | --- | --- |
-| `recording_metadata` | 任务 ID、数据来源、实际行驶方向、左右车道、时间、完整性和版本；v5 新增 `travel_direction` 和 `lane_side`，同时保留兼容字段 `lane` |
+| `recording_metadata` | 任务 ID、数据来源、实际行驶方向、右起车道编号、时间、完整性和版本；v5 新增 `travel_direction` 和 `lane_side`，v15 新增 `lane_number_from_right`，同时保留兼容字段 `lane` |
 | `clearance_samples` | 50 Hz最近源帧保持样本、有效性、质量、来源、RTK/IMU/里程计快照 |
 | `imu_samples` | schema v13新增；按IMU实际接收频率保存净空、RTK、IMU、温度、最低点和ODIN原始里程计快照，作为38列TXT数据源 |
 | `clearance_source_frames` | 净空算法实际输出源帧及质量字段。v4 使用合格连通区域数、水平投影网格覆盖面积、中位残差和 P95 残差的明确字段名 |
@@ -150,7 +150,7 @@ CAPTURE_DATA_ROOT/
 | `recording_counters` | 样本和写入错误计数 |
 
 `data_origin` 取值为 `recorded` 或 `test_fixture`。前端必须明确显示测试数据，不得将其作为正式
-测量结果。周期样本包含 `source_sequence`、`source_age_ms`、`is_repeated` 和 `repeat_index`。版本 3 起 `lidar_to_top_m` 保留算法原始输出，`clearance_height_m` 保存 `lidar_to_top_m + 雷达安装高度`。版本 4 将源帧诊断字段整理为 `candidate_region_count`、`selected_grid_area_m2`、`selected_residual_median_m` 和 `selected_residual_p95_m`。版本 5 在元数据中新增实际行驶方向和左右车道。版本 11曾采用真实净空事件驱动记录；版本12恢复50 Hz最近源帧保持序列，版本13新增IMU接收频率原始表。只有可靠源序号或设备时间戳重复时才拒绝通信层重复源帧，相同高度或最低点坐标不会被去重。
+测量结果。周期样本包含 `source_sequence`、`source_age_ms`、`is_repeated` 和 `repeat_index`。版本 3 起 `lidar_to_top_m` 保留算法原始输出，`clearance_height_m` 保存 `lidar_to_top_m + 雷达安装高度`。版本 4 将源帧诊断字段整理为 `candidate_region_count`、`selected_grid_area_m2`、`selected_residual_median_m` 和 `selected_residual_p95_m`。版本 5 在元数据中新增实际行驶方向和左右车道。版本 11 曾采用真实净空事件驱动记录；版本 12 恢复 50 Hz 最近源帧保持序列，版本 13 新增 IMU 接收频率原始表，版本 14 新增冻结的检测半径和最低簇支持点数，版本 15 新增右起车道编号。后端继续读取版本 1 至 15。只有可靠源序号或设备时间戳重复时才拒绝通信层重复源帧，相同高度或最低点坐标不会被去重。
 
 ## 7. 当前限制
 

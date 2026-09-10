@@ -148,7 +148,9 @@ if [[ -r "/sys/class/net/${direct_interface}/carrier" ]] && [[ "$(cat "/sys/clas
   nmcli connection up "${direct_profile}" ifname "${direct_interface}" >/dev/null
 fi
 
-mkdir -p /etc/capture-system
+# 部署快照目录本身保持不可列出，但运行用户必须能按固定路径读取公开的device.env。
+# install -d会同时修复旧部署遗留的0700父目录权限；状态文件和备份仍各自保持0600/0700。
+install -d -m 0711 /etc/capture-system
 cat >/etc/capture-system/device.env <<ENV
 CAPTURE_HOSTNAME=${capture_hostname}
 CAPTURE_ETHERNET_MODE=dual-port

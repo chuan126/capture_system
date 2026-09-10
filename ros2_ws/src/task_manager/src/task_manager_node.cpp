@@ -610,10 +610,16 @@ private:
   TransitionResult begin_start(const interfaces::srv::StartTask::Request & request)
   {
     const std::string lane_side = request.lane_side.empty() ? request.lane : request.lane_side;
+    const bool legacy_lane_valid = lane_side == "left" || lane_side == "right";
+    const bool numbered_lane_valid =
+      request.lane_number_from_right >= 1U && request.lane_number_from_right <= 4U;
     const bool direction_valid = request.travel_direction.empty() ||
       request.travel_direction == "up" || request.travel_direction == "down";
     if (request.task_id.empty() || request.command_id.empty() ||
-      (lane_side != "left" && lane_side != "right") || !direction_valid ||
+      (!legacy_lane_valid && !numbered_lane_valid) ||
+      request.lane_number_from_right > 4U ||
+      (legacy_lane_valid && numbered_lane_valid) ||
+      (numbered_lane_valid && request.travel_direction.empty()) || !direction_valid ||
       (!request.lane.empty() && request.lane != lane_side) ||
       !std::isfinite(request.lidar_mount_height_m) ||
       !std::isfinite(request.clearance_threshold_m) ||
@@ -700,7 +706,7 @@ private:
           "INSERT INTO task_parameters (task_id, lane, lidar_mount_height_m, "
           "clearance_threshold_m, clearance_upper_limit_m, captured_at, "
           "parameter_schema_version, travel_direction, lane_side, detection_radius_m, "
-          "min_support_points) VALUES (?, ?, ?, ?, ?, ?, 4, ?, ?, ?, ?) "
+          "min_support_points, lane_number_from_right) VALUES (?, ?, ?, ?, ?, ?, 5, ?, ?, ?, ?, ?) "
           "ON CONFLICT(task_id) DO UPDATE SET lane=excluded.lane, "
           "lidar_mount_height_m=excluded.lidar_mount_height_m, "
           "clearance_threshold_m=excluded.clearance_threshold_m, "
@@ -708,11 +714,12 @@ private:
           "captured_at=excluded.captured_at, "
           "parameter_schema_version=excluded.parameter_schema_version, "
           "travel_direction=excluded.travel_direction, lane_side=excluded.lane_side, "
+          "lane_number_from_right=excluded.lane_number_from_right, "
           "detection_radius_m=excluded.detection_radius_m, "
           "min_support_points=excluded.min_support_points",
           -1, &parameters, nullptr), database, "准备任务参数写入失败");
       bind_text(parameters, 1, request.task_id);
-      bind_text(parameters, 2, lane_side);
+      bind_text(parameters, 2, legacy_lane_valid ? lane_side : "unknown");
       sqlite3_bind_double(parameters, 3, request.lidar_mount_height_m);
       sqlite3_bind_double(parameters, 4, request.clearance_threshold_m);
       sqlite3_bind_double(parameters, 5, request.clearance_upper_limit_m);
@@ -720,9 +727,16 @@ private:
       bind_optional_text(
         parameters, 7, request.travel_direction.empty() ? std::nullopt :
         std::optional<std::string>(request.travel_direction));
-      bind_text(parameters, 8, lane_side);
+      bind_optional_text(
+        parameters, 8, legacy_lane_valid ? std::optional<std::string>(lane_side) : std::nullopt);
       sqlite3_bind_double(parameters, 9, request.detection_radius_m);
       sqlite3_bind_int64(parameters, 10, static_cast<sqlite3_int64>(request.min_support_points));
+      if (numbered_lane_valid) {
+        sqlite3_bind_int64(
+          parameters, 11, static_cast<sqlite3_int64>(request.lane_number_from_right));
+      } else {
+        sqlite3_bind_null(parameters, 11);
+      }
       check_sqlite(sqlite3_step(parameters), database, "写入任务参数失败");
       sqlite3_finalize(parameters);
       insert_event(
@@ -1123,6 +1137,7 @@ private:
     recorder_request->lane = lane_side;
     recorder_request->travel_direction = request.travel_direction;
     recorder_request->lane_side = lane_side;
+    recorder_request->lane_number_from_right = request.lane_number_from_right;
     recorder_request->lidar_mount_height_m = request.lidar_mount_height_m;
     recorder_request->clearance_threshold_m = request.clearance_threshold_m;
     recorder_request->clearance_upper_limit_m = request.clearance_upper_limit_m;

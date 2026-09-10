@@ -190,6 +190,7 @@ def test_task_control_requires_lidar_but_not_rtk_before_start(tmp_path: Path) ->
                 "travel_direction": None,
                 "lane_side": "right",
                 "lane": "right",
+                "lane_number_from_right": None,
                 "lidar_mount_height_m": 1.86,
                 "clearance_threshold_m": 4.5,
                 "clearance_upper_limit_m": 20.0,
@@ -198,6 +199,57 @@ def test_task_control_requires_lidar_but_not_rtk_before_start(tmp_path: Path) ->
             },
         )
     ]
+
+
+def test_task_control_forwards_numbered_lane_without_legacy_right_label(tmp_path: Path) -> None:
+    static_dir = tmp_path / "site-numbered"
+    make_static_site(static_dir)
+    created_bridges: list[FakeTaskControlBridge] = []
+
+    def task_bridge_factory(sink):
+        bridge = FakeTaskControlBridge(sink)
+        created_bridges.append(bridge)
+        return bridge
+
+    application = create_app(
+        static_dir,
+        data_root=tmp_path / "runtime-numbered",
+        start_ros_bridge=True,
+        bridge_factory=DummyBridge,
+        rtk_bridge_factory=DummyBridge,
+        system_status_bridge_factory=DummyBridge,
+        clearance_bridge_factory=DummyBridge,
+        task_control_bridge_factory=task_bridge_factory,
+    )
+    with TestClient(application) as client:
+        task = client.post(
+            "/api/v1/tasks",
+            json={
+                "tunnel_code": "T-304",
+                "tunnel_name": "四车道控制测试",
+                "travel_direction": "up",
+                "lane_number_from_right": 3,
+            },
+        ).json()
+        publish_sensor_status(application, lidar_online=True, rtk_online=False)
+        response = client.post(
+            f"/api/v1/tasks/{task['task_id']}/start",
+            headers={"Idempotency-Key": "start-numbered-001"},
+            json={
+                "travel_direction": "up",
+                "lane_number_from_right": 3,
+                "lidar_mount_height_m": 1.86,
+                "clearance_threshold_m": 4.5,
+                "expected_revision": 0,
+            },
+        )
+
+    assert response.status_code == 202
+    _, call = created_bridges[0].calls[0]
+    assert call["travel_direction"] == "up"
+    assert call["lane_number_from_right"] == 3
+    assert call["lane_side"] is None
+    assert call["lane"] is None
 
 
 def test_task_control_returns_503_when_ros_bridge_is_not_started(tmp_path: Path) -> None:

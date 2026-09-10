@@ -485,9 +485,15 @@ private:
       return;
     }
     const std::string lane_side = request->lane_side.empty() ? request->lane : request->lane_side;
+    const bool legacy_lane_valid = lane_side == "left" || lane_side == "right";
+    const bool numbered_lane_valid =
+      request->lane_number_from_right >= 1U && request->lane_number_from_right <= 4U;
     const bool direction_valid = request->travel_direction.empty() ||
       request->travel_direction == "up" || request->travel_direction == "down";
-    if (request->task_id.empty() || (lane_side != "left" && lane_side != "right") ||
+    if (request->task_id.empty() || (!legacy_lane_valid && !numbered_lane_valid) ||
+      request->lane_number_from_right > 4U ||
+      (legacy_lane_valid && numbered_lane_valid) ||
+      (numbered_lane_valid && request->travel_direction.empty()) ||
       !direction_valid || (!request->lane.empty() && request->lane != lane_side) ||
       !std::isfinite(request->lidar_mount_height_m) ||
       !std::isfinite(request->clearance_threshold_m) ||
@@ -511,8 +517,9 @@ private:
       tunnel_code_ = request->tunnel_code;
       tunnel_name_ = request->tunnel_name;
       travel_direction_ = request->travel_direction.empty() ? "unknown" : request->travel_direction;
-      lane_side_ = lane_side;
-      lane_ = lane_side;
+      lane_side_ = legacy_lane_valid ? lane_side : "unknown";
+      lane_ = legacy_lane_valid ? lane_side : "unknown";
+      lane_number_from_right_ = request->lane_number_from_right;
       lidar_mount_height_m_ = request->lidar_mount_height_m;
       clearance_threshold_m_ = request->clearance_threshold_m;
       clearance_upper_limit_m_ = request->clearance_upper_limit_m;
@@ -1594,6 +1601,8 @@ private:
         lane TEXT NOT NULL CHECK (lane IN ('left', 'right', 'unknown')),
         travel_direction TEXT NOT NULL CHECK (travel_direction IN ('up', 'down', 'unknown')),
         lane_side TEXT NOT NULL CHECK (lane_side IN ('left', 'right', 'unknown')),
+        lane_number_from_right INTEGER
+          CHECK ((lane_number_from_right BETWEEN 1 AND 4) OR lane_number_from_right IS NULL),
         started_at TEXT NOT NULL,
         ended_at TEXT,
         complete INTEGER NOT NULL CHECK (complete IN (0, 1)),
@@ -1829,11 +1838,12 @@ private:
         database_,
         "INSERT INTO recording_metadata ("
         "id, schema_version, task_id, data_origin, lane, travel_direction, lane_side, "
+        "lane_number_from_right, "
         "started_at, ended_at, complete, nominal_sample_rate_hz, algorithm_version, "
         "config_version, software_version, lidar_mount_height_m, clearance_threshold_m, "
         "clearance_upper_limit_m, detection_radius_m, min_support_points, "
         "entry_rtk_status, exit_rtk_status) "
-        "VALUES (1, 14, ?, 'recorded', ?, ?, ?, ?, NULL, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
+        "VALUES (1, 15, ?, 'recorded', ?, ?, ?, ?, ?, NULL, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
         "?, 'not_requested')",
         -1, &statement, nullptr),
       database_, "准备任务元数据写入失败");
@@ -1841,17 +1851,22 @@ private:
     bind_text(statement, 2, lane_);
     bind_text(statement, 3, travel_direction_);
     bind_text(statement, 4, lane_side_);
-    bind_text(statement, 5, iso_utc_from_ns(start_requested_ns_));
-    check_sqlite(sqlite3_bind_double(statement, 6, sample_rate_hz_), database_, "绑定采样频率失败");
-    bind_text(statement, 7, algorithm_version_);
-    bind_text(statement, 8, config_version_);
-    bind_text(statement, 9, software_version_);
-    check_sqlite(sqlite3_bind_double(statement, 10, lidar_mount_height_m_), database_, "绑定安装高度失败");
-    check_sqlite(sqlite3_bind_double(statement, 11, clearance_threshold_m_), database_, "绑定高度下限阈值失败");
-    check_sqlite(sqlite3_bind_double(statement, 12, clearance_upper_limit_m_), database_, "绑定高度上限阈值失败");
-    check_sqlite(sqlite3_bind_double(statement, 13, detection_radius_m_), database_, "绑定检测半径失败");
-    check_sqlite(sqlite3_bind_int64(statement, 14, static_cast<sqlite3_int64>(min_support_points_)), database_, "绑定最低支持点数失败");
-    bind_text(statement, 15, entry_rtk_status_);
+    if (lane_number_from_right_ >= 1U && lane_number_from_right_ <= 4U) {
+      sqlite3_bind_int64(statement, 5, static_cast<sqlite3_int64>(lane_number_from_right_));
+    } else {
+      sqlite3_bind_null(statement, 5);
+    }
+    bind_text(statement, 6, iso_utc_from_ns(start_requested_ns_));
+    check_sqlite(sqlite3_bind_double(statement, 7, sample_rate_hz_), database_, "绑定采样频率失败");
+    bind_text(statement, 8, algorithm_version_);
+    bind_text(statement, 9, config_version_);
+    bind_text(statement, 10, software_version_);
+    check_sqlite(sqlite3_bind_double(statement, 11, lidar_mount_height_m_), database_, "绑定安装高度失败");
+    check_sqlite(sqlite3_bind_double(statement, 12, clearance_threshold_m_), database_, "绑定高度下限阈值失败");
+    check_sqlite(sqlite3_bind_double(statement, 13, clearance_upper_limit_m_), database_, "绑定高度上限阈值失败");
+    check_sqlite(sqlite3_bind_double(statement, 14, detection_radius_m_), database_, "绑定检测半径失败");
+    check_sqlite(sqlite3_bind_int64(statement, 15, static_cast<sqlite3_int64>(min_support_points_)), database_, "绑定最低支持点数失败");
+    bind_text(statement, 16, entry_rtk_status_);
     check_sqlite(sqlite3_step(statement), database_, "写入任务元数据失败");
     sqlite3_finalize(statement);
   }
@@ -2304,6 +2319,7 @@ private:
     travel_direction_.clear();
     lane_side_.clear();
     lane_.clear();
+    lane_number_from_right_ = 0U;
     task_directory_.clear();
     final_database_path_.clear();
     temporary_database_path_.clear();
@@ -2354,6 +2370,7 @@ private:
   std::string travel_direction_;
   std::string lane_side_;
   std::string lane_;
+  std::uint8_t lane_number_from_right_{0U};
   double lidar_mount_height_m_{0.0};
   double clearance_threshold_m_{0.0};
   double clearance_upper_limit_m_{20.0};

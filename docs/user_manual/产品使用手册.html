@@ -1,0 +1,1062 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>车载隧道净空高度测量系统产品使用手册</title>
+<style>
+@page {
+  size: A4;
+  margin: 18mm 16mm 18mm 16mm;
+  @top-center { content: "车载隧道净空高度测量系统产品使用手册"; color: #000; font-size: 8pt; }
+  @bottom-center { content: "第 " counter(page) " 页 / 共 " counter(pages) " 页"; color: #000; font-size: 8pt; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; color: #000; font-family: "WenQuanYi Micro Hei", "Microsoft YaHei", sans-serif; font-size: 10.2pt; line-height: 1.72; }
+h1 { margin: 54mm 0 12mm; color: #000; font-size: 25pt; line-height: 1.35; text-align: center; }
+h2 { margin: 10mm 0 4mm; color: #000; border-bottom: 1.5px solid #777; padding-bottom: 2mm; font-size: 17pt; line-height: 1.35; break-after: avoid; }
+h2.chapter { break-before: page; }
+h3 { margin: 7mm 0 2.5mm; color: #000; font-size: 13pt; line-height: 1.4; break-after: avoid; }
+h4 { margin: 5mm 0 2mm; color: #000; font-size: 11pt; break-after: avoid; }
+p { margin: 0 0 3mm; text-align: justify; }
+body > p:nth-of-type(-n+4) { text-align: center; }
+hr { border: 0; border-top: 1px solid #aaa; margin: 8mm 0; }
+hr.cover-break, hr.toc-break { visibility: hidden; height: 0; margin: 0; break-after: page; }
+a { color: #000; text-decoration: underline; }
+code { padding: 0.2mm 1mm; border-radius: 2px; background: #f1f1f1; color: #000; font-family: "DejaVu Sans Mono", monospace; font-size: 9pt; }
+pre { margin: 3mm 0 4mm; padding: 4mm; border: 1px solid #aaa; border-radius: 4px; background: #f7f7f7; white-space: pre-wrap; break-inside: avoid; }
+pre code { padding: 0; background: transparent; }
+blockquote { margin: 4mm 0; padding: 3.5mm 4mm; border-left: 4px solid #666; background: #f5f5f5; color: #000; break-inside: avoid; }
+blockquote p { margin: 0 0 2mm; }
+blockquote p:last-child { margin-bottom: 0; }
+ul, ol { margin: 1.5mm 0 3mm; padding-left: 7mm; }
+li { margin-bottom: 1.2mm; }
+table { width: 100%; margin: 3mm 0 5mm; border-collapse: collapse; font-size: 8.6pt; break-inside: auto; }
+thead { display: table-header-group; }
+tr { break-inside: avoid; }
+th { background: #ededed; color: #000; font-weight: 700; }
+th, td { border: 1px solid #999; padding: 2mm 2.2mm; vertical-align: top; text-align: left; }
+img { display: block; max-width: 100%; max-height: 205mm; margin: 4mm auto 2mm; object-fit: contain; break-inside: avoid; }
+p > em:only-child { display: block; color: #000; font-size: 8.6pt; text-align: center; }
+.toc { margin: 4mm 0 6mm; padding: 4mm 7mm; border: 1px solid #aaa; border-radius: 4px; background: #fafafa; }
+.toc ul { list-style: none; padding-left: 0; }
+.toc ul ul { padding-left: 6mm; }
+.toc li { margin: 1mm 0; }
+.toc > ul > li > a { font-weight: 700; }
+@media screen { body { max-width: 980px; margin: 0 auto; padding: 30px; background: white; } }
+</style>
+</head>
+<body>
+<h1 id="_1">车载隧道净空高度测量系统产品使用手册</h1>
+<p><strong>手册版本：</strong> V1.0<br>
+<strong>适用软件版本：</strong> CAPTURE SYSTEM V1.0<br>
+<strong>核对日期：</strong> 2026年8月30日<br>
+<strong>适用对象：</strong> 一线操作人员</p>
+<blockquote>
+<p>本手册中的界面图片为示例。任务编号、隧道名称、测量数值、地图位置和网络名称以现场设备为准。截图中的Wi-Fi名称和密钥均经过替换或遮蔽。</p>
+</blockquote>
+<hr class="cover-break">
+<h2 id="_2">目录</h2>
+<div class="toc">
+<ul>
+<li><a href="#_2">目录</a></li>
+<li><a href="#_3">修订记录</a></li>
+<li><a href="#_4">安全标识</a></li>
+<li><a href="#1">1 产品概述</a><ul>
+<li><a href="#11">1.1 产品用途</a></li>
+<li><a href="#12">1.2 本地运行原则</a></li>
+<li><a href="#13">1.3 推荐作业流程</a></li>
+</ul>
+</li>
+<li><a href="#2">2 硬件连接</a></li>
+<li><a href="#3">3 软件使用前准备</a><ul>
+<li><a href="#31">3.1 电脑和浏览器要求</a></li>
+<li><a href="#32">3.2 网络连接关系</a></li>
+<li><a href="#33">3.3 使用维护网线打开系统</a></li>
+<li><a href="#34-wi-fi">3.4 设备连接外部Wi-Fi</a></li>
+<li><a href="#35">3.5 首次配置高德地图</a></li>
+<li><a href="#36-deepseek">3.6 首次准备DeepSeek大模型</a></li>
+<li><a href="#37">3.7 作业前检查标准</a></li>
+</ul>
+</li>
+<li><a href="#4">4 采集首页</a><ul>
+<li><a href="#41">4.1 页面区域说明</a></li>
+<li><a href="#42">4.2 系统状态和设备状态</a></li>
+<li><a href="#43">4.3 实时净空高度</a></li>
+<li><a href="#44">4.4 点云实时预览</a></li>
+<li><a href="#45">4.5 实时定位地图</a></li>
+<li><a href="#46">4.6 创建检测任务</a></li>
+<li><a href="#47">4.7 选择和切换任务</a></li>
+<li><a href="#48">4.8 设置作业参数</a></li>
+<li><a href="#49-rtk">4.9 记录入口RTK</a></li>
+<li><a href="#410">4.10 开始采集</a></li>
+<li><a href="#411">4.11 采集过程监视</a></li>
+<li><a href="#412">4.12 暂停和继续</a></li>
+<li><a href="#413-rtk">4.13 停止采集并记录出口RTK</a></li>
+<li><a href="#414">4.14 浏览器断线与恢复控制</a></li>
+</ul>
+</li>
+<li><a href="#5">5 数据回放</a><ul>
+<li><a href="#51">5.1 页面区域说明</a></li>
+<li><a href="#52">5.2 选择回放任务</a></li>
+<li><a href="#53">5.3 查看净空高度曲线</a></li>
+<li><a href="#54">5.4 查看统计和数据质量</a></li>
+<li><a href="#55">5.5 进入报告导出</a></li>
+<li><a href="#56">5.6 永久删除任务</a></li>
+</ul>
+</li>
+<li><a href="#6">6 报告导出</a><ul>
+<li><a href="#61">6.1 页面区域说明</a></li>
+<li><a href="#62">6.2 判断任务是否可导出</a></li>
+<li><a href="#63-txt">6.3 导出结构化测量数据TXT</a></li>
+<li><a href="#64-pdf">6.4 生成本地PDF汇总报告</a></li>
+<li><a href="#65-deepseek">6.5 使用DeepSeek生成辅助分析报告</a></li>
+<li><a href="#66">6.6 导出任务的后台运行</a></li>
+<li><a href="#67">6.7 文件命名和归档建议</a></li>
+</ul>
+</li>
+<li><a href="#7">7 现场作业规范</a><ul>
+<li><a href="#71">7.1 人员分工</a></li>
+<li><a href="#72">7.2 参数记录</a></li>
+<li><a href="#73">7.3 端点记录</a></li>
+<li><a href="#74">7.4 异常处置</a></li>
+<li><a href="#75">7.5 作业结束检查</a></li>
+</ul>
+</li>
+<li><a href="#8">8 常见问题与故障处理</a><ul>
+<li><a href="#81">8.1 浏览器无法打开系统</a></li>
+<li><a href="#82">8.2 页面打开但状态长期为“检查中”</a></li>
+<li><a href="#83-wi-fi">8.3 Wi-Fi不可用或扫描不到网络</a></li>
+<li><a href="#84">8.4 高德地图加载失败</a></li>
+<li><a href="#85">8.5 雷达显示未连接或点云不刷新</a></li>
+<li><a href="#86-rtk-">8.6 RTK坐标显示--</a></li>
+<li><a href="#87">8.7 “开始采集”按钮不可用</a></li>
+<li><a href="#88-">8.8 净空高度显示--</a></li>
+<li><a href="#89">8.9 回放页面没有曲线</a></li>
+<li><a href="#810-txtpdf">8.10 TXT或PDF按钮不可点击</a></li>
+<li><a href="#811-ai">8.11 AI报告生成失败</a></li>
+<li><a href="#812">8.12 浏览器意外关闭</a></li>
+<li><a href="#813">8.13 存储空间不足</a></li>
+</ul>
+</li>
+<li><a href="#a-key">附录A 申请高德地图Key</a></li>
+<li><a href="#b-deepseek-api-key">附录B 申请DeepSeek API Key</a></li>
+<li><a href="#c">附录C 参数记录表</a></li>
+<li><a href="#d">附录D 任务状态说明</a></li>
+<li><a href="#e">附录E 交付方联系记录</a></li>
+</ul>
+</div>
+<hr class="toc-break">
+<h2 id="_3">修订记录</h2>
+<table>
+<thead>
+<tr>
+<th>版本</th>
+<th>日期</th>
+<th>修订内容</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>V1.0</td>
+<td>2026-08-30</td>
+<td>首版产品使用手册；完成软件连接、采集、回放、报告、第三方服务配置和故障处理说明</td>
+</tr>
+</tbody>
+</table>
+<h2 id="_4">安全标识</h2>
+<table>
+<thead>
+<tr>
+<th>标识</th>
+<th>含义</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>危险</strong></td>
+<td>不遵守可能造成人身伤害或严重事故</td>
+</tr>
+<tr>
+<td><strong>警告</strong></td>
+<td>不遵守可能导致测量数据丢失、任务错误或设备异常</td>
+</tr>
+<tr>
+<td><strong>注意</strong></td>
+<td>帮助正确操作设备、识别限制或提高作业质量</td>
+</tr>
+<tr>
+<td><strong>提示</strong></td>
+<td>补充说明、推荐做法或操作结果</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p><strong>危险：行车期间驾驶员不得操作电脑或浏览器。</strong> 应由随车操作人员负责创建任务、记录RTK端点、控制采集和查看告警；驾驶员只负责安全驾驶。</p>
+<p><strong>警告：本系统的网页界面用于操作和监视，不替代现场交通组织、封控、限速和人员安全措施。</strong> 现场作业必须遵守客户单位及作业地点的安全规定。</p>
+</blockquote>
+<hr>
+<h2 id="1" class="chapter">1 产品概述</h2>
+<h3 id="11">1.1 产品用途</h3>
+<p>车载隧道净空高度测量系统用于在车辆行驶过程中采集激光雷达和RTK数据，在RK3588采集终端本地计算、显示并保存隧道净空高度。操作人员通过维护网线连接电脑，在浏览器中完成任务创建、采集控制、数据回放和报告导出。</p>
+<p>系统主要提供以下功能：</p>
+<ul>
+<li>实时显示激光雷达点云、净空高度和高度曲线；</li>
+<li>显示RTK坐标、定位质量和实时地图；</li>
+<li>创建并管理隧道检测任务；</li>
+<li>记录入口和出口RTK快照；</li>
+<li>暂停、继续和停止采集；</li>
+<li>回放任务净空高度曲线并查看数据质量；</li>
+<li>导出结构化测量数据TXT和多任务PDF汇总报告；</li>
+<li>可选使用DeepSeek生成单任务大模型辅助分析报告。</li>
+</ul>
+<h3 id="12">1.2 本地运行原则</h3>
+<p>采集、净空计算、任务状态和数据存储均在RK3588采集终端上运行。电脑只显示页面并发送操作命令。浏览器关闭或维护网线短暂断开，不会自动终止设备端正在执行的采集任务。</p>
+<p>高德地图底图和DeepSeek大模型属于联网功能。外部互联网不可用时，本地采集、数据回放、TXT导出和本地PDF生成仍可使用；地图底图和AI报告可能不可用。</p>
+<h3 id="13">1.3 推荐作业流程</h3>
+<pre><code class="language-text">连接并打开网页
+→ 检查雷达、RTK、主控板和存储状态
+→ 创建并选择任务
+→ 核对六项作业参数
+→ 记录入口RTK
+→ 开始采集
+→ 监视点云、净空曲线和设备状态
+→ 停止采集
+→ 记录出口RTK
+→ 数据回放核对
+→ 导出TXT、PDF或AI报告
+→ 备份后按需清理设备数据
+</code></pre>
+<hr>
+<h2 id="2" class="chapter">2 硬件连接</h2>
+<blockquote>
+<p><strong>本章预留，由交付方补充。</strong> 建议至少包含设备组成、接口名称、供电要求、雷达网线、维护网线、RTK天线与串口、安装方向、雷达安装高度测量方法、上电/断电顺序、车辆固定要求和硬件故障检查。</p>
+</blockquote>
+<hr>
+<h2 id="3" class="chapter">3 软件使用前准备</h2>
+<h3 id="31">3.1 电脑和浏览器要求</h3>
+<p>客户电脑不需要安装专用客户端。建议使用最新稳定版Google Chrome或Microsoft Edge浏览器，推荐屏幕分辨率不低于1440×900。</p>
+<p>操作前请关闭浏览器中可能改变页面显示比例的插件，并将浏览器缩放设置为100%。不要同时在多台电脑上控制同一个正在执行的任务。</p>
+<h3 id="32">3.2 网络连接关系</h3>
+<p><img alt="图3-1 系统网络连接示意图" src="%E6%8F%92%E5%9B%BE/%E5%9B%BE3-1_%E7%B3%BB%E7%BB%9F%E7%BD%91%E7%BB%9C%E8%BF%9E%E6%8E%A5.svg"></p>
+<p><em>图3-1 系统网络连接示意图</em></p>
+<ul>
+<li>ODIN1 Lite通过雷达网线连接RK3588的雷达口；</li>
+<li>客户电脑通过维护网线连接RK3588的维护口，这是推荐的网页访问方式；</li>
+<li>RK3588通过Wi-Fi连接外部互联网，用于高德地图和DeepSeek；</li>
+<li>维护网线和设备Wi-Fi用途不同，不要把设备连接外部Wi-Fi理解为电脑连接设备热点。</li>
+</ul>
+<h3 id="33">3.3 使用维护网线打开系统</h3>
+<h4 id="_5">操作前提</h4>
+<ul>
+<li>设备已正确安装并上电；</li>
+<li>客户电脑已通过维护网线连接RK3588维护口；</li>
+<li>设备启动过程已经完成。</li>
+</ul>
+<h4 id="_6">操作步骤</h4>
+<ol>
+<li>打开电脑浏览器。</li>
+<li>
+<p>在地址栏输入 <strong><code>http://capture-system.local:8000/</code></strong>。</p>
+</li>
+<li>
+<p>按Enter键，等待采集首页显示。</p>
+</li>
+<li>确认页面左上角显示“三维采集系统”，左侧显示“采集首页、数据回放、报告导出”。</li>
+</ol>
+<h4 id="_7">备用访问地址</h4>
+<p>如果现场交付时未修改默认维护网段，且域名地址无法打开，可尝试：</p>
+<pre><code class="language-text">http://192.168.100.1:8000/
+</code></pre>
+<blockquote>
+<p><strong>注意：</strong> 如果交付人员修改过维护网段，应以设备标签或交付记录中的地址为准。</p>
+</blockquote>
+<h3 id="34-wi-fi">3.4 设备连接外部Wi-Fi</h3>
+<p>高德地图和DeepSeek需要RK3588访问互联网。客户电脑仍建议保持维护网线连接。</p>
+<p><img alt="图3-3 连接外部Wi-Fi" src="%E6%8F%92%E5%9B%BE/%E5%9B%BE3-3_%E8%BF%9E%E6%8E%A5%E5%A4%96%E9%83%A8WiFi.png"></p>
+<p><em>图3-3 连接外部Wi-Fi（图中网络名称为示例）</em></p>
+<h4 id="_8">操作步骤</h4>
+<ol>
+<li>点击页面左下角的“Wi-Fi”。</li>
+<li>等待“连接 Wi-Fi”窗口列出可用网络。</li>
+<li>选择需要连接的网络。</li>
+<li>如果网络需要密码，在密码框中输入正确密码。</li>
+<li>点击“连接”。</li>
+<li>窗口关闭后，确认左下角显示已连接的网络名称。</li>
+</ol>
+<p>点击“重新扫描”可以刷新网络列表。信号百分比越高，通常表示当前接收信号越强。</p>
+<blockquote>
+<p><strong>注意：</strong> 切换Wi-Fi时页面可能短暂提示网络异常。通过独立维护网线访问时通常不影响网页连接；如页面没有恢复，等待10秒后刷新浏览器。</p>
+<p><strong>警告：</strong> 不要在截图、报告或公开文档中保存客户Wi-Fi密码。</p>
+</blockquote>
+<h3 id="35">3.5 首次配置高德地图</h3>
+<p>高德地图配置只需在设备上完成一次，配置会保存在当前RK3588中，其他浏览器访问同一设备时自动共用。</p>
+<p>客户需要提前申请：</p>
+<ul>
+<li>高德地图Web端（JS API）Key；</li>
+<li>与该Key配套的<code>securityJsCode</code>安全密钥。</li>
+</ul>
+<p><img alt="图3-4 高德地图设置" src="%E6%8F%92%E5%9B%BE/%E5%9B%BE3-4_%E9%AB%98%E5%BE%B7%E5%9C%B0%E5%9B%BE%E8%AE%BE%E7%BD%AE.png"></p>
+<p><em>图3-4 高德地图设置（Key已使用提示文字替代）</em></p>
+<h4 id="_9">操作步骤</h4>
+<ol>
+<li>确认设备已连接可以访问互联网的Wi-Fi。</li>
+<li>在采集首页“实时定位地图”右上角点击“地图设置”。</li>
+<li>在“Web JS API Key”中输入客户申请的Key。</li>
+<li>在“安全密钥”中输入对应的<code>securityJsCode</code>。</li>
+<li>点击“保存”。</li>
+<li>等待地图加载，确认地图底图正常显示。</li>
+</ol>
+<p>安全密钥由设备端保存并通过同源代理使用，读取配置时不会把安全密钥明文返回浏览器。</p>
+<p>如果地图加载失败，请依次检查互联网连接、Key类型、安全密钥是否配套，以及高德控制台中的配置限制。申请方法见附录A。</p>
+<h3 id="36-deepseek">3.6 首次准备DeepSeek大模型</h3>
+<p>客户需自行注册DeepSeek开放平台账号、创建API Key并保证账号余额满足调用要求。API Key在“报告导出”页面填写，具体操作见第6.5节“使用DeepSeek生成辅助分析报告”。</p>
+<blockquote>
+<p><strong>警告：</strong> API Key相当于调用凭证。不要通过聊天软件、截图或普通文档公开，不要使用个人账号为无关人员长期提供共享Key。</p>
+</blockquote>
+<h3 id="37">3.7 作业前检查标准</h3>
+<p>每次正式作业前，操作人员应完成以下检查：</p>
+<table>
+<thead>
+<tr>
+<th>检查项</th>
+<th>合格表现</th>
+<th>不合格时处理</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>网页访问</td>
+<td>页面可打开且数据持续刷新</td>
+<td>检查维护网线、设备电源和访问地址</td>
+</tr>
+<tr>
+<td>雷达</td>
+<td>雷达状态灯正常，点云持续刷新</td>
+<td>不开始采集，检查雷达供电和雷达网线</td>
+</tr>
+<tr>
+<td>RTK</td>
+<td>串口连接，定位质量满足现场要求</td>
+<td>检查天线、串口和遮挡；RTK不阻塞采集，但端点可能未确认</td>
+</tr>
+<tr>
+<td>主控板</td>
+<td>状态正常，CPU数据可见</td>
+<td>等待恢复或联系维护人员</td>
+</tr>
+<tr>
+<td>数据存储</td>
+<td>状态正常且容量满足本次任务</td>
+<td>先导出和备份历史数据，再按规定清理</td>
+</tr>
+<tr>
+<td>作业参数</td>
+<td>六项参数与项目作业单一致</td>
+<td>开始前改正并再次核对</td>
+</tr>
+<tr>
+<td>地图和AI</td>
+<td>需要使用时能访问互联网</td>
+<td>检查设备Wi-Fi；不影响本地采集主流程</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h2 id="4" class="chapter">4 采集首页</h2>
+<h3 id="41">4.1 页面区域说明</h3>
+<p><img alt="图4-1 采集首页区域标注" src="%E6%8F%92%E5%9B%BE/%E5%9B%BE4-1_%E9%87%87%E9%9B%86%E9%A6%96%E9%A1%B5%E6%A0%87%E6%B3%A8.svg"></p>
+<p><em>图4-1 采集首页区域标注。1—系统与设备状态；2—点云实时预览；3—实时定位地图；4—实时净空高度曲线；5—作业参数；6—当前任务；7—待测任务；8—采集控制。</em></p>
+<table>
+<thead>
+<tr>
+<th>编号</th>
+<th>区域</th>
+<th>主要用途</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>系统与设备状态</td>
+<td>查看净空高度、RTK、雷达、主控板、存储和总体状态</td>
+</tr>
+<tr>
+<td>2</td>
+<td>点云实时预览</td>
+<td>确认雷达数据持续到达并观察最低可信点簇</td>
+</tr>
+<tr>
+<td>3</td>
+<td>实时定位地图</td>
+<td>查看有效RTK位置、作业车道和轨迹状态</td>
+</tr>
+<tr>
+<td>4</td>
+<td>实时净空高度曲线</td>
+<td>查看最近120帧有效高度和无效帧断点</td>
+</tr>
+<tr>
+<td>5</td>
+<td>作业参数</td>
+<td>设置安装高度、车道、阈值和算法参数</td>
+</tr>
+<tr>
+<td>6</td>
+<td>当前任务</td>
+<td>查看任务编号、隧道、车道、状态和当前阶段</td>
+</tr>
+<tr>
+<td>7</td>
+<td>待测任务</td>
+<td>选择尚未执行的任务</td>
+</tr>
+<tr>
+<td>8</td>
+<td>采集控制</td>
+<td>开始、暂停、继续、记录RTK端点、停止和恢复控制</td>
+</tr>
+</tbody>
+</table>
+<h3 id="42">4.2 系统状态和设备状态</h3>
+<p>顶部状态区用于快速判断设备是否具备作业条件：</p>
+<ul>
+<li><strong>系统正常：</strong> 四类设备没有明确异常；</li>
+<li><strong>系统告警：</strong> 存在需要关注但不一定立即中止作业的问题；</li>
+<li><strong>系统异常：</strong> 存在断连、超时或资源异常；</li>
+<li><strong>检查中：</strong> 页面尚未获得最新设备诊断。</li>
+</ul>
+<p>雷达、RTK、主控板和数据存储卡片右侧的状态灯表示当前诊断结果。没有持续数据或诊断超时时，不应把旧的绿色状态当作当前在线证据。</p>
+<h3 id="43">4.3 实时净空高度</h3>
+<p>顶部“净空高度”显示当前有效净空结果，单位为米，保留三位小数。页面显示值为雷达到顶部的测量高度加“雷达安装高度”。</p>
+<p>因此，雷达安装高度填写错误会直接造成显示值和正式记录整体偏移。作业前必须按照交付标定结果填写，不得凭感觉估计。</p>
+<p>当高度低于下限阈值或超过上限阈值时，页面以红色提示异常。显示<code>--</code>表示当前帧没有可用结果或数据链路尚未就绪，系统不会沿用上一帧高度冒充当前值。</p>
+<h3 id="44">4.4 点云实时预览</h3>
+<p>点云预览显示雷达原始坐标数据的浏览器降采样结果，仅用于实时监视：</p>
+<ul>
+<li>鼠标左键拖动可旋转视角；</li>
+<li>鼠标滚轮可缩放；</li>
+<li>右上角放大按钮可进入放大显示；</li>
+<li>按Esc、点击背景或再次点击放大按钮可退出放大显示。</li>
+</ul>
+<p>图例中不同颜色用于区分普通预览点、计算范围内点和最低可信簇。网页点云不是正式历史点云文件，不应用截图代替正式测量记录。</p>
+<h3 id="45">4.5 实时定位地图</h3>
+<p>地图仅在RTK结果有效时追加轨迹。当前位置使用蓝色圆点，轨迹由有效RTK坐标绘制。RTK无效时，地图保留最后有效位置和已有轨迹，但暂停新增轨迹。</p>
+<p>地图显示“定位无效”时，应以顶部RTK状态和坐标为准检查定位条件，不要把地图保留位置理解为当前有效坐标。</p>
+<h3 id="46">4.6 创建检测任务</h3>
+<p><img alt="图4-2 创建检测任务" src="%E6%8F%92%E5%9B%BE/%E5%9B%BE4-2_%E5%88%9B%E5%BB%BA%E6%A3%80%E6%B5%8B%E4%BB%BB%E5%8A%A1.png"></p>
+<p><em>图4-2 创建检测任务</em></p>
+<h4 id="_10">操作步骤</h4>
+<ol>
+<li>在任务控制卡片右上角点击“创建任务”。</li>
+<li>输入隧道编号，例如<code>T-001</code>。</li>
+<li>输入隧道名称。</li>
+<li>选择作业车道。</li>
+<li>输入高度下限阈值和高度上限阈值。</li>
+<li>如本次只创建一个任务，点击“保存并关闭”。</li>
+<li>如需连续创建多个任务，点击“保存并继续创建”，等待成功提示后填写下一项。</li>
+</ol>
+<h4 id="_11">输入规则</h4>
+<ul>
+<li>隧道编号和隧道名称不能为空；</li>
+<li>作业车道必须选择；</li>
+<li>高度下限和上限范围均为0～20 m；</li>
+<li>高度下限不得大于高度上限；</li>
+<li>“右1车道”指行驶方向最右侧车道，向左依次为右2、右3、右4车道。</li>
+</ul>
+<p>保存成功后，设备根据创建时间自动生成任务编号，例如<code>20260830_142530</code>。同一秒创建多个任务时会追加<code>_02</code>、<code>_03</code>。操作人员不需要手工编写任务编号。</p>
+<h3 id="47">4.7 选择和切换任务</h3>
+<p>创建后，任务显示在“当前任务”或“待测任务”区域：</p>
+<ul>
+<li>点击待测任务即可选择；</li>
+<li>当前任务区显示任务编号、隧道信息、车道、状态和当前阶段；</li>
+<li>点击“切换任务”可从任务列表中选择其他任务；</li>
+<li>采集中、暂停中或控制过渡阶段不能切换任务；</li>
+<li>正常完成一个任务后，系统可选择下一项待执行任务，但不会自动开始采集。</li>
+</ul>
+<p>刷新浏览器后如果没有选中任务，重新在页面中选择即可；设备端已经开始的活动任务仍会显示控制入口。</p>
+<h3 id="48">4.8 设置作业参数</h3>
+<p>任务开始前必须逐项核对以下参数：</p>
+<table>
+<thead>
+<tr>
+<th>参数</th>
+<th style="text-align: right;">允许范围</th>
+<th>操作说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>雷达安装高度</td>
+<td style="text-align: right;">0～20 m</td>
+<td>雷达测量基准点相对路面高度；应使用交付标定值</td>
+</tr>
+<tr>
+<td>作业车道</td>
+<td style="text-align: right;">上/下行右1～右4</td>
+<td>右1为行驶方向最右侧车道</td>
+</tr>
+<tr>
+<td>高度下限阈值</td>
+<td style="text-align: right;">0～20 m</td>
+<td>报告高度闭区间下限，同时用于实时异常提示</td>
+</tr>
+<tr>
+<td>高度上限阈值</td>
+<td style="text-align: right;">0～20 m</td>
+<td>报告高度闭区间上限，同时用于实时异常提示；不得小于下限</td>
+</tr>
+<tr>
+<td>圆柱检测半径</td>
+<td style="text-align: right;">0.10～5.00 m</td>
+<td>以雷达为中心参与最低净空检测的水平半径</td>
+</tr>
+<tr>
+<td>最低簇支持点数</td>
+<td style="text-align: right;">1～10000点，必须为整数</td>
+<td>一个低点簇至少需要的支持点数量</td>
+</tr>
+</tbody>
+</table>
+<p>圆柱检测半径和最低簇支持点数允许一线操作人员修改。输入合法值并停止编辑约0.5秒后，系统自动保存并应用。开始采集后六项参数锁定，作为该任务的实际执行参数和报告依据。</p>
+<h4 id="_12">参数调整影响</h4>
+<ul>
+<li>检测半径增大：覆盖区域变大，也可能引入车道外或无关结构；</li>
+<li>检测半径减小：检测区域更集中，也可能遗漏偏离车辆中心的结构；</li>
+<li>支持点数增大：更不容易把零散噪点作为障碍，也可能忽略点数较少的真实目标；</li>
+<li>支持点数减小：对小目标更敏感，同时更容易受到零散点影响。</li>
+</ul>
+<blockquote>
+<p><strong>警告：</strong> 参数必须依据项目作业单、标定记录或现场负责人指令调整。不要为了获得“更好看”的曲线随意修改参数。</p>
+</blockquote>
+<h3 id="49-rtk">4.9 记录入口RTK</h3>
+<p>推荐在车辆位于隧道入口、定位条件满足要求时，先记录入口RTK，再开始采集。</p>
+<h4 id="_13">操作步骤</h4>
+<ol>
+<li>确认当前任务正确。</li>
+<li>查看顶部RTK坐标、卫星数及HDOP/PDOP。</li>
+<li>点击底部“入口RTK”。</li>
+<li>等待页面显示记录结果。</li>
+</ol>
+<p>系统保存按钮操作时最新的RTK快照，不等待稳定窗口。如果没有最近有效定位，系统会保存“坐标未确认”状态，但不阻止任务开始。</p>
+<h3 id="410">4.10 开始采集</h3>
+<h4 id="_14">开始前最终检查</h4>
+<ul>
+<li>当前任务的隧道编号、名称和车道正确；</li>
+<li>六项作业参数正确且没有红色输入提示；</li>
+<li>雷达在线并持续显示点云；</li>
+<li>存储容量充足；</li>
+<li>入口RTK已经按项目要求记录；</li>
+<li>随车人员和交通安全条件已就绪。</li>
+</ul>
+<h4 id="_15">操作步骤</h4>
+<ol>
+<li>点击“开始采集”。</li>
+<li>不要重复点击，等待当前阶段依次更新。</li>
+<li>确认任务状态变为“采集中”。</li>
+<li>确认作业参数已经锁定。</li>
+<li>确认实时高度曲线持续更新。</li>
+</ol>
+<p>开始流程可能短暂显示“雷达初始化”“创建记录文件”等阶段。RTK是否定位不阻塞开始；雷达、任务控制服务或参数不满足条件时，“开始采集”按钮会不可用。</p>
+<h3 id="411">4.11 采集过程监视</h3>
+<p>采集过程中，随车操作人员应持续关注：</p>
+<ul>
+<li>系统总体状态是否正常；</li>
+<li>雷达状态灯和点云是否持续更新；</li>
+<li>当前净空是否出现红色越限提示；</li>
+<li>实时曲线是否连续，是否频繁出现无效断点；</li>
+<li>RTK状态是否满足端点记录要求；</li>
+<li>主控板CPU和存储状态是否异常；</li>
+<li>当前任务是否保持“采集中”。</li>
+</ul>
+<p>单帧无效不一定代表设备故障；如果连续出现<code>--</code>、点云停止刷新或雷达状态异常，应在确保行车安全的前提下停止本次任务并检查设备。</p>
+<h3 id="412">4.12 暂停和继续</h3>
+<p>需要临时排除非检测路段或处理中断时，可以使用暂停：</p>
+<ol>
+<li>点击“暂停”。</li>
+<li>等待任务状态变为“已暂停”。</li>
+<li>排除暂停原因后点击“继续”。</li>
+<li>等待任务状态恢复为“采集中”。</li>
+</ol>
+<p>暂停期间正式测量样本停止写入，实时点云、净空和RTK监视仍继续。系统在记录中保留暂停区间，报告的数据质量区会显示暂停段数。</p>
+<h3 id="413-rtk">4.13 停止采集并记录出口RTK</h3>
+<p>推荐在车辆完成隧道检测并到达出口后执行以下操作：</p>
+<ol>
+<li>点击“停止”。</li>
+<li>不要重复点击，等待“文件收尾”完成。</li>
+<li>确认任务状态变为“已停止”。</li>
+<li>在出口定位条件满足时点击“出口RTK”。</li>
+<li>等待页面显示出口RTK记录结果。</li>
+<li>点击“查看数据”进入数据回放，或点击“报告检查”进入报告导出。</li>
+</ol>
+<p>停止按钮不显示二次确认，点击后立即固定停止时间并开始封存记录。出口RTK是独立快照；如果没有有效定位，系统保存“坐标未确认”，不阻塞任务完成。</p>
+<h3 id="414">4.14 浏览器断线与恢复控制</h3>
+<p>浏览器关闭、页面刷新或维护网线短暂断开时，设备端正在执行的任务继续运行。恢复连接后：</p>
+<ol>
+<li>重新打开系统地址；</li>
+<li>等待任务列表和状态加载；</li>
+<li>确认当前活动任务及真实状态；</li>
+<li>根据页面提供的按钮继续、停止或恢复控制。</li>
+</ol>
+<p>仅当页面明确显示可恢复且任务控制卡住时使用“恢复控制”。不要通过反复刷新、重复开始或直接断电代替正常恢复。</p>
+<hr>
+<h2 id="5" class="chapter">5 数据回放</h2>
+<h3 id="51">5.1 页面区域说明</h3>
+<p><img alt="图5-1 数据回放页面区域标注" src="%E6%8F%92%E5%9B%BE/%E5%9B%BE5-1_%E6%95%B0%E6%8D%AE%E5%9B%9E%E6%94%BE%E6%A0%87%E6%B3%A8.svg"></p>
+<p><em>图5-1 “海沧隧道-20260828-04”数据回放页面区域标注。1—任务列表；2—净空曲线；3—统计与数据质量；4—页面操作区。</em></p>
+<h3 id="52">5.2 选择回放任务</h3>
+<ol>
+<li>点击左侧导航“数据回放”。</li>
+<li>在任务列表中使用时间编号、隧道编号或名称搜索。</li>
+<li>按“全部、已停止、未结束”筛选任务。</li>
+<li>点击目标任务。</li>
+<li>等待高度曲线和统计结果加载。</li>
+</ol>
+<p>任务按日期分组并按创建时间倒序显示，较新的任务位于上方。任务卡片同时显示状态和是否存在测量记录。</p>
+<h3 id="53">5.3 查看净空高度曲线</h3>
+<p><img alt="图5-2 净空高度曲线" src="%E6%8F%92%E5%9B%BE/%E5%9B%BE5-2_%E5%87%80%E7%A9%BA%E9%AB%98%E5%BA%A6%E6%9B%B2%E7%BA%BF.png"></p>
+<p><em>图5-2 “海沧隧道-20260828-04”净空高度曲线</em></p>
+<p>曲线支持以下操作：</p>
+<table>
+<thead>
+<tr>
+<th>操作</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>鼠标拖动</td>
+<td>左右或上下平移曲线</td>
+</tr>
+<tr>
+<td>鼠标滚轮</td>
+<td>横向缩放时间窗口</td>
+</tr>
+<tr>
+<td>Shift+滚轮</td>
+<td>纵向缩放高度范围</td>
+</tr>
+<tr>
+<td><code>＋</code>、<code>－</code></td>
+<td>放大或缩小时间窗口</td>
+</tr>
+<tr>
+<td><code>Y＋</code>、<code>Y－</code></td>
+<td>放大或缩小纵轴范围</td>
+</tr>
+<tr>
+<td>双击曲线</td>
+<td>复位视图</td>
+</tr>
+<tr>
+<td>“回到开头”</td>
+<td>返回任务起始窗口</td>
+</tr>
+<tr>
+<td>鼠标悬停</td>
+<td>查看附近点的时间和高度</td>
+</tr>
+</tbody>
+</table>
+<p>曲线断点表示对应位置没有有效净空结果，页面不会使用模拟值或上一有效值补齐。页面显示序列可能包含对最近雷达源帧的保持记录；重复记录保留来源关系，不代表雷达独立产生了更多帧。</p>
+<h3 id="54">5.4 查看统计和数据质量</h3>
+<p>右侧“统计与数据质量”包含：</p>
+<ul>
+<li>隧道信息：任务编号、隧道编号、隧道名称和检测车道；</li>
+<li>测量统计：最低、平均、最高净空，有效样本数量、记录时长和实际平均频率；</li>
+<li>隧道端点：入口RTK和出口RTK；</li>
+<li>数据质量：数据来源、标称频率、有效采样比例、无效数量、暂停区间和记录完整性。</li>
+</ul>
+<p>入口或出口显示<code>--</code>表示没有已确认坐标。任务“异常中断”或记录不完整时，应在导出正式报告前由现场负责人复核。</p>
+<h3 id="55">5.5 进入报告导出</h3>
+<p>选中任务后，点击页面顶部“进入报告导出”。当前任务会带入报告页面，便于继续生成TXT、PDF或AI报告。</p>
+<h3 id="56">5.6 永久删除任务</h3>
+<p><img alt="图5-3 选择与删除任务" src="%E6%8F%92%E5%9B%BE/%E5%9B%BE5-3_%E9%80%89%E6%8B%A9%E4%B8%8E%E5%88%A0%E9%99%A4%E4%BB%BB%E5%8A%A1.png"></p>
+<p><em>图5-3 勾选“海沧隧道-20260828-04”后可使用顶部“删除所选任务”</em></p>
+<p>可以逐项勾选、选择某一天或对当前筛选结果执行全选。采集中和已暂停的任务不能勾选删除。</p>
+<h4 id="_16">删除步骤</h4>
+<ol>
+<li>确认任务数据已经完成所需导出和外部备份。</li>
+<li>勾选一个或多个任务。</li>
+<li>核对顶部“已选删除”数量。</li>
+<li>点击“删除所选任务”。</li>
+<li>仔细阅读确认提示并确认一次。</li>
+<li>等待页面显示删除数量和释放空间。</li>
+</ol>
+<blockquote>
+<p><strong>警告：删除为永久删除。</strong> 系统会删除所选任务的本地测量数据库、分析文件和任务内导出文件，普通用户无法恢复。中央任务索引只保留删除时间、清理时间和释放空间等审计信息。</p>
+</blockquote>
+<p>如果所选任务中有任何一项不允许删除，系统不会开始本次批量清理。</p>
+<hr>
+<h2 id="6" class="chapter">6 报告导出</h2>
+<h3 id="61">6.1 页面区域说明</h3>
+<p><img alt="图6-1 报告导出页面区域标注" src="%E6%8F%92%E5%9B%BE/%E5%9B%BE6-1_%E6%8A%A5%E5%91%8A%E5%AF%BC%E5%87%BA%E6%A0%87%E6%B3%A8.svg"></p>
+<p><em>图6-1 报告导出页面区域标注。1—任务选择；2—当前任务；3—TXT导出；4—PDF汇总；5—DeepSeek辅助分析。</em></p>
+<p>报告页面有两种“选择”概念：</p>
+<ul>
+<li><strong>当前任务：</strong> 点击任务卡片确定，TXT和AI报告针对当前任务；</li>
+<li><strong>勾选任务：</strong> 使用复选框确定，PDF汇总针对一个或多个勾选任务。</li>
+</ul>
+<h3 id="62">6.2 判断任务是否可导出</h3>
+<p>页面顶部显示当前任务状态、已选择任务数量和可汇总数量。任务卡片上方会显示“可以导出”或“当前不能导出”及原因。</p>
+<p>正式报告通常要求任务已经结束、存在正式测量记录并包含可用于报告的净空结果。界面测试数据不会进入正式文件。</p>
+<h3 id="63-txt">6.3 导出结构化测量数据TXT</h3>
+<p><img alt="图6-2 TXT导出" src="%E6%8F%92%E5%9B%BE/%E5%9B%BE6-2_TXT%E5%AF%BC%E5%87%BA.png"></p>
+<p><em>图6-2 TXT导出区域</em></p>
+<h4 id="_17">操作步骤</h4>
+<ol>
+<li>点击目标任务，使其成为“当前任务”。</li>
+<li>确认页面显示“可以导出”。</li>
+<li>在“原始数据保存”卡片中核对文件名。</li>
+<li>点击“导出 TXT”。</li>
+<li>等待生成完成，浏览器自动开始下载。</li>
+</ol>
+<p>TXT以实际收到的IMU消息为行，固定输出38列结构化字段，包括记录时间、任务信息、净空、RTK、IMU、雷达温度、最低点和ODIN位姿等。缺失字段按当前导出协议填<code>0</code>，列之间使用4个ASCII空格。</p>
+<blockquote>
+<p><strong>注意：</strong> 当前TXT是结构化测量数据，不包含历史原始点云。不要把TXT描述为完整点云文件。</p>
+</blockquote>
+<h3 id="64-pdf">6.4 生成本地PDF汇总报告</h3>
+<h4 id="_18">操作步骤</h4>
+<ol>
+<li>在左侧勾选需要汇总的一个或多个任务。</li>
+<li>核对顶部“已选择”和“可汇总”数量。</li>
+<li>查看PDF区域中的报告预览。</li>
+<li>点击“本地报告生成”。</li>
+<li>等待进度完成，浏览器自动开始下载。</li>
+</ol>
+<p>PDF按用户明确勾选的任务汇总，主要列出任务编号、隧道编号、检测车道、最低值、记录时间、入口RTK和出口RTK。最低值按任务开始时冻结的高度闭区间进行正式异常分析；没有区间内有效值时最低值可留空，但其他任务信息仍可进入报告。</p>
+<p>本地报告不依赖DeepSeek，也不需要填写大模型API Key。</p>
+<h3 id="65-deepseek">6.5 使用DeepSeek生成辅助分析报告</h3>
+<p><img alt="图6-3 PDF与大模型报告" src="%E6%8F%92%E5%9B%BE/%E5%9B%BE6-3_PDF%E4%B8%8E%E5%A4%A7%E6%A8%A1%E5%9E%8B%E6%8A%A5%E5%91%8A.png"></p>
+<p><em>图6-3 PDF汇总和DeepSeek大模型辅助分析区域（API Key以密码形式遮蔽）</em></p>
+<h4 id="_19">使用前提</h4>
+<ul>
+<li>设备Wi-Fi能够访问互联网；</li>
+<li>客户已经创建DeepSeek API Key；</li>
+<li>DeepSeek账号余额和服务状态正常；</li>
+<li>当前任务满足正式PDF导出条件。</li>
+</ul>
+<h4 id="_20">操作步骤</h4>
+<ol>
+<li>点击目标任务，使其成为当前任务。</li>
+<li>
+<p>在“DeepSeek大模型辅助分析”中确认API地址为 <strong><code>https://api.deepseek.com/chat/completions</code></strong>。</p>
+</li>
+<li>
+<p>输入客户自己的DeepSeek API Key。</p>
+</li>
+<li>选择<code>deepseek-v4-flash</code>或<code>deepseek-v4-pro</code>。</li>
+<li>普通操作人员保持默认“大模型Skill”，不要随意删除或改写分析规则。</li>
+<li>点击“AI报告生成”。</li>
+<li>页面显示“大模型thinking...”时等待生成完成。</li>
+<li>生成成功后浏览器自动下载PDF。</li>
+</ol>
+<p>配置会自动保存到当前RK3588。每次点击“AI报告生成”都会创建一次新的独立请求，不延续前一次上下文，并可能产生新的接口费用。</p>
+<p>设备不会上传整个SQLite数据库。RK3588先在本地读取任务数据并形成有界审计证据包，再发送源帧统计、低值候选、连续性和数据质量摘要。生成的PDF在固定任务表格后增加“报告分析结果”和“数据质量分析”。</p>
+<blockquote>
+<p><strong>警告：</strong> AI报告属于辅助分析，不能替代原始测量记录、现场复核、工程人员判断和最终签字结论。</p>
+<p><strong>数据提示：</strong> 使用前应确认客户的数据管理制度允许将分析证据发送至第三方DeepSeek服务。</p>
+</blockquote>
+<h3 id="66">6.6 导出任务的后台运行</h3>
+<p>TXT、PDF和AI报告均在设备后台生成。生成过程中可以取消。切换页面或刷新浏览器后，系统会继续跟踪未完成的导出作业；正式采集活动期间，导出作业可能保持排队，待资源允许后继续。</p>
+<p>不要在生成期间反复点击同一按钮。AI报告每次点击都会产生新的第三方请求。</p>
+<h3 id="67">6.7 文件命名和归档建议</h3>
+<ul>
+<li>TXT文件名包含任务时间编号和隧道编号；</li>
+<li>PDF汇总文件名使用报告生成时间；</li>
+<li>AI报告对应当前单个任务；</li>
+<li>下载后按客户项目、日期、隧道和车道建立归档目录；</li>
+<li>删除设备任务前，至少在一处独立存储介质完成备份并抽查文件可打开。</li>
+</ul>
+<hr>
+<h2 id="7" class="chapter">7 现场作业规范</h2>
+<h3 id="71">7.1 人员分工</h3>
+<ul>
+<li>驾驶员负责车辆和交通安全，不操作网页；</li>
+<li>随车操作人员负责系统状态、任务控制、端点记录和异常报告；</li>
+<li>项目负责人确认参数、数据有效性和报告结论。</li>
+</ul>
+<h3 id="72">7.2 参数记录</h3>
+<p>每次项目开始前应形成参数作业单，至少记录雷达安装高度、行驶方向、车道编号、高度上下限、检测半径和最低簇支持点数。操作人员开始任务前逐项核对，开始后不得通过其他方式绕过参数锁定。</p>
+<h3 id="73">7.3 端点记录</h3>
+<p>入口和出口RTK以按钮时刻最新快照为准。操作人员应在车辆处于项目定义的入口或出口位置、RTK质量满足要求时点击。坐标“未确认”不应被描述为已经获得可靠端点。</p>
+<h3 id="74">7.4 异常处置</h3>
+<p>发生以下情况时，应在确保交通和人员安全的前提下停止或暂停任务：</p>
+<ul>
+<li>雷达状态异常或点云持续停止；</li>
+<li>实时净空连续显示<code>--</code>；</li>
+<li>存储出现异常或剩余空间不足；</li>
+<li>当前任务、车道或安装高度设置错误；</li>
+<li>系统持续显示异常且不能恢复；</li>
+<li>现场负责人要求中止作业。</li>
+</ul>
+<p>异常任务不要直接删除。先记录任务编号、发生时间和页面提示，再由负责人决定重测、导出或保留。</p>
+<h3 id="75">7.5 作业结束检查</h3>
+<ul>
+<li>当前任务已经停止，不处于采集中或暂停中；</li>
+<li>入口和出口RTK状态已经核对；</li>
+<li>回放曲线和数据质量已经检查；</li>
+<li>必要的TXT、PDF或AI报告已完成下载；</li>
+<li>文件已复制到项目归档位置并抽查可打开；</li>
+<li>需要释放空间时，仅删除已经确认备份的任务；</li>
+<li>按硬件章节要求关闭设备电源。</li>
+</ul>
+<hr>
+<h2 id="8" class="chapter">8 常见问题与故障处理</h2>
+<h3 id="81">8.1 浏览器无法打开系统</h3>
+<ol>
+<li>检查RK3588是否已经上电并完成启动。</li>
+<li>检查维护网线两端及网口指示灯。</li>
+<li>重新输入<code>http://capture-system.local:8000/</code>。</li>
+<li>尝试默认备用地址<code>http://192.168.100.1:8000/</code>。</li>
+<li>暂时关闭电脑上会改变路由的VPN或代理软件后重试。</li>
+<li>仍无法访问时，记录电脑网络状态并联系维护人员。</li>
+</ol>
+<h3 id="82">8.2 页面打开但状态长期为“检查中”</h3>
+<p>等待10秒并刷新页面。如果仍未恢复，检查设备端业务服务是否启动。不要因为页面没有更新就反复点击采集按钮。</p>
+<h3 id="83-wi-fi">8.3 Wi-Fi不可用或扫描不到网络</h3>
+<ul>
+<li>点击“重新扫描”；</li>
+<li>检查无线路由器和信号强度；</li>
+<li>确认设备无线网卡已启用；</li>
+<li>尝试靠近接入点或使用其他网络；</li>
+<li>页面提示“Wi-Fi管理不可用”时联系维护人员检查设备网络权限和NetworkManager。</li>
+</ul>
+<h3 id="84">8.4 高德地图加载失败</h3>
+<ul>
+<li>确认设备已经连接互联网；</li>
+<li>确认申请的是“Web端（JS API）”Key；</li>
+<li>确认Key和<code>securityJsCode</code>来自同一项配置；</li>
+<li>重新打开“地图设置”并保存；</li>
+<li>检查高德开放平台中的安全设置和配额；</li>
+<li>RTK无效只会暂停定位轨迹，不等同于地图Key错误。</li>
+</ul>
+<h3 id="85">8.5 雷达显示未连接或点云不刷新</h3>
+<ul>
+<li>检查雷达供电和雷达网线；</li>
+<li>确认雷达接口没有接到维护网口；</li>
+<li>等待雷达初始化完成；</li>
+<li>如果状态灯异常且点云持续停止，不开始正式采集；</li>
+<li>已在采集时发生故障，应安全停止任务并记录任务编号和时间。</li>
+</ul>
+<h3 id="86-rtk-">8.6 RTK坐标显示<code>--</code></h3>
+<p>可能原因包括RTK串口未连接、没有有效Fix、定位数据无效或数据已经超时。检查RTK天线视野、接头、串口和定位状态。RTK无效不阻塞开始或停止，但入口、出口坐标可能保存为未确认。</p>
+<h3 id="87">8.7 “开始采集”按钮不可用</h3>
+<p>依次检查：</p>
+<ul>
+<li>是否已经创建并选择待执行任务；</li>
+<li>雷达是否在线并有持续数据；</li>
+<li>雷达安装高度是否在0～20 m；</li>
+<li>高度上下限是否在0～20 m且下限不大于上限；</li>
+<li>检测半径是否在0.10～5.00 m；</li>
+<li>最低簇支持点数是否为1～10000之间的整数；</li>
+<li>任务控制服务是否可用；</li>
+<li>是否已经有其他活动任务。</li>
+</ul>
+<h3 id="88-">8.8 净空高度显示<code>--</code></h3>
+<p>表示当前没有可用净空结果，常见原因是点云未到达、当前帧无效、计算范围内没有可信点簇或算法尚未就绪。不要把上一次有效值手工抄作当前值。</p>
+<h3 id="89">8.9 回放页面没有曲线</h3>
+<ul>
+<li>确认选中了正确任务；</li>
+<li>查看任务是否“已有测量记录”；</li>
+<li>查看本地数据是否已清理；</li>
+<li>等待首段数据加载；</li>
+<li>任务没有有效高度记录时页面保持空状态，不会生成模拟曲线。</li>
+</ul>
+<h3 id="810-txtpdf">8.10 TXT或PDF按钮不可点击</h3>
+<ul>
+<li>TXT要求当前任务满足正式导出条件；</li>
+<li>PDF要求至少勾选一个可汇总任务；</li>
+<li>采集未结束、没有测量记录或数据不满足条件时，页面会给出阻止原因；</li>
+<li>按页面提示返回数据回放核对任务状态和记录完整性。</li>
+</ul>
+<h3 id="811-ai">8.11 AI报告生成失败</h3>
+<p>按以下顺序检查：</p>
+<ol>
+<li>设备互联网连接；</li>
+<li>DeepSeek API地址是否正确；</li>
+<li>API Key是否完整、有效；</li>
+<li>账号是否有可用余额；</li>
+<li>当前模型是否可用；</li>
+<li>当前任务是否满足正式PDF条件；</li>
+<li>稍后重试并避免重复提交。</li>
+</ol>
+<p>常见第三方错误包括：401认证失败、402余额不足、429达到限速、500服务故障和503服务繁忙。以页面实际错误信息及DeepSeek官方状态为准。</p>
+<h3 id="812">8.12 浏览器意外关闭</h3>
+<p>重新打开系统页面并等待真实任务状态恢复。设备端任务不会因浏览器关闭自动停止。确认状态后再进行暂停、继续或停止，不要重新创建同一任务代替恢复。</p>
+<h3 id="813">8.13 存储空间不足</h3>
+<p>先停止创建新的正式任务，完成历史任务的TXT/PDF导出和外部备份。确认备份可用后，在数据回放页按项目负责人批准的范围永久删除历史任务。不要直接操作设备数据目录。</p>
+<hr>
+<h2 id="a-key" class="chapter">附录A 申请高德地图Key</h2>
+<p>高德开放平台页面可能调整，以下流程以官方控制台实际显示为准。</p>
+<ol>
+<li>访问<a href="https://lbs.amap.com/">高德开放平台</a>，注册并登录开发者账号。</li>
+<li>进入控制台的“应用管理”。</li>
+<li>创建新应用。</li>
+<li>在应用中添加Key。</li>
+<li>服务平台选择“Web端（JS API）”。</li>
+<li>创建后保存Web JS API Key和配套安全密钥<code>securityJsCode</code>。</li>
+<li>回到采集首页“地图设置”填写并保存。</li>
+</ol>
+<p>高德官方说明要求Web端（JS API）Key配合安全密钥使用，本系统采用设备端代理保存和使用安全密钥。具体申请步骤参见<a href="https://lbs.amap.com/api/javascript-api-v2/prerequisites">高德地图JS API 2.0准备</a>，安全密钥说明参见<a href="https://lbs.amap.com/api/javascript-api-v2/guide/abc/jscode">JS API安全密钥使用</a>。</p>
+<h2 id="b-deepseek-api-key" class="chapter">附录B 申请DeepSeek API Key</h2>
+<ol>
+<li>访问<a href="https://platform.deepseek.com/">DeepSeek开放平台</a>。</li>
+<li>注册并登录客户自己的账号。</li>
+<li>按平台提示完成必要的账号设置。</li>
+<li>在API Key管理页面创建新的API Key。</li>
+<li>立即将Key保存到客户批准的凭据管理位置；不要在公开文档中保存明文。</li>
+<li>根据预计用量确认余额和计费规则。</li>
+<li>在本系统“报告导出”页面填写API地址、API Key并选择模型。</li>
+</ol>
+<p>DeepSeek当前API入口、模型和计费可能调整。使用前参见<a href="https://api-docs.deepseek.com/zh-cn/">DeepSeek API首次调用</a>和<a href="https://api-docs.deepseek.com/zh-cn/quick_start/pricing/">模型与价格</a>。</p>
+<h2 id="c" class="chapter">附录C 参数记录表</h2>
+<p>建议每次项目开始前填写一份，并由操作人员与项目负责人共同确认。</p>
+<table>
+<thead>
+<tr>
+<th>项目</th>
+<th>填写值</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>项目名称</td>
+<td></td>
+</tr>
+<tr>
+<td>设备编号</td>
+<td></td>
+</tr>
+<tr>
+<td>作业日期</td>
+<td></td>
+</tr>
+<tr>
+<td>隧道编号</td>
+<td></td>
+</tr>
+<tr>
+<td>隧道名称</td>
+<td></td>
+</tr>
+<tr>
+<td>作业车道</td>
+<td></td>
+</tr>
+<tr>
+<td>雷达安装高度</td>
+<td>m</td>
+</tr>
+<tr>
+<td>高度下限阈值</td>
+<td>m</td>
+</tr>
+<tr>
+<td>高度上限阈值</td>
+<td>m</td>
+</tr>
+<tr>
+<td>圆柱检测半径</td>
+<td>m</td>
+</tr>
+<tr>
+<td>最低簇支持点数</td>
+<td>点</td>
+</tr>
+<tr>
+<td>操作人员</td>
+<td></td>
+</tr>
+<tr>
+<td>复核人员</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h2 id="d" class="chapter">附录D 任务状态说明</h2>
+<table>
+<thead>
+<tr>
+<th>状态</th>
+<th>含义</th>
+<th>操作建议</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>待执行</td>
+<td>任务已创建，尚未开始</td>
+<td>核对参数和入口RTK后开始</td>
+</tr>
+<tr>
+<td>采集中</td>
+<td>正在正式记录</td>
+<td>持续监视系统和测量状态</td>
+</tr>
+<tr>
+<td>已暂停</td>
+<td>正式样本暂时停止写入</td>
+<td>排除原因后继续或停止</td>
+</tr>
+<tr>
+<td>已停止</td>
+<td>任务正常完成并封存</td>
+<td>记录出口RTK、回放和导出</td>
+</tr>
+<tr>
+<td>异常中断</td>
+<td>任务未按正常流程完整结束</td>
+<td>保留数据并由负责人复核</td>
+</tr>
+<tr>
+<td>失败</td>
+<td>控制或记录过程失败</td>
+<td>记录错误信息并联系维护人员</td>
+</tr>
+</tbody>
+</table>
+<h2 id="e" class="chapter">附录E 交付方联系记录</h2>
+<table>
+<thead>
+<tr>
+<th>项目</th>
+<th>内容</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>交付单位</td>
+<td></td>
+</tr>
+<tr>
+<td>联系人</td>
+<td></td>
+</tr>
+<tr>
+<td>联系电话</td>
+<td></td>
+</tr>
+<tr>
+<td>技术支持邮箱</td>
+<td></td>
+</tr>
+<tr>
+<td>设备编号</td>
+<td></td>
+</tr>
+<tr>
+<td>维护地址</td>
+<td><code>http://capture-system.local:8000/</code></td>
+</tr>
+<tr>
+<td>备用地址</td>
+<td><code>http://192.168.100.1:8000/</code>（默认配置）</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<p><strong>手册结束</strong></p>
+</body>
+</html>

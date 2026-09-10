@@ -32,7 +32,7 @@ def iso_utc(epoch_ns: int) -> str:
 
 
 def create_recording_schema(connection: sqlite3.Connection) -> None:
-    """建立与 data_recorder 当前 schema v10 对齐的测试数据库。"""
+    """建立与 data_recorder 当前 schema v15 对齐的测试数据库。"""
     connection.executescript(
         """
         CREATE TABLE recording_metadata (
@@ -43,6 +43,8 @@ def create_recording_schema(connection: sqlite3.Connection) -> None:
             lane TEXT NOT NULL CHECK (lane IN ('left', 'right', 'unknown')),
             travel_direction TEXT NOT NULL CHECK (travel_direction IN ('up', 'down', 'unknown')),
             lane_side TEXT NOT NULL CHECK (lane_side IN ('left', 'right', 'unknown')),
+            lane_number_from_right INTEGER
+              CHECK ((lane_number_from_right BETWEEN 1 AND 4) OR lane_number_from_right IS NULL),
             started_at TEXT NOT NULL,
             ended_at TEXT,
             complete INTEGER NOT NULL CHECK (complete IN (0, 1)),
@@ -223,6 +225,8 @@ def create_recording(
     sample_count: int,
     complete: bool,
     lane: str,
+    travel_direction: str,
+    lane_number_from_right: int | None,
     invalid_ranges: list[tuple[int, int]],
     include_exit_rtk: bool,
     pause_interval: tuple[float, float] | None,
@@ -234,16 +238,19 @@ def create_recording(
         connection.execute(
             """
             INSERT INTO recording_metadata (
-                id, schema_version, task_id, data_origin, lane, travel_direction, lane_side, started_at,
+                id, schema_version, task_id, data_origin, lane, travel_direction, lane_side,
+                lane_number_from_right, started_at,
                 ended_at, complete, nominal_sample_rate_hz, algorithm_version,
                 config_version, software_version, lidar_mount_height_m,
                 clearance_threshold_m, clearance_upper_limit_m, entry_rtk_status, exit_rtk_status
-            ) VALUES (1, 10, ?, 'test_fixture', ?, 'up', ?, ?, ?, ?, 50.0, ?, ?, ?, ?, ?, ?, 'confirmed', ?)
+            ) VALUES (1, 15, ?, 'test_fixture', ?, ?, ?, ?, ?, ?, ?, 50.0, ?, ?, ?, ?, ?, ?, 'confirmed', ?)
             """,
             (
                 task_id,
                 lane,
-                lane,
+                travel_direction,
+                lane if lane in {"left", "right"} else "unknown",
+                lane_number_from_right,
                 iso_utc(start_ns),
                 iso_utc(end_ns) if complete else None,
                 1 if complete else 0,
@@ -526,10 +533,11 @@ def generate(output: Path, *, force: bool) -> None:
                 created_at, updated_at, started_at, completed_at,
                 entry_rtk_status, exit_rtk_status, has_measurements,
                 recording_path, schema_version,
-                planned_travel_direction, planned_lane_side, planned_clearance_threshold_m,
+                planned_travel_direction, planned_lane_side, planned_lane_number_from_right,
+                planned_clearance_threshold_m,
                 planned_clearance_upper_limit_m,
                 deleted_at, delete_reason
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)
             """,
             [
                 (
@@ -552,7 +560,8 @@ def generate(output: Path, *, force: bool) -> None:
                     None,
                     schema_version,
                     "up",
-                    "left",
+                    None,
+                    1,
                     4.5,
                     20.0,
                 ),
@@ -576,7 +585,8 @@ def generate(output: Path, *, force: bool) -> None:
                     completed_path,
                     schema_version,
                     "up",
-                    "left",
+                    None,
+                    2,
                     4.5,
                     20.0,
                 ),
@@ -601,6 +611,7 @@ def generate(output: Path, *, force: bool) -> None:
                     schema_version,
                     "down",
                     "right",
+                    None,
                     4.2,
                     20.0,
                 ),
@@ -613,7 +624,9 @@ def generate(output: Path, *, force: bool) -> None:
         start_ns=start_completed_ns,
         sample_count=1_500,
         complete=True,
-        lane="left",
+        lane="unknown",
+        travel_direction="up",
+        lane_number_from_right=2,
         invalid_ranges=[(210, 245), (680, 710), (1_160, 1_175)],
         include_exit_rtk=True,
         pause_interval=(18_000.0, 19_200.0),
@@ -625,6 +638,8 @@ def generate(output: Path, *, force: bool) -> None:
         sample_count=600,
         complete=False,
         lane="right",
+        travel_direction="down",
+        lane_number_from_right=None,
         invalid_ranges=[(120, 155), (430, 470)],
         include_exit_rtk=False,
         pause_interval=None,
@@ -645,7 +660,7 @@ def generate(output: Path, *, force: bool) -> None:
             assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
             assert connection.execute(
                 "SELECT schema_version FROM recording_metadata WHERE id=1"
-            ).fetchone()[0] == 10
+            ).fetchone()[0] == 15
 
     print(output)
 

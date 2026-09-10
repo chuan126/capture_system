@@ -208,11 +208,14 @@ export const loadMeasurementSummary = async (
   const rawLane = readString(payload.lane, "lane");
   const travelDirection = readString(payload.travel_direction, "travel_direction");
   const laneSide = readString(payload.lane_side, "lane_side");
+  const laneNumberFromRight = payload.lane_number_from_right === undefined
+    ? null
+    : readNullableNumber(payload.lane_number_from_right, "lane_number_from_right");
   return {
     taskId: readString(payload.task_id, "task_id"),
     recordingSchemaVersion: readNumber(payload.recording_schema_version, "recording_schema_version"),
     dataOrigin,
-    lane: formatLaneDisplay(travelDirection, laneSide, rawLane),
+    lane: formatLaneDisplay(travelDirection, laneSide, rawLane, laneNumberFromRight),
     startedAt: readString(payload.started_at, "started_at"),
     endedAt: readNullableString(payload.ended_at, "ended_at"),
     complete: readBoolean(payload.complete, "complete"),

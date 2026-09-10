@@ -388,7 +388,12 @@ class ReportExportService:
                     sample.sample_index,
                     _format_timestamp_ms(sample.recorded_timestamp_ms),
                     _txt_or_zero(task.tunnel_code),
-                    _txt_or_zero(_lane_text(summary.lane, summary.travel_direction, summary.lane_side)),
+                    _txt_or_zero(_lane_text(
+                        summary.lane,
+                        summary.travel_direction,
+                        summary.lane_side,
+                        summary.lane_number_from_right,
+                    )),
                     _format_txt_number(sample.height_m, 3),
                     _format_txt_number(sample.minimum_height_m, 3),
                     _format_txt_rtk(summary.entry_rtk),
@@ -508,7 +513,12 @@ class ReportExportService:
                 [
                     mixed_paragraph(assessment.task.display_id, body_style, fonts),
                     mixed_paragraph(assessment.task.tunnel_code, body_style, fonts),
-                    mixed_paragraph(_lane_text(summary.lane, summary.travel_direction, summary.lane_side), body_style, fonts),
+                    mixed_paragraph(_lane_text(
+                        summary.lane,
+                        summary.travel_direction,
+                        summary.lane_side,
+                        summary.lane_number_from_right,
+                    ), body_style, fonts),
                     mixed_paragraph(_format_number(normal_statistics.minimum_height_m, 3), body_style, fonts),
                     mixed_paragraph(time_text, body_style, fonts),
                     mixed_paragraph(_format_rtk(summary.entry_rtk), body_style, fonts),
@@ -569,7 +579,18 @@ def _safe_component(value: str) -> str:
     return normalized[:80] or "tunnel"
 
 
-def _lane_text(lane: str, travel_direction: str = "unknown", lane_side: str | None = None) -> str:
+def _lane_text(
+    lane: str,
+    travel_direction: str = "unknown",
+    lane_side: str | None = None,
+    lane_number_from_right: int | None = None,
+) -> str:
+    if lane_number_from_right in {1, 2, 3, 4}:
+        if travel_direction == "up":
+            return f"上行右{lane_number_from_right}车道"
+        if travel_direction == "down":
+            return f"下行右{lane_number_from_right}车道"
+        return f"右{lane_number_from_right}车道"
     side = lane_side if lane_side in {"left", "right"} else lane
     if travel_direction == "up" and side == "left":
         return "上行左车道"

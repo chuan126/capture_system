@@ -191,6 +191,7 @@ class MeasurementSummaryRecord:
     lane: MeasurementLane
     travel_direction: MeasurementTravelDirection
     lane_side: MeasurementLane
+    lane_number_from_right: int | None
     started_at: str
     ended_at: str | None
     complete: bool
@@ -237,6 +238,7 @@ class MeasurementHistoryRecord:
     lane: MeasurementLane
     travel_direction: MeasurementTravelDirection
     lane_side: MeasurementLane
+    lane_number_from_right: int | None
     started_at: str
     ended_at: str | None
     complete: bool
@@ -250,7 +252,7 @@ class MeasurementHistoryRecord:
     samples: list[ClearanceHistorySampleRecord]
 
 
-_SUPPORTED_SCHEMA_VERSIONS = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14}
+_SUPPORTED_SCHEMA_VERSIONS = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}
 _MAX_HISTORY_SAMPLES = 500_000
 
 
@@ -436,6 +438,7 @@ class MeasurementRepository:
                 lane=summary.lane,
                 travel_direction=summary.travel_direction,
                 lane_side=summary.lane_side,
+                lane_number_from_right=summary.lane_number_from_right,
                 started_at=summary.started_at,
                 ended_at=summary.ended_at,
                 complete=summary.complete,
@@ -1378,6 +1381,14 @@ class MeasurementRepository:
             raise MeasurementStorageError(f"未知行驶方向：{travel_direction}")
         if lane_side not in {"left", "right", "unknown"}:
             raise MeasurementStorageError(f"未知车道位置：{lane_side}")
+        lane_number_from_right = (
+            int(metadata["lane_number_from_right"])
+            if "lane_number_from_right" in metadata_keys
+            and metadata["lane_number_from_right"] is not None
+            else None
+        )
+        if lane_number_from_right is not None and lane_number_from_right not in {1, 2, 3, 4}:
+            raise MeasurementStorageError(f"未知从右向左车道编号：{lane_number_from_right}")
         first_sample_index, last_sample_index, first_timestamp_ms, last_timestamp_ms = sample_bounds
         return MeasurementSummaryRecord(
             task_id=task.task_id,
@@ -1386,6 +1397,7 @@ class MeasurementRepository:
             lane=cast(MeasurementLane, lane),
             travel_direction=cast(MeasurementTravelDirection, travel_direction),
             lane_side=cast(MeasurementLane, lane_side),
+            lane_number_from_right=lane_number_from_right,
             started_at=str(metadata["started_at"]),
             ended_at=metadata["ended_at"],
             complete=bool(metadata["complete"]),

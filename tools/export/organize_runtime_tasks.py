@@ -29,6 +29,7 @@ WINDOWS_RESERVED_NAMES = {
 TASK_CSV_FIELDS = [
     "日期文件夹", "网页显示编号", "任务UUID", "隧道编号", "隧道名称", "任务状态",
     "创建时间", "开始时间", "完成时间", "测量时长秒", "行驶方向", "左右车道",
+    "右起车道编号",
     "净空阈值米", "净空上限米", "入口RTK状态", "出口RTK状态", "是否有测量数据",
     "原始记录路径", "整理后相对路径", "数据库字节数", "数据库Schema版本",
     "净空源帧数", "50Hz保持样本数", "IMU样本数", "RTK样本数",
@@ -241,6 +242,7 @@ def task_csv_row(
         "测量时长秒": duration_seconds(task),
         "行驶方向": parameters.get("travel_direction") or task.get("planned_travel_direction"),
         "左右车道": parameters.get("lane_side") or parameters.get("lane") or task.get("planned_lane_side"),
+        "右起车道编号": parameters.get("lane_number_from_right") or task.get("planned_lane_number_from_right"),
         "净空阈值米": parameters.get("clearance_threshold_m", task.get("planned_clearance_threshold_m")),
         "净空上限米": parameters.get("clearance_upper_limit_m", task.get("planned_clearance_upper_limit_m")),
         "入口RTK状态": task.get("entry_rtk_status"),

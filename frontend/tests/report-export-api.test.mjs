@@ -62,6 +62,24 @@ test("loads selected-task report exportability from FastAPI without ROS 2 browse
   assert.equal(preview.tasks[0].clearanceUpperLimitM, 5.80);
 });
 
+test("preserves the right-based lane number in report preview", async () => {
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    task_count: 1,
+    exportable_task_count: 1,
+    generated_at: "2026-08-07T06:58:00Z",
+    tasks: [{
+      ...taskPayload,
+      lane: "unknown",
+      travel_direction: "up",
+      lane_side: "unknown",
+      lane_number_from_right: 4,
+    }],
+  }), { status: 200, headers: { "content-type": "application/json" } });
+
+  const preview = await loadReportPreview(["task-1"]);
+  assert.equal(preview.tasks[0].lane, "上行右4车道");
+});
+
 test("creates TXT and selected-task PDF through FastAPI HTTP endpoints", async () => {
   const calls = [];
   globalThis.fetch = async (url, init) => {

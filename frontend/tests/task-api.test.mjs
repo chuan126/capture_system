@@ -102,7 +102,7 @@ test("creates one task per formal frontend request without any ROS 2 browser int
 
   try {
     const task = await createTask(
-      { tunnelCode: "T-001", tunnelName: "东山隧道", lane: "上行左车道", clearanceThresholdM: 4.5, clearanceUpperLimitM: 5.8 },
+      { tunnelCode: "T-001", tunnelName: "东山隧道", lane: "上行右3车道", clearanceThresholdM: 4.5, clearanceUpperLimitM: 5.8 },
       "request-001",
     );
     assert.equal(task.displayId, "20260807_145601");
@@ -113,7 +113,7 @@ test("creates one task per formal frontend request without any ROS 2 browser int
       tunnel_code: "T-001",
       tunnel_name: "东山隧道",
       travel_direction: "up",
-      lane_side: "left",
+      lane_number_from_right: 3,
       clearance_threshold_m: 4.5,
       clearance_upper_limit_m: 5.8,
     });
@@ -210,6 +210,43 @@ test("loads planned lane and threshold before start and prefers frozen actual va
     assert.equal(running.lane, "上行右车道");
     assert.equal(running.clearanceThresholdM, 4.3);
     assert.equal(running.clearanceUpperLimitM, 5.6);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("formats numbered planned and frozen lanes without collapsing them to legacy right lane", async () => {
+  const originalFetch = globalThis.fetch;
+  let call = 0;
+  globalThis.fetch = async () => {
+    call += 1;
+    if (call === 1) return jsonResponse([{
+      ...apiTask,
+      planned_travel_direction: "down",
+      planned_lane_side: null,
+      planned_lane_number_from_right: 4,
+      travel_direction: null,
+      lane_side: null,
+      lane: null,
+      lane_number_from_right: null,
+    }]);
+    return jsonResponse([{
+      ...apiTask,
+      status: "running",
+      operation_phase: "recording",
+      planned_travel_direction: "down",
+      planned_lane_number_from_right: 4,
+      travel_direction: "up",
+      lane_side: null,
+      lane: "unknown",
+      lane_number_from_right: 2,
+    }]);
+  };
+  try {
+    const [pending] = await listTasks();
+    assert.equal(pending.lane, "下行右4车道");
+    const [running] = await listTasks();
+    assert.equal(running.lane, "上行右2车道");
   } finally {
     globalThis.fetch = originalFetch;
   }

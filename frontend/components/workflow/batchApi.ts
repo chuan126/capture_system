@@ -1,27 +1,6 @@
 import { TaskApiError } from "./taskApi";
 import type { CaptureBatch, CaptureBatchStatus } from "./batchModel";
 
-type BatchApiResponse = {
-  batch_id: string;
-  batch_code: string;
-  operation_date: string;
-  daily_sequence: number;
-  status: CaptureBatchStatus;
-  created_at: string;
-  started_at: string;
-  completed_at: string | null;
-  archived_at: string | null;
-  purged_at: string | null;
-  task_count: number;
-  visible_task_count: number;
-  measurement_bytes: number;
-  report_id: string | null;
-  report_path: string | null;
-  report_sha256: string | null;
-  report_generated_at: string | null;
-  purged_bytes: number;
-};
-
 export type BatchPurgeResult = {
   batch: CaptureBatch;
   releasedBytes: number;

@@ -25,6 +25,7 @@ class TaskExportPreviewResponse(BaseModel):
     lane: MeasurementLane | None
     travel_direction: MeasurementTravelDirection | None = None
     lane_side: MeasurementLane | None = None
+    lane_number_from_right: int | None = Field(default=None, ge=1, le=4)
     started_at: datetime | None
     ended_at: datetime | None
     complete: bool | None

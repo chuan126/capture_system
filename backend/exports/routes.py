@@ -102,6 +102,7 @@ def _preview_response(assessment: TaskExportAssessment) -> TaskExportPreviewResp
         lane=summary.lane if summary else None,
         travel_direction=summary.travel_direction if summary else None,
         lane_side=summary.lane_side if summary else None,
+        lane_number_from_right=summary.lane_number_from_right if summary else None,
         started_at=summary.started_at if summary else assessment.task.started_at,
         ended_at=summary.ended_at if summary else assessment.task.completed_at,
         complete=summary.complete if summary else None,

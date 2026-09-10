@@ -18,7 +18,7 @@ import PlaybackWorkspace from "@/components/playback/PlaybackWorkspace";
 import ReportWorkspace from "@/components/report/ReportWorkspace";
 import { DEVTOOLS_ENABLED, DevToolsWorkspace } from "@/components/devtools/devtoolsEntry.generated";
 import { useTaskStatusSocket } from "@/components/task-status/useTaskStatusSocket";
-import { createTask, listTasks, TaskApiError } from "@/components/workflow/taskApi";
+import { createTask, listTasks } from "@/components/workflow/taskApi";
 import {
   captureEntryRtk,
   captureExitRtk,
@@ -34,7 +34,7 @@ import {
   isTaskControlBusy,
   taskPhaseLabels,
 } from "@/components/workflow/taskModel";
-import { laneSelectionParts } from "@/components/workflow/taskModel";
+import { laneSelectionParts, numberedLaneOptions } from "@/components/workflow/taskModel";
 import type { CollectionTask, CollectionTaskLane, CollectionTaskStatus, WorkflowPageId } from "@/components/workflow/taskModel";
 import { loadClearanceAlgorithmParameters, saveClearanceAlgorithmParameters } from "@/components/workflow/algorithmParametersApi";
 
@@ -135,7 +135,7 @@ function TaskCreateDialog({ onClose, onCreate }: { onClose: () => void; onCreate
       setSubmitting(false);
     }
   };
-  return <div className="task-dialog-mask" role="dialog" aria-modal="true"><section className="task-dialog-panel"><header className="task-dialog-head"><div><h2>创建检测任务</h2><p>每次保存一个任务。保存成功后可继续创建下一项，任务编号由设备端按创建时间生成，例如 20260807_145601。</p></div><button type="button" disabled={submitting} onClick={onClose}>×</button></header><div className="task-dialog-single"><label><span>隧道编号</span><input value={draft.tunnelCode} onChange={event=>update("tunnelCode",event.target.value)} placeholder="例如 T-001" autoFocus/></label><label><span>隧道名称</span><input value={draft.tunnelName} onChange={event=>update("tunnelName",event.target.value)} placeholder="请输入隧道名称"/></label><label><span>作业车道</span><select value={draft.lane} onChange={event=>update("lane",event.target.value as CollectionTaskLane|"")}><option value="">请选择作业车道</option><option value="上行左车道">上行左车道</option><option value="上行右车道">上行右车道</option><option value="下行左车道">下行左车道</option><option value="下行右车道">下行右车道</option></select></label><div className="task-dialog-height-range"><label><span>高度下限阈值</span><div className="task-dialog-measure"><input type="number" min="0" max="20" step="0.01" value={draft.clearanceThreshold} onChange={event=>update("clearanceThreshold",event.target.value)}/><small>m</small></div></label><label><span>高度上限阈值</span><div className="task-dialog-measure"><input type="number" min="0" max="20" step="0.01" value={draft.clearanceUpperLimit} onChange={event=>update("clearanceUpperLimit",event.target.value)}/><small>m</small></div></label></div></div>{savedDisplayId&&<p className="task-dialog-success" role="status">已保存任务 {savedDisplayId}，可以继续创建下一项。</p>}{error&&<p className="task-dialog-error" role="alert">{error}</p>}<footer className="task-dialog-actions"><button type="button" className="button" disabled={submitting} onClick={onClose}>取消</button><button type="button" className="button" disabled={submitting} onClick={()=>void submit(false)}>{submitting?"正在保存":"保存并关闭"}</button><button type="button" className="button button--primary" disabled={submitting} onClick={()=>void submit(true)}>{submitting?"正在保存":"保存并继续创建"}</button></footer></section></div>;
+  return <div className="task-dialog-mask" role="dialog" aria-modal="true"><section className="task-dialog-panel"><header className="task-dialog-head"><div><h2>创建检测任务</h2><p>每次保存一个任务。保存成功后可继续创建下一项，任务编号由设备端按创建时间生成，例如 20260807_145601。</p></div><button type="button" disabled={submitting} onClick={onClose}>×</button></header><div className="task-dialog-single"><label><span>隧道编号</span><input value={draft.tunnelCode} onChange={event=>update("tunnelCode",event.target.value)} placeholder="例如 T-001" autoFocus/></label><label><span>隧道名称</span><input value={draft.tunnelName} onChange={event=>update("tunnelName",event.target.value)} placeholder="请输入隧道名称"/></label><label><span>作业车道</span><select value={draft.lane} onChange={event=>update("lane",event.target.value as CollectionTaskLane|"")}><option value="">请选择作业车道</option>{numberedLaneOptions.map(lane=><option key={lane} value={lane}>{lane}</option>)}</select></label><div className="task-dialog-height-range"><label><span>高度下限阈值</span><div className="task-dialog-measure"><input type="number" min="0" max="20" step="0.01" value={draft.clearanceThreshold} onChange={event=>update("clearanceThreshold",event.target.value)}/><small>m</small></div></label><label><span>高度上限阈值</span><div className="task-dialog-measure"><input type="number" min="0" max="20" step="0.01" value={draft.clearanceUpperLimit} onChange={event=>update("clearanceUpperLimit",event.target.value)}/><small>m</small></div></label></div></div>{savedDisplayId&&<p className="task-dialog-success" role="status">已保存任务 {savedDisplayId}，可以继续创建下一项。</p>}{error&&<p className="task-dialog-error" role="alert">{error}</p>}<footer className="task-dialog-actions"><button type="button" className="button" disabled={submitting} onClick={onClose}>取消</button><button type="button" className="button" disabled={submitting} onClick={()=>void submit(false)}>{submitting?"正在保存":"保存并关闭"}</button><button type="button" className="button button--primary" disabled={submitting} onClick={()=>void submit(true)}>{submitting?"正在保存":"保存并继续创建"}</button></footer></section></div>;
 }
 
 function TaskSwitchDialog({
@@ -461,7 +461,7 @@ function Header({ page, task }: { page: PageId; task: CollectionTask | null }) {
   return (
     <header className="topbar">
       <div>
-        <div className="breadcrumb">三维采集系统 / {title}</div>
+        <div className="breadcrumb">交科净界-大件运输净空动态分析系统 / {title}</div>
         <h1>车载隧道净空高度测量</h1>
         <p>Odin1 Lite 激光雷达 · RK3588 设备端显控界面</p>
       </div>
@@ -684,7 +684,12 @@ function Dashboard({
   const firstPendingTask = tasks.find((task) => task.status === "待执行") ?? null;
   // 刷新后不替用户选择待执行或历史任务；真实活动任务仍必须显示控制入口。
   const currentTask = activeTask ?? selectedPendingTask ?? selectedTask ?? null;
-  useEffect(() => setRtkCaptureMessage(null), [currentTask?.taskId]);
+  const currentTaskId = currentTask?.taskId ?? null;
+  const currentTaskMountHeightM = currentTask?.lidarMountHeightM ?? null;
+  const currentTaskThresholdM = currentTask?.clearanceThresholdM ?? null;
+  const currentTaskUpperLimitM = currentTask?.clearanceUpperLimitM ?? null;
+  const currentTaskLane = currentTask?.lane ?? null;
+  useEffect(() => setRtkCaptureMessage(null), [currentTaskId]);
   const pendingTasks = tasks
     .filter((task) => task.status === "待执行" && task.taskId !== currentTask?.taskId)
     .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
@@ -708,18 +713,17 @@ function Dashboard({
   const clearanceAbnormal = clearanceAbnormalReason !== null;
 
   useEffect(() => {
-    if (!currentTask) return;
-    if (currentTask.lidarMountHeightM !== null) setMountHeight(String(currentTask.lidarMountHeightM));
-    if (currentTask.clearanceThresholdM !== null) setHeightThreshold(String(currentTask.clearanceThresholdM));
-    if (currentTask.clearanceUpperLimitM !== null) setHeightUpperLimit(String(currentTask.clearanceUpperLimitM));
-    if (currentTask.lane !== null && currentTask.lane in laneSelectionParts) {
-      setOperationLane(currentTask.lane as CollectionTaskLane);
+    if (!currentTaskId) return;
+    if (currentTaskMountHeightM !== null) setMountHeight(String(currentTaskMountHeightM));
+    if (currentTaskThresholdM !== null) setHeightThreshold(String(currentTaskThresholdM));
+    if (currentTaskUpperLimitM !== null) setHeightUpperLimit(String(currentTaskUpperLimitM));
+    if (currentTaskLane !== null && currentTaskLane in laneSelectionParts) {
+      setOperationLane(currentTaskLane as CollectionTaskLane);
     }
-  }, [currentTask?.taskId, currentTask?.lidarMountHeightM, currentTask?.clearanceThresholdM, currentTask?.clearanceUpperLimitM, currentTask?.lane, setMountHeight, setHeightThreshold, setHeightUpperLimit, setOperationLane]);
+  }, [currentTaskId, currentTaskMountHeightM, currentTaskThresholdM, currentTaskUpperLimitM, currentTaskLane, setMountHeight, setHeightThreshold, setHeightUpperLimit, setOperationLane]);
 
   const taskBusy = isTaskControlBusy(currentTask) || controlSubmitting !== null;
   const taskLocked = isTaskActive(currentTask);
-  const currentTaskStatus = currentTask?.status ?? "待执行";
   const currentTaskRuntimeLabel = currentTask ? taskRuntimeLabel(currentTask) : "无任务";
   const taskRunning = currentTask?.status === "采集中" || currentTask?.status === "已暂停" || isTaskControlBusy(currentTask);
   const entryRtkSnapshotRecorded = currentTask?.entryRtkStatus === "confirmed" || currentTask?.entryRtkStatus === "unconfirmed";
@@ -837,6 +841,8 @@ function Dashboard({
     if (lastAppliedAlgorithmSignature.current === signature) return;
     const timer = window.setTimeout(() => void saveAlgorithmParameters(true), 500);
     return () => window.clearTimeout(timer);
+  // 定时保存只跟踪规范化后的参数值，函数本身会随同一次渲染捕获这些值。
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     algorithmParametersLoaded,
     taskLocked,
@@ -1136,10 +1142,8 @@ function Dashboard({
                       onChange={(event) => setOperationLane(event.target.value as CollectionTaskLane)}
                       aria-label="设置作业车道"
                     >
-                      <option value="上行左车道">上行左车道</option>
-                      <option value="上行右车道">上行右车道</option>
-                      <option value="下行左车道">下行左车道</option>
-                      <option value="下行右车道">下行右车道</option>
+                      {!numberedLaneOptions.some(lane=>lane===operationLane) && <option value={operationLane}>{operationLane}（历史）</option>}
+                      {numberedLaneOptions.map(lane=><option key={lane} value={lane}>{lane}</option>)}
                     </select>
                   </label>
 
@@ -1388,7 +1392,7 @@ export default function Home() {
   const [heightThreshold, setHeightThreshold] = useState("0.00");
   const [heightUpperLimit, setHeightUpperLimit] = useState("20.00");
   const [mountHeight, setMountHeight] = useState("0.00");
-  const [operationLane, setOperationLane] = useState<CollectionTaskLane>("上行右车道");
+  const [operationLane, setOperationLane] = useState<CollectionTaskLane>("上行右1车道");
   const [detectionRadius, setDetectionRadius] = useState("1.00");
   const [minSupportPoints, setMinSupportPoints] = useState("5");
   const [algorithmParametersLoaded, setAlgorithmParametersLoaded] = useState(false);
@@ -1476,12 +1480,18 @@ export default function Home() {
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <div className="brand"><div className="brand__mark"><span>T</span></div><div><strong>三维采集系统</strong><span>隧道净空测量终端</span></div></div>
+        <div className="brand">
+          {/* 设备静态导出直接复用本地原图，不启用Next图片优化服务。 */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img className="brand__logo" src="/ctd-group-logo.png" alt="蜀交科发 CTD GROUP" />
+          <i className="brand__separator" aria-hidden="true" />
+          <div className="brand__copy"><strong>交科净界</strong><span>大件运输净空动态分析系统</span></div>
+        </div>
         <div className="nav-label">工作台</div>
         <nav aria-label="主导航">{navigation.map((item) => (
           <button type="button" key={item.id} className={activePage === item.id ? "active" : ""} onClick={() => setActivePage(item.id)} aria-current={activePage === item.id ? "page" : undefined}><span>{item.index}</span>{item.label}<i>›</i></button>
         ))}</nav>
-        <div className="sidebar__bottom"><WifiControl /><div className="device-card"><div className="device-card__icon">RK</div><div><strong>车载主控终端</strong><span>RK3588 · 本地运行</span></div><i /></div><div className="version">CAPTURE SYSTEM · V1.0</div></div>
+        <div className="sidebar__bottom"><WifiControl /><div className="device-card"><div className="device-card__icon">RK</div><div><strong>车载主控终端</strong><span>RK3588 · 本地运行</span></div><i /></div></div>
       </aside>
       <main className={activePage === "dashboard" ? "main--dashboard" : undefined}>
         {activePage !== "dashboard" && <Header page={activePage} task={selectedTask} />}

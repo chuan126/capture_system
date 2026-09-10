@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080" role="img" aria-labelledby="title">
+  <title id="title">报告导出页面区域标注</title>
+  <image href="图6-1_报告导出.png" x="0" y="0" width="1920" height="1080"/>
+  <g font-family="Arial, sans-serif" font-size="24" font-weight="700" text-anchor="middle" dominant-baseline="central">
+    <g fill="#e5484d" stroke="#fff" stroke-width="4">
+      <circle cx="263" cy="63" r="23"/><circle cx="592" cy="38" r="23"/>
+      <circle cx="594" cy="348" r="23"/><circle cx="1265" cy="348" r="23"/>
+      <circle cx="1280" cy="635" r="23"/>
+    </g>
+    <g fill="#fff" stroke="none">
+      <text x="263" y="63">1</text><text x="592" y="38">2</text>
+      <text x="594" y="348">3</text><text x="1265" y="348">4</text>
+      <text x="1280" y="635">5</text>
+    </g>
+  </g>
+</svg>

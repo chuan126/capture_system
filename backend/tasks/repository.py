@@ -101,11 +101,13 @@ class TaskRecord:
     warning_code: str | None
     planned_travel_direction: str | None
     planned_lane_side: str | None
+    planned_lane_number_from_right: int | None
     planned_clearance_threshold_m: float | None
     planned_clearance_upper_limit_m: float | None
     travel_direction: str | None
     lane_side: str | None
     lane: str | None
+    lane_number_from_right: int | None
     lidar_mount_height_m: float | None
     clearance_threshold_m: float | None
     clearance_upper_limit_m: float | None
@@ -120,7 +122,7 @@ class TaskRecord:
         return self.display_id
 
 
-_SCHEMA_VERSION = 10
+_SCHEMA_VERSION = 11
 _LOCAL_TIMEZONE = ZoneInfo("Asia/Singapore")
 _ALLOWED_STATUS = {
     "pending",
@@ -136,6 +138,7 @@ _TASK_SELECT_COLUMNS = """
     task_parameters.travel_direction AS parameter_travel_direction,
     task_parameters.lane_side AS parameter_lane_side,
     task_parameters.lane AS parameter_lane,
+    task_parameters.lane_number_from_right AS parameter_lane_number_from_right,
     task_parameters.lidar_mount_height_m AS parameter_lidar_mount_height_m,
     task_parameters.clearance_threshold_m AS parameter_clearance_threshold_m,
     task_parameters.clearance_upper_limit_m AS parameter_clearance_upper_limit_m
@@ -228,6 +231,11 @@ class TaskRepository:
                     current_version = connection.execute(
                         "SELECT COALESCE(MAX(version), 0) FROM schema_migrations"
                     ).fetchone()[0]
+                    if current_version < 11:
+                        self._apply_migration_11(connection)
+                    current_version = connection.execute(
+                        "SELECT COALESCE(MAX(version), 0) FROM schema_migrations"
+                    ).fetchone()[0]
                     if current_version != _SCHEMA_VERSION:
                         raise TaskStorageError(
                             f"不支持的任务数据库版本：{current_version}，程序支持版本：{_SCHEMA_VERSION}"
@@ -296,15 +304,17 @@ class TaskRepository:
                     """
                     INSERT INTO tasks (
                         task_id, sequence, batch_id, batch_sequence, display_id, tunnel_code, tunnel_name,
-                        planned_travel_direction, planned_lane_side, planned_clearance_threshold_m,
+                        planned_travel_direction, planned_lane_side, planned_lane_number_from_right,
+                        planned_clearance_threshold_m,
                         planned_clearance_upper_limit_m,
                         status, created_at, updated_at, started_at, completed_at,
                         has_measurements, recording_path, schema_version, deleted_at, delete_reason,
                         local_data_purged_at, purged_bytes
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, NULL, NULL, 0, NULL, ?, NULL, NULL, NULL, 0)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, NULL, NULL, 0, NULL, ?, NULL, NULL, NULL, 0)
                     """,
                     (task_id, global_sequence, batch_id, batch_sequence, display_id, draft.tunnel_code,
                      draft.tunnel_name, draft.travel_direction, draft.lane_side,
+                     draft.lane_number_from_right,
                      draft.clearance_threshold_m, draft.clearance_upper_limit_m,
                      now, now, _SCHEMA_VERSION),
                 )
@@ -1413,6 +1423,72 @@ class TaskRepository:
             connection.rollback()
             raise
 
+    def _apply_migration_11(self, connection: sqlite3.Connection) -> None:
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            task_columns = {
+                row[1] for row in connection.execute("PRAGMA table_info(tasks)").fetchall()
+            }
+            if "planned_lane_number_from_right" not in task_columns:
+                connection.execute(
+                    "ALTER TABLE tasks ADD COLUMN planned_lane_number_from_right INTEGER "
+                    "CHECK ((planned_lane_number_from_right BETWEEN 1 AND 4) "
+                    "OR planned_lane_number_from_right IS NULL)"
+                )
+
+            # 兼容列lane原先只允许left/right。编号车道不应伪装成某一侧，
+            # 因此允许unknown并另存从右向左的明确编号。
+            connection.execute("ALTER TABLE task_parameters RENAME TO task_parameters_v10")
+            connection.execute(
+                """
+                CREATE TABLE task_parameters (
+                    task_id TEXT PRIMARY KEY REFERENCES tasks(task_id),
+                    lane TEXT NOT NULL CHECK (lane IN ('left', 'right', 'unknown')),
+                    lidar_mount_height_m REAL NOT NULL CHECK (lidar_mount_height_m >= 0),
+                    clearance_threshold_m REAL NOT NULL CHECK (clearance_threshold_m >= 0),
+                    captured_at TEXT NOT NULL,
+                    parameter_schema_version INTEGER NOT NULL DEFAULT 1,
+                    travel_direction TEXT CHECK (travel_direction IN ('up', 'down') OR travel_direction IS NULL),
+                    lane_side TEXT CHECK (lane_side IN ('left', 'right') OR lane_side IS NULL),
+                    clearance_upper_limit_m REAL NOT NULL DEFAULT 20.0
+                        CHECK (clearance_upper_limit_m >= 0 AND clearance_upper_limit_m <= 20),
+                    detection_radius_m REAL NOT NULL DEFAULT 1.0
+                        CHECK (detection_radius_m >= 0.1 AND detection_radius_m <= 5.0),
+                    min_support_points INTEGER NOT NULL DEFAULT 5
+                        CHECK (min_support_points >= 1 AND min_support_points <= 10000),
+                    lane_number_from_right INTEGER
+                        CHECK ((lane_number_from_right BETWEEN 1 AND 4) OR lane_number_from_right IS NULL)
+                )
+                """
+            )
+            connection.execute(
+                """
+                INSERT INTO task_parameters (
+                    task_id, lane, lidar_mount_height_m, clearance_threshold_m, captured_at,
+                    parameter_schema_version, travel_direction, lane_side,
+                    clearance_upper_limit_m, detection_radius_m, min_support_points,
+                    lane_number_from_right
+                )
+                SELECT task_id, lane, lidar_mount_height_m, clearance_threshold_m, captured_at,
+                       parameter_schema_version, travel_direction, lane_side,
+                       clearance_upper_limit_m, detection_radius_m, min_support_points, NULL
+                FROM task_parameters_v10
+                """
+            )
+            connection.execute("DROP TABLE task_parameters_v10")
+            connection.execute(
+                "UPDATE tasks SET schema_version=? WHERE schema_version<?",
+                (_SCHEMA_VERSION, _SCHEMA_VERSION),
+            )
+            connection.execute(
+                "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
+                (11, _utc_now_text()),
+            )
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+
     def _load_idempotent_response(
         self,
         connection: sqlite3.Connection,
@@ -1492,6 +1568,12 @@ class TaskRepository:
                 row["planned_travel_direction"] if "planned_travel_direction" in keys else None
             ),
             planned_lane_side=row["planned_lane_side"] if "planned_lane_side" in keys else None,
+            planned_lane_number_from_right=(
+                int(row["planned_lane_number_from_right"])
+                if "planned_lane_number_from_right" in keys
+                and row["planned_lane_number_from_right"] is not None
+                else None
+            ),
             planned_clearance_threshold_m=(
                 float(row["planned_clearance_threshold_m"])
                 if "planned_clearance_threshold_m" in keys and row["planned_clearance_threshold_m"] is not None
@@ -1508,6 +1590,12 @@ class TaskRepository:
             ),
             lane_side=row["parameter_lane_side"] if "parameter_lane_side" in keys else None,
             lane=row["parameter_lane"] if "parameter_lane" in keys else None,
+            lane_number_from_right=(
+                int(row["parameter_lane_number_from_right"])
+                if "parameter_lane_number_from_right" in keys
+                and row["parameter_lane_number_from_right"] is not None
+                else None
+            ),
             lidar_mount_height_m=(
                 float(row["parameter_lidar_mount_height_m"])
                 if "parameter_lidar_mount_height_m" in keys and row["parameter_lidar_mount_height_m"] is not None
@@ -1540,6 +1628,7 @@ class TaskRepository:
                 "tunnel_name": draft.tunnel_name,
                 "travel_direction": draft.travel_direction,
                 "lane_side": draft.lane_side,
+                "lane_number_from_right": draft.lane_number_from_right,
                 "clearance_threshold_m": draft.clearance_threshold_m,
                 "clearance_upper_limit_m": draft.clearance_upper_limit_m,
             }

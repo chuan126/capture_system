@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict
 MeasurementDataOrigin = Literal["recorded", "test_fixture"]
 MeasurementLane = Literal["left", "right", "unknown"]
 MeasurementTravelDirection = Literal["up", "down", "unknown"]
+MeasurementLaneNumberFromRight = Literal[1, 2, 3, 4]
 
 
 class ClearanceHistorySampleResponse(BaseModel):
@@ -64,6 +65,7 @@ class MeasurementHistoryResponse(BaseModel):
     lane: MeasurementLane
     travel_direction: MeasurementTravelDirection = "unknown"
     lane_side: MeasurementLane = "unknown"
+    lane_number_from_right: MeasurementLaneNumberFromRight | None = None
     started_at: datetime
     ended_at: datetime | None
     complete: bool
@@ -86,6 +88,7 @@ class MeasurementSummaryResponse(BaseModel):
     lane: MeasurementLane
     travel_direction: MeasurementTravelDirection = "unknown"
     lane_side: MeasurementLane = "unknown"
+    lane_number_from_right: MeasurementLaneNumberFromRight | None = None
     started_at: datetime
     ended_at: datetime | None
     complete: bool

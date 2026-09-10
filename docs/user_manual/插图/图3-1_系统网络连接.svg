@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="520" viewBox="0 0 1400 520" role="img" aria-labelledby="title desc">
+  <title id="title">采集系统网络连接示意图</title>
+  <desc id="desc">雷达通过雷达网线连接RK3588，客户电脑通过维护网线连接RK3588，RK3588通过Wi-Fi访问高德地图与DeepSeek。</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#2563eb"/>
+    </marker>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#16355e" flood-opacity="0.12"/>
+    </filter>
+    <style>
+      .box { fill:#fff; stroke:#cbd8ea; stroke-width:2; rx:18; filter:url(#shadow); }
+      .main { fill:#eff6ff; stroke:#2563eb; stroke-width:3; rx:20; filter:url(#shadow); }
+      .title { font:700 28px "Noto Sans CJK SC","Microsoft YaHei",sans-serif; fill:#172b4d; }
+      .sub { font:400 20px "Noto Sans CJK SC","Microsoft YaHei",sans-serif; fill:#667085; }
+      .link { fill:none; stroke:#2563eb; stroke-width:4; marker-end:url(#arrow); }
+      .label { font:600 19px "Noto Sans CJK SC","Microsoft YaHei",sans-serif; fill:#2456a6; }
+      .note { font:400 18px "Noto Sans CJK SC","Microsoft YaHei",sans-serif; fill:#475467; }
+    </style>
+  </defs>
+
+  <rect x="36" y="166" width="250" height="150" class="box"/>
+  <text x="161" y="222" text-anchor="middle" class="title">ODIN1 Lite</text>
+  <text x="161" y="260" text-anchor="middle" class="sub">激光雷达</text>
+
+  <rect x="465" y="135" width="330" height="210" class="main"/>
+  <text x="630" y="210" text-anchor="middle" class="title">RK3588采集终端</text>
+  <text x="630" y="252" text-anchor="middle" class="sub">本地采集 · 计算 · 存储</text>
+  <text x="630" y="288" text-anchor="middle" class="sub">网页服务 · 报告生成</text>
+
+  <rect x="1015" y="38" width="300" height="132" class="box"/>
+  <text x="1165" y="92" text-anchor="middle" class="title">客户电脑</text>
+  <text x="1165" y="130" text-anchor="middle" class="sub">浏览器操作界面</text>
+
+  <rect x="1015" y="224" width="300" height="230" class="box"/>
+  <text x="1165" y="278" text-anchor="middle" class="title">外部互联网</text>
+  <text x="1165" y="328" text-anchor="middle" class="sub">高德地图在线服务</text>
+  <text x="1165" y="367" text-anchor="middle" class="sub">DeepSeek API</text>
+  <text x="1165" y="412" text-anchor="middle" class="note">不影响本地采集主流程</text>
+
+  <path d="M 286 241 L 465 241" class="link"/>
+  <text x="375" y="217" text-anchor="middle" class="label">雷达网线</text>
+
+  <path d="M 795 190 L 905 190 L 905 104 L 1015 104" class="link"/>
+  <text x="900" y="80" text-anchor="middle" class="label">维护网线（推荐）</text>
+
+  <path d="M 795 290 L 905 290 L 905 339 L 1015 339" class="link"/>
+  <text x="900" y="318" text-anchor="middle" class="label">Wi-Fi</text>
+
+  <text x="700" y="492" text-anchor="middle" class="note">电脑通过维护网线访问设备；设备通过Wi-Fi访问地图和大模型服务。</text>
+</svg>

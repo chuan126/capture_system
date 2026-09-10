@@ -182,7 +182,7 @@ export default function ReportWorkspace({
         }
       });
     return () => controller.abort();
-  }, [previewIds.join("|"), revision]);
+  }, [previewIds, revision]);
 
   const selectedPreview = preview?.tasks.find((task) => task.taskId === selectedTaskId) ?? null;
   const pdfExportableTasks = preview?.tasks.filter(
@@ -197,7 +197,8 @@ export default function ReportWorkspace({
 
   const toggle = (id: string) => setChecked((current) => {
     const next = new Set(current);
-    next.has(id) ? next.delete(id) : next.add(id);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
     return next;
   });
   const toggleDate = (_: string, ids: string[]) => setChecked((current) => {

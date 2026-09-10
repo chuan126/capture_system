@@ -123,6 +123,7 @@ def test_network_configuration_is_dual_port_only() -> None:
     assert "ipv4.method manual" in network
     assert "ipv4.method shared" in network
     assert '[[ "${direct_interface}" != "${lidar_interface}" ]]' in network
+    assert "install -d -m 0711 /etc/capture-system" in network
 
 
 def test_install_failure_has_snapshot_and_automatic_rollback() -> None:

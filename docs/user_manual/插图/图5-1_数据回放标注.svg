@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080" role="img" aria-labelledby="title">
+  <title id="title">数据回放页面区域标注</title>
+  <image href="图5-1_数据回放.png" x="0" y="0" width="1920" height="1080"/>
+  <g font-family="Arial, sans-serif" font-size="24" font-weight="700" text-anchor="middle" dominant-baseline="central">
+    <g fill="#e5484d" stroke="#fff" stroke-width="4">
+      <circle cx="263" cy="282" r="23"/><circle cx="578" cy="287" r="23"/>
+      <circle cx="1536" cy="285" r="23"/><circle cx="1480" cy="180" r="23"/>
+    </g>
+    <g fill="#fff" stroke="none">
+      <text x="263" y="282">1</text><text x="578" y="287">2</text>
+      <text x="1536" y="285">3</text><text x="1480" y="180">4</text>
+    </g>
+  </g>
+</svg>

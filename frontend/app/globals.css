@@ -62,35 +62,38 @@ button { line-height: 1.2; }
 }
 
 .brand {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 2px 8px 31px;
-}
-
-.brand__mark {
-  width: 45px;
-  height: 45px;
-  padding: 4px;
-  border-radius: 14px;
-  background: linear-gradient(145deg, #0f5ce4, #55adff);
-  box-shadow: 0 9px 20px rgba(23, 105, 238, .22);
-}
-
-.brand__mark span {
   display: grid;
-  width: 100%;
-  height: 100%;
-  place-items: center;
-  color: #fff;
-  border: 1px solid rgba(255, 255, 255, .28);
-  border-radius: 10px;
-  font: 800 19px/1 Arial;
+  grid-template-columns: 50px 1px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  margin: 0 0 24px;
+  padding: 9px 10px;
+  border: 1px solid #dfe7f2;
+  border-radius: 13px;
+  background: linear-gradient(135deg, #fff 0%, #f7faff 100%);
+  box-shadow: 0 5px 15px rgba(34, 56, 92, .045);
 }
 
-.brand > div:last-child { display: grid; gap: 3px; }
-.brand strong { font-size: 17px; letter-spacing: .2px; }
-.brand span { color: var(--muted); font-size: 12px; }
+.brand__logo { display: block; width: 50px; height: auto; }
+.brand__separator {
+  align-self: stretch;
+  width: 1px;
+  min-height: 48px;
+  border-radius: 999px;
+  background: linear-gradient(to bottom, rgba(242, 122, 0, .18), rgba(242, 122, 0, .72), rgba(242, 122, 0, .18));
+}
+.brand__copy { display: grid; gap: 4px; min-width: 0; }
+.brand strong {
+  color: #26364d;
+  font: 800 15px/1.2 "Microsoft YaHei", "PingFang SC", "Noto Sans SC", sans-serif;
+  letter-spacing: .04em;
+  white-space: nowrap;
+}
+.brand span {
+  color: #567093;
+  font: 700 10.5px/1.42 "Microsoft YaHei", "PingFang SC", "Noto Sans SC", sans-serif;
+  letter-spacing: 0;
+}
 
 .nav-label {
   padding: 0 13px 9px;
@@ -166,7 +169,6 @@ nav button.active > i { color: var(--primary); opacity: 1; }
 .device-card strong { font-size: 12px; }
 .device-card span { color: var(--muted); font-size: 10px; }
 .device-card > i { width: 7px; height: 7px; border-radius: 50%; background: #aab4c3; }
-.version { padding-top: 14px; color: #a9b2c0; text-align: center; font: 700 9px/1 Arial; letter-spacing: 1.5px; }
 
 main { min-width: 0; height: 100dvh; overflow-y: auto; }
 
@@ -1967,8 +1969,11 @@ table {
   .app-shell { grid-template-columns: 1fr; height: auto; min-height: 100vh; overflow: visible; }
   main, .main--dashboard { height: auto; overflow: visible; }
   .sidebar { position: sticky; width: 100%; height: auto; padding: 12px; border-right: 0; border-bottom: 1px solid var(--line); }
-  .brand { padding: 2px 4px 12px; }
-  .brand__mark { width: 38px; height: 38px; }
+  .brand { grid-template-columns: 44px 1px minmax(0, 1fr); width: min(100%, 360px); gap: 8px; margin-bottom: 12px; padding: 6px 8px; }
+  .brand__logo { width: 44px; }
+  .brand__separator { min-height: 42px; }
+  .brand strong { font-size: 16px; }
+  .brand span { font-size: 11px; }
   .nav-label, .sidebar__bottom { display: none; }
   nav { display: flex; overflow-x: auto; }
   nav button { flex: 0 0 auto; grid-template-columns: 24px auto; min-height: 40px; }

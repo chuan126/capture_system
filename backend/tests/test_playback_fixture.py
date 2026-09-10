@@ -26,10 +26,12 @@ def test_playback_fixture_matches_current_task_and_measurement_schemas(tmp_path:
 
     completed = next(task for task in tasks if task.task_id == TASK_COMPLETED)
     history = MeasurementRepository(data_root / "tasks").load_history(completed)
-    assert history.recording_schema_version == 10
+    assert history.recording_schema_version == 15
     assert history.data_origin == "test_fixture"
     assert history.travel_direction == "up"
-    assert history.lane_side == "left"
+    assert history.lane == "unknown"
+    assert history.lane_side == "unknown"
+    assert history.lane_number_from_right == 2
     assert history.complete is True
     assert history.statistics.total_samples == 1500
 
